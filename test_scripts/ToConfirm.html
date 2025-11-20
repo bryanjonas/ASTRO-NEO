@@ -1,0 +1,516 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=ISO-8859-1">
+<base href="/iau/">
+
+
+  <link rel="stylesheet" type="text/css" href="/stylesheets/mpc.css">
+  <link rel="stylesheet" type="text/css" href="/stylesheets/table-sorter.css">
+  <meta http-equiv="content-type" content="text/html;charset=UTF-8">
+
+  <link media="all" rel="stylesheet" href="/css/all.css">
+
+  <link rel="icon" type="image/png" href="/iau/figs/MPClogo16.png">
+  <meta name="description" content="We are the official body that deals with
+      astrometric observations and orbits of minor planets (asteroids) and comets.">
+
+  <meta name="keywords" content="astrometry, observations, orbits,
+      minor planets, asteroids, comets, near earth objects, 
+      potentially hazardous asteroids">
+
+  <script type="text/javascript" src="/js/jquery-latest.js"></script>
+<!--  <script type="text/javascript" src="/js/jquery.main.js"></script> -->
+<!--  <script type="text/javascript" src="/js/jquery.metadata.js"></script> -->
+  <script type="text/javascript" src="/js/jquery.tablesorter.js"></script>
+  <script type="text/javascript" src="/js/webtrends.js"></script>
+  <script type="text/javascript" src="/js/track_pdfs.js"></script>
+  <link href='https://fonts.googleapis.com/css?family=Arvo:400,700,400italic,700italic|PT+Sans:400,700,400italic,700italic|PT+Sans+Narrow:400,700' rel='stylesheet' type='text/css'>
+
+
+<title>The NEO Confirmation Page</title>
+<META name="description" content="We are the official body that deals
+with astrometric observations and orbits of minor planets (asteroids) and
+comets.">
+<META name="keywords" content="astrometry, observations, observation, orbits,
+orbit, minor planets, minor planet, asteroids, asteroid, comets, comet">
+</head>
+
+<!-- Body preamble -->
+
+<body>
+  <!-- wrapper -->
+  <div id="wrapper">
+    <div class="w1">
+      <!-- header -->
+      <header id="header">
+        <div class="holder">
+          <!-- logo -->
+          <h1 class="logo"><a href="/">The International Astronomical Union Minor Planet Center</a></h1>
+          <div class="area">
+            <!-- top-nav -->
+            <nav class="top-nav">
+              <ul>
+                <li><a href="/">Home</a></li>
+                <li><a href="/about">About</a></li>
+		<li><a href="/mpcops/contact/">Contact</a></li>
+                <li><a href="https://mpc-service.atlassian.net/servicedesk/customer/portals">Helpdesk</a></li>
+              </ul>
+            </nav>
+            <!-- search-form -->
+            <div class="form-holder">
+              <!-- This commented code opens a new page for the search. -->
+              <!--<form class="search-form" method="get" action="https://www.google.com/search" target="_blank">-->
+              <form class="search-form" method="get" action="https://www.google.com/search">
+                <fieldset>
+                  <!--<label for="search">Search</label>-->
+                  <input type="hidden" name="sitesearch" value="minorplanetcenter.net">
+                  <input type="text" onfocus="if(this.value==this.defaultValue)this.value='';" onblur="if(this.value=='')this.value=this.defaultValue;" id="search" name="q" value="Search MPC">
+                </fieldset>
+              </form>
+            </div>
+            <div class="social-bar">
+<!--              <a href="https://twitter.com/MinorPlanetCtr"><span class="social twitter">L</span></a> -->
+<!--              <a href="https://www.facebook.com/MinorPlanetCenter"><span class="social facebook">F</span></a> -->
+<!--              <a href="https://www.youtube.com/channel/UCtALMOQHuBxh5XMsYNiDhMg"><span class="social youtube">X</span></a> -->
+<!--              <a href="/iau/rss/mpc_feeds.html"><span class="social rss">R</span></a> -->
+            </div>
+          </div>
+        </div>
+        <nav class="nav-holder">
+          <!-- main navigation -->
+          <ul id="nav">
+            <li>
+              <a href="/iau/mpc.html"><span>OBSERVERS</span></a>
+              <ul>
+                <li><a href="/iau/MPEph/MPEph.html">Ephemeris Service</a></li>
+                <li><a href="/mpec/RecentMPECs.html">MPECs</a></li>
+                <li><a href="/iau/NEO/toconfirm_tabular.html">NEO Confirmation</a></li>
+                <li><a href="/iau/NEO/pccp_tabular.html">Possible Comet Confirmation</a></li>
+                <li><a href="/mpcops/submissions/cometary/">Report Cometary Activity</a></li>
+                <li><a href="/db_search">Orbits/Observations Database</a></li>				
+                <li><a href="/iau/Ephemerides/EphemOrbEls.html" class="nested">Orbital Elements</a>
+                  <ul>
+                    <li><a href="/iau/MPCORB.html">MPCORB</a></li>
+                    <li><a href="/iau/ECS/MPCAT/MPCAT.html">MPCAT</a></li>
+                    <li><a href="/iau/ECS/MPCUPDATE/MPCUPDATE.html">MPCUPDATE</a></li>
+                    <li><a href="/iau/Ephemerides/SoftwareEls.html">Orbital Elements for Software</a></li>
+                  </ul>                
+                </li>
+                <li><a href="/iau/services/MPCServices.html">Publications Overview</a></li>
+                <li><a href="/iau/ECS/MPCArchive/MPCArchive_TBL.html">Publications Archive</a></li>              
+                <li><a href="/iau/NEO/TheNEOPage.html" class="nested">NEO Services</a>
+                  <ul>
+                    <li><a href="/iau/NEO/toconfirm_tabular.html">Confirmation</a></li>
+                    <li><a href="/iau/NEO/PossNEO.html">Ratings</a></li>
+                    <li><a href="/cgi-bin/neaobs.cgi">Observation Planning Aid</a></li>
+                    <li><a href="/neocp_followup_report/">NEOCP Followup Report Form</a></li>
+                    <li><a href="/neocp_followup_reports/">NEOCP Followup Reports</a></li>
+                    <li><a href="/neocp_obs">NEOCP Recent Observations</a></li>
+                    <li><a href="/mpcops/neocp/neocp_plots/">NEOCP Plots</a></li>		    
+                    <li><a href="/iau/recovery/recovery.html">NEO Recovery</a></li>
+                  </ul>
+                </li>
+
+                <li><a href="" class="nested">Observations</a>
+                  <ul>
+                    <li><a href="/wamo/">WAMO</a></li>
+                  </ul>
+                </li>
+
+                <li><a href="/mpcops/orbits/" class="nested">Orbits</a>
+                  <ul>
+                    <li><a href="https://data.minorplanetcenter.net/comparison/index.html">Orbit Comparison Tool</a></li>
+                    <li><a href="/mpcops/orbits/no-orbits-astrometry/">Request for archival astrometry</a></li>
+                  </ul>
+                </li>
+
+                <li><a href="/iau/services/WebCSAccess.html" class="nested">Other Observer Services</a>
+                  <ul>
+                    <li><a href="/whatsup">Observing Target List</a></li>
+                    <li><a href="/iau/NatSats/NaturalSatellites.html">Natural Satellite Ephemerides</a></li>
+                    <li><a href="/iau/MPEph/NewObjEphems.html">New Object Ephemerides</a></li>
+                    <li><a href="/cgi-bin/checkmp.cgi">MPChecker</a></li>
+<!-- THIS PAGE IS NO LONGER SUPPORTED   <li><a href="/iau/artsats/artsats.html">Distant Artificial Satellites</a></li> -->
+                    <li><a href="/iau/lists/Customize.html">Observing List Customizer</a></li>
+                    <li><a href="/iau/delays/neocp_delay.html">Processing Times</a></li>		    
+                  </ul>
+                </li>
+		
+		<li><a href="/" class="nested">Identifications</a>
+		  <ul>
+		    <li><a href="/mpcops/documentation/identifications/">Documentation</a></li>		    
+		    <li><a href="/mpcops/documentation/identifications/submission-format/">Submission Format</a></li>
+                    <li><a href="/mpcops/submissions/identifications/">Submit</a></li>
+		  </ul>
+		</li>
+
+                <li><a href="/iau/ECS/MPCAT-OBS/MPCAT-OBS.html">MPCAT-OBS</a></li>
+                <li><a href="/iau/SkyCoverage.html">Sky Coverage</a></li>
+                <li><a href="/iau/MPC_Documentation.html" class="nested">Documentation</a>
+                  <ul>
+                    <li><a href="/iau/info/TechInfo.html">MPC Submission Info</a></li>
+                    <li><a href="/iau/info/Astrometry.html">Astrometry Guide</a></li>
+                    <li><a href="/mpcops/documentation/artificial-satellites/">Artificial Satellites</a></li>
+                    <li><a href="/submit_action_code">Submit Action Code</a></li>		    
+                    <li><a href="/mpcops/documentation/">Other</a></li>		    
+                    <!-- <li><a href="/iau/WhatsNew.html">What's New</a></li> -->
+                  </ul>                
+                </li>
+                <li><a href="/iau/lists/Lists.html" class="nested">Lists and Plots</a>
+                  <ul>
+                    <li><a href="/iau/lists/MPLists.html">Minor Planets</a></li>
+                      <!--<ul>
+                        <li><a href="/iau/lists/t_atens.html">Atens</a></li>
+                        <li><a href="/iau/lists/t_apollos.html">Apollos</a></li>
+                        <li><a href="/iau/lists/t_amors.html">Amors</a></li>
+                        <li><a href="/iau/lists/t_centaurs.html">Centaurs and Scattered Disk Objects</a></li>
+                        <li><a href="/iau/lists/t_tnos.html">Transneptunian Objects</a></li>
+                        <li><a href="/iau/lists/t_others.html">Other Unusual Objects</a></li>
+                        <li><a href="/iau/lists/t_dangerous.html">Potentially Hazardous Asteroids</a></li>
+                      </ul>-->
+                    <li><a href="/iau/lists/CometLists.html">Comets</a></li>
+                      <!--<ul>
+                        <li><a href="/iau/lists/LastCometObs.html">Date of Last Observation</a></li>
+                        <li><a href="/iau/lists/LastYear.html">Designations from the Past Year</a></li>
+                        <li><a href="http://www.icq.eps.harvard.edu/CometMags.html">Comet Magnitude Estimates</a></li>
+                        <li><a href="/iau/lists/ClosestComets.html">Closest Approaches</a></li>
+                        <li><a href="/iau/lists/PeriodicCodes.html">Periodic Comets</a></li>
+                      </ul>-->
+                    <li><a href="/iau/lists/ObsCodesF.html">Observatory Codes</a></li>		    
+                    <li><a href="/iau/Animations/Animations.html">Animations</a></li>
+                  </ul>                
+                </li>
+                <!--<li><%= link_to 'Summary', :controller => 'mpc', :action => 'summary' %></li>-->
+                <li><a href='/mpc/obs_stats_2014_2018'>2014-18 NEO Obs Statistics</a></li>
+                <li><a href='/mpc/summary'>Summary of Latest Data</a></li>
+                <li><a href='/deprecated-pages.html'>Deprecated Webpages</a></li>		
+              </ul>
+            </li>
+            <li><a href="/data"><span>DATA</span></a></li>
+	    
+            <li><a href="/"><span>NEW</span></a>
+	      <ul>
+		<li><a href="/mpcops/new/developments/">Developments</a></li>
+<!--		<li><a href="/mpcops/new/releases/">New Releases</a></li> -->
+		<li><a href="/mpcops/new/existing-upgrades/">Existing Upgrades</a></li>
+		<li><a href="/mpcops/new/newsletters/">Newsletters</a></li>
+	      </ul>
+	    </li>
+	
+
+            <li><a href="/iau/MPCStatus.html"><span style="color:GoldenRod">STATUS</a></li>
+
+	    <li><a href="/mpcops/documentation/"><span>DOCUMENTATION</span></a></li>
+	    
+            <li><a href="/"><span>EXTERNAL</span></a>
+	      <ul id="external">
+	        <li><a href="https://mpcmug.astro.umd.edu/" target="_blank">MPC User Group (MUG)</a></li>
+		<li><a href="http://iawn.net/" target="_blank">IAWN</a></li>
+		<li><a href="https://sbnmpc.astro.umd.edu/" target="_blank">SBN Annex</a></li>
+		<li><a href="https://www.wgsbn-iau.org/" target="_blank">WGSBN</a></li>
+                <li><a href='http://alcdef.org'>Light Curve Database</a></li>
+	      </ul>
+	    </li>
+
+          </ul>
+        </nav>
+      </header>
+
+   <script type="text/javascript">
+          document.addEventListener('DOMContentLoaded', function () {
+            const listItems = document.querySelectorAll('#nav li ');
+            function getDirectTextContent(element) {
+                let directTextContent = '';
+                element.childNodes.forEach(node => {
+                    if (node.textContent.trim().includes('OBSERVERS') || node.textContent.trim().includes('DATA') || node.textContent.trim().includes('NEW') || node.textContent.trim().includes('STATUS') || node.textContent.trim().includes('DOCUMENTATION') || node.textContent.trim().includes('EXTERNAL')){
+                        directTextContent += node.textContent.trim();
+                    }
+                });
+                return directTextContent;
+            }
+
+            listItems.forEach(function (li) {
+                const directText = getDirectTextContent(li);
+                const textLength = directText.length;  
+
+                // Log the length of each item to the console
+                //console.log(`Text: "${li.textContent.trim()}", Length: ${textLength}`);
+
+                // Apply class based on length
+                if (textLength <= 5) {
+                    li.classList.add('short-word');
+                } else if (textLength <= 10) {
+                    li.classList.add('medium-word');
+                } else {
+                    li.classList.add('long-word');
+                }
+            });
+        });
+    </script>
+
+      <!-- main -->
+      <div id="main">
+
+
+<!-- Navigation Menu block -->
+
+<li class="yuimenuitemlabel alert"> Processing <a href="/iau/info/MPCOpStatus.html">(Info)</a></li>
+
+
+
+
+<!-- Main content block -->
+
+<br>
+<p>
+ <h2>The NEO Confirmation Page</h2> Please
+ensure you are familiar with the <a href="/iau/NEO/ToConfirm.html#notes">notes
+at the bottom of this page</a>. <br>Also, additional notes on the NEOCP and
+information on how we remove objects on the NEOCP are also available <a href="/iau/NEO/NEOCPNotes.html">here</a>.
+<p>You are reminded that a cross-reference of
+designations that have appeared here previously is available
+<a href="/iau/NEO/ToConfirm_PrevDes.html">elsewhere</a>.
+<p><!-- mkneocp_files.py 17-NOV-2025 01:40:02.47 -->
+<a href="https://cgi.minorplanetcenter.net/cgi-bin/feedback.cgi?U=/iau/NEO/ToConfirm.html&amp;S=Problem">Problems?</a>
+<a href="https://cgi.minorplanetcenter.net/cgi-bin/feedback.cgi?U=/iau/NEO/ToConfirm.html&amp;S=Commment">Comments?</a>
+<p><hr><p>
+<FORM METHOD=POST ACTION="https://cgi.minorplanetcenter.net/cgi-bin/confirmeph2.cgi">
+<input type=submit value=" Get ephemerides "> <input type=reset value=" Reset form "><p>
+<p><a href="/iau/NEO/ToConfirmRA.html">See this list in R.A. order</a>
+<p>Select object(s) from the current list of objects needing confirmation
+(NEO prob, <a href="/iau/NEO/NEOCPNotes.html">class</a>, discovery date, rough current position and magnitude given):
+<p><input type="radio" name="W" VALUE="a">All objects
+with <i>V</i> =
+<input name="mb" maxlength=4 size=4 value="-30"> to
+<input name="mf" maxlength=4 size=4 value="30">, with Decl. between
+<input name="dl" maxlength=5 size=5 value="-90">&#176; and
+<input name="du" maxlength=5 size=5 value="+90">&#176;, with an
+NEO probability of
+<input name="nl" maxlength=3 size=3 value="0">&#37; to
+<input name="nu" maxlength=3 size=3 value="100">&#37;
+<input type="hidden" name="sort" value="d">
+<p><input type="radio" name="W" VALUE="j" CHECKED>or just the objects selected below:
+<input type=button value="Deselect All"
+  onclick="var i; var ff = document.getElementsByTagName('input');
+           for (i = 0; i < ff.length; i++) {
+             if (ff[i].type == 'checkbox') {
+               ff[i].checked=false;}}">
+<input type=button value="Select All"
+  onclick="var i; var ff = document.getElementsByTagName('input');
+           for (i = 0; i < ff.length; i++) {
+             if (ff[i].type == 'checkbox') {
+               ff[i].checked=true;}}">
+<pre>
+<input type="checkbox" name="obj" VALUE="P22hmGA"> P22hmGA 100 1 [2025 Nov. 16.5 UT.   R.A. = 05 43.3, Decl. = -15 34, V = 21.3 ] Updated Nov. 16.77 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hmGB"> P22hmGB 100 1 [2025 Nov. 16.5 UT.   R.A. = 05 04.9, Decl. = -16 06, V = 20.2 ] Updated Nov. 16.77 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hmGD"> P22hmGD  98 1 [2025 Nov. 16.5 UT.   R.A. = 06 01.7, Decl. = -17 58, V = 21.9 ] Updated Nov. 16.77 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hlPL"> P12hlPL 100 1 [2025 Nov. 16.4 UT.   R.A. = 03 47.3, Decl. = -18 08, V = 21.3 ] Updated Nov. 16.76 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hlPM"> P12hlPM  95 3 [2025 Nov. 16.4 UT.   R.A. = 03 60.0, Decl. = -22 36, V = 20.9 ] Updated Nov. 16.76 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hlQg"> P12hlQg  70 3 [2025 Nov. 16.4 UT.   R.A. = 03 39.2, Decl. = -17 41, V = 22.0 ] Updated Nov. 16.76 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hlQx"> P12hlQx  65 3 [2025 Nov. 16.4 UT.   R.A. = 03 11.7, Decl. = -16 22, V = 22.0 ] Updated Nov. 16.76 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hmJW"> P12hmJW  76 3 [2025 Nov. 16.4 UT.   R.A. = 04 10.9, Decl. = +03 46, V = 21.9 ] Added Nov. 16.74 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hmt6"> P12hmt6 100 1 [2025 Nov. 16.4 UT.   R.A. = 04 59.1, Decl. = -02 14, V = 20.9 ] Added Nov. 16.58 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hmt7"> P12hmt7 100 1 [2025 Nov. 16.4 UT.   R.A. = 04 14.8, Decl. = +01 53, V = 21.4 ] Updated Nov. 16.76 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hmt8"> P12hmt8  87 2 [2025 Nov. 16.4 UT.   R.A. = 04 27.7, Decl. = +01 01, V = 21.5 ] Updated Nov. 16.75 UT
+<input type="checkbox" name="obj" VALUE="P12hmta"> P12hmta  75 1 [2025 Nov. 16.4 UT.   R.A. = 04 49.4, Decl. = +01 41, V = 21.8 ] Added Nov. 16.59 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hlY8"> P22hlY8  86 1 [2025 Nov. 16.4 UT.   R.A. = 03 51.0, Decl. = -09 56, V = 18.5 ] Updated Nov. 17.05 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="P22hlY9"> P22hlY9 100 1 [2025 Nov. 16.4 UT.   R.A. = 04 55.3, Decl. = -05 10, V = 21.5 ] Updated Nov. 16.77 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hlYa"> P22hlYa  96 1 [2025 Nov. 16.4 UT.   R.A. = 04 05.0, Decl. = -00 46, V = 21.6 ] Updated Nov. 16.77 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hmMG"> P22hmMG 100 1 [2025 Nov. 16.4 UT.   R.A. = 04 53.4, Decl. = -01 44, V = 21.4 ] Added Nov. 16.82 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="X87192"> X87192  100 2 [2025 Nov. 15.7 UT.   R.A. = 02 56.2, Decl. = +21 14, V = 21.0 ] Added Nov. 16.34 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hlFz"> P22hlFz  98 1 [2025 Nov. 15.5 UT.   R.A. = 05 12.8, Decl. = -01 58, V = 21.3 ] Updated Nov. 16.42 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="P22hlGk"> P22hlGk  78 3 [2025 Nov. 15.5 UT.   R.A. = 05 27.0, Decl. = -01 10, V = 22.1 ] Updated Nov. 15.77 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hlL3"> P22hlL3 100 1 [2025 Nov. 15.5 UT.   R.A. = 04 54.4, Decl. = -03 39, V = 22.2 ] Updated Nov. 16.78 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17NQ75"> C17NQ75  91 3 [2025 Nov. 15.4 UT.   R.A. = 02 51.2, Decl. = +43 08, V = 22.3 ] Updated Nov. 15.51 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17PFQ5"> C17PFQ5 100 1 [2025 Nov. 15.4 UT.   R.A. = 02 13.9, Decl. = +11 58, V = 20.6 ] Added Nov. 15.43 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17QR45"> C17QR45 100 1 [2025 Nov. 15.4 UT.   R.A. = 03 05.8, Decl. = +23 47, V = 21.8 ] Updated Nov. 15.50 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17QR55"> C17QR55 100 1 [2025 Nov. 15.4 UT.   R.A. = 03 17.3, Decl. = +18 50, V = 21.5 ] Updated Nov. 15.50 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17QV75"> C17QV75  93 1 [2025 Nov. 15.4 UT.   R.A. = 05 01.9, Decl. = +00 52, V = 21.5 ] Updated Nov. 16.58 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="P12hlnQ"> P12hlnQ 100 1 [2025 Nov. 15.4 UT.   R.A. = 03 13.9, Decl. = -09 48, V = 22.0 ] Updated Nov. 16.42 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="P12hlnR"> P12hlnR 100 1 [2025 Nov. 15.4 UT.   R.A. = 03 35.3, Decl. = -12 26, V = 21.6 ] Added Nov. 15.52 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P12hlsh"> P12hlsh  75 3 [2025 Nov. 15.4 UT.   R.A. = 03 32.1, Decl. = -10 12, V = 22.1 ] Added Nov. 15.53 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hlp4"> P22hlp4 100 1 [2025 Nov. 15.4 UT.   R.A. = 04 10.1, Decl. = +30 48, V = 21.9 ] Updated Nov. 15.74 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="P22hlp5"> P22hlp5  96 2 [2025 Nov. 15.4 UT.   R.A. = 04 41.4, Decl. = +31 03, V = 22.3 ] Updated Nov. 15.76 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17N7T5"> C17N7T5 100 1 [2025 Nov. 15.3 UT.   R.A. = 02 06.8, Decl. = -10 47, V = 20.8 ] Updated Nov. 15.38 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17NGE5"> C17NGE5 100 1 [2025 Nov. 15.3 UT.   R.A. = 01 52.0, Decl. = +29 20, V = 22.5 ] Updated Nov. 15.44 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="CDV1CK2"> CDV1CK2  98 1 [2025 Nov. 15.3 UT.   R.A. = 03 41.9, Decl. = +24 06, V = 21.6 ] Updated Nov. 15.50 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="CDV4682"> CDV4682 100 1 [2025 Nov. 15.3 UT.   R.A. = 04 12.2, Decl. = +22 50, V = 21.3 ] Updated Nov. 16.91 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17M875"> C17M875 100 1 [2025 Nov. 15.2 UT.   R.A. = 22 52.3, Decl. = +13 41, V = 23.3 ] Updated Nov. 15.54 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="CDUR642"> CDUR642 100 1 [2025 Nov. 15.2 UT.   R.A. = 00 59.6, Decl. = +22 50, V = 21.7 ] Updated Nov. 16.11 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17JCR5"> C17JCR5  94 1 [2025 Nov. 14.4 UT.   R.A. = 03 12.9, Decl. = +17 31, V = 21.7 ] Updated Nov. 15.20 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17JH25"> C17JH25  88 2 [2025 Nov. 14.4 UT.   R.A. = 03 12.6, Decl. = +15 01, V = 22.0 ] Updated Nov. 15.20 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17K4R5"> C17K4R5  98 1 [2025 Nov. 14.4 UT.   R.A. = 03 06.9, Decl. = +49 51, V = 21.8 ] Updated Nov. 15.26 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17KAT5"> C17KAT5 100 1 [2025 Nov. 14.4 UT.   R.A. = 04 07.6, Decl. = +19 40, V = 22.1 ] Updated Nov. 15.33 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17KF25"> C17KF25 100 1 [2025 Nov. 14.4 UT.   R.A. = 03 53.1, Decl. = +33 09, V = 21.4 ] Updated Nov. 16.29 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17KTC5"> C17KTC5 100 1 [2025 Nov. 14.4 UT.   R.A. = 04 18.1, Decl. = +22 14, V = 22.4 ] Updated Nov. 15.31 UT
+<input type="checkbox" name="obj" VALUE="C17GWE5"> C17GWE5  97 1 [2025 Nov. 14.3 UT.   R.A. = 01 27.3, Decl. = -01 01, V = 22.7 ] Updated Nov. 16.24 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17GY55"> C17GY55 100 1 [2025 Nov. 14.3 UT.   R.A. = 01 33.5, Decl. = -05 53, V = 23.0 ] Updated Nov. 15.29 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17H115"> C17H115  82 1 [2025 Nov. 14.3 UT.   R.A. = 01 21.8, Decl. = +43 14, V = 22.7 ] Updated Nov. 16.19 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="C17H1A5"> C17H1A5  95 3 [2025 Nov. 14.3 UT.   R.A. = 01 22.2, Decl. = +43 51, V = 23.1 ] Updated Nov. 15.32 UT
+<input type="checkbox" name="obj" VALUE="C17H1C5"> C17H1C5 100 1 [2025 Nov. 14.3 UT.   R.A. = 01 34.9, Decl. = +38 37, V = 22.4 ] Updated Nov. 16.26 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17H555"> C17H555 100 1 [2025 Nov. 14.3 UT.   R.A. = 03 02.1, Decl. = -07 59, V = 22.5 ] Updated Nov. 15.20 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="CDUEFC2"> CDUEFC2  40 3 [2025 Nov. 14.3 UT.   R.A. = 03 29.1, Decl. = +09 32, V = 21.2 ] Updated Nov. 15.43 UT
+<input type="checkbox" name="obj" VALUE="C17FC15"> C17FC15 100 1 [2025 Nov. 14.2 UT.   R.A. = 23 22.7, Decl. = -00 13, V = 22.5 ] Updated Nov. 16.18 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17FEJ5"> C17FEJ5  80 1 [2025 Nov. 14.2 UT.   R.A. = 23 29.5, Decl. = +01 59, V = 22.7 ] Updated Nov. 17.06 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="C17FTX5"> C17FTX5 100 1 [2025 Nov. 14.2 UT.   R.A. = 00 27.1, Decl. = -01 12, V = 23.1 ] Updated Nov. 15.82 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="CDTVZD2"> CDTVZD2  74 1 [2025 Nov. 14.1 UT.   R.A. = 01 56.2, Decl. = +16 30, V = 21.5 ] Updated Nov. 17.06 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="ZTF108v"> ZTF108v 100 1 [2025 Nov. 13.3 UT.   R.A. = 13 40.6, Decl. = +06 03, V = 29.8 ] Updated Nov. 15.19 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="MHN1283"> MHN1283  24 2 [2025 Nov. 13.2 UT.   R.A. = 00 59.0, Decl. = +49 46, V = 21.0 ] Updated Nov. 17.05 UT
+<input type="checkbox" name="obj" VALUE="CDTCL92"> CDTCL92  96 1 [2025 Nov. 12.3 UT.   R.A. = 12 52.3, Decl. = -22 53, V = 26.8 ] Updated Nov. 15.19 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="P22hhya"> P22hhya  96 1 [2025 Nov. 11.3 UT.   R.A. = 02 16.7, Decl. = +27 30, V = 23.6 ] Updated Nov. 16.19 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="ZTF108n"> ZTF108n 100 1 [2025 Nov. 11.1 UT.   R.A. = 18 14.1, Decl. = -18 27, V = 21.8 ] Updated Nov. 16.19 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="ST25K11"> ST25K11  98 1 [2025 Nov. 10.5 UT.   R.A. = 03 47.3, Decl. = -11 27, V = 24.1 ] Updated Nov. 16.18 UT <b>*</b> <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="CDR25T2"> CDR25T2  35 3 [2025 Nov. 02.5 UT.   R.A. = 09 44.6, Decl. = +10 39, V = 20.1 ] Updated Nov. 16.19 UT
+<input type="checkbox" name="obj" VALUE="jdq0018"> jdq0018 100 3 [2025 Oct. 30.8 UT.   R.A. = 01 50.0, Decl. = +06 50, V = 18.8 ] Updated Nov. 16.18 UT <b>[1 nighter]</b>
+<input type="checkbox" name="obj" VALUE="XA8jlXA"> XA8jlXA  98 1 [2025 Oct. 30.8 UT.   R.A. = 03 33.4, Decl. = +05 35, V = 24.2 ] Updated Nov. 16.18 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="iM20251"> iM20251 100 1 [2025 Oct. 30.5 UT.   R.A. = 01 33.7, Decl. = +02 23, V = 20.6 ] Updated Nov. 16.18 UT
+<input type="checkbox" name="obj" VALUE="SZ01098"> SZ01098 100 1 [2025 Oct. 28.9 UT.   R.A. = 02 24.9, Decl. = +01 04, V = 21.6 ] Updated Nov. 15.19 UT <b>*</b>
+<input type="checkbox" name="obj" VALUE="P22bZYt"> P22bZYt  35 3 [2025 July 26.3 UT.   R.A. = 15 48.5, Decl. = -23 57, V = 23.4 ] Updated Nov. 15.19 UT
+
+</pre>
+<p><hr><p>Select your viewing point:
+<p><input type="radio" name="Parallax" VALUE="0">Geocentric
+<input type="radio" name="Parallax" VALUE="1" CHECKED><a href="/iau/lists/ObsCodes.html">Observatory code</a>
+<input name="obscode" maxlength=3 size=3 VALUE="500">
+<p><input type="radio" name="Parallax" VALUE="2">
+Longitude <input name="long" maxlength=8 size=8 value=""> &#176; E,
+latitude <input name="lat" maxlength=8 size=8 value=""> &#176;,
+altitude <input name="alt" maxlength=6 size=6 value=""> m.
+<p>Longitudes and latitudes should be entered in decimal degrees.
+<p><hr><p>Other options:
+<p>Ephemeris interval: <input type="radio" name="int" value="0" CHECKED> 1 hour
+<input type="radio" name="int" value="1"> 30 mins
+<input type="radio" name="int" value="2"> 10 mins
+<input type="radio" name="int" value="3"> 1 min
+<p>Start ephemerides at now + <input name="start" value="0" maxlength=5 size=5> hours
+<p>Display positions in: <input type="radio" name="raty" value="h"> truncated sexagesimal or
+<input type="radio" name="raty" value="a" CHECKED> full sexagesimal or
+<input type="radio" name="raty" value="d"> decimal units
+<p>Display motions as: <input type="radio" name="mot" value="s"> "/sec,
+<input type="radio" name="mot" value="m" CHECKED> "/min,
+<input type="radio" name="mot" value="h"> "/hr or
+<input type="radio" name="mot" value="d"> &#176;/day.
+<p><input type="radio" name="dmot" value="p" CHECKED> Total motion and direction
+<input type="radio" name="dmot" value="r"> Separate R.A. and Decl. coordinate motions
+<input type="radio" name="dmot" value="s"> Separate R.A. and Decl. sky motions
+<p><input type="radio" name="out" value="f" CHECKED> Full output  <input type="radio" name="out" value="b"> Brief output
+<p>Suppress output at
+<select name="sun">
+<option value="x"> &lt;never&gt;
+<option value="s" checked> sunset/rise
+<option value="c"> civil twilight
+<option value="n"> nautical twilight
+<option value="a"> astronomical twilight
+</select> or when object's altitude is below
+<input name="oalt" maxlength=3 size=3 value="20">&#176;.
+<p><input type=submit value=" Get ephemerides "> <input type=reset value=" Reset form "><p>
+</form>
+<p><hr><p>
+<a name="ActionCodes"></a>
+If you need to delete one of your discoveries as "does not exist" or "artificial", or flag it as "cometary", etc., please submit the corresponding "action code" through our <a href="/submit_action_code">Submit Action Code Form</a>
+</p>
+<a name="ObsComm"></a>
+<p><hr><p>
+<a href="/iau/info/Astrometry.html">Notes on how to begin your own
+astrometric program</a> are available.
+<p>
+Please ensure that you have read the <a href="/iau/NEO/NEOCPNotes.html">additional
+notes on the NEOCP</a>.
+<p><b>Please do not report observations of non-NEOCP objects in the same
+message as observations of objects on this page!</b>
+<p><a href="/iau/NEO/PossNEO.html">Get NEO Ratings to see whether you
+should report a possible NEO.</a>
+<p><b>Please ensure that you use the NEOCP designations when reporting
+follow-up observations.  Do not use your own temporary designations: if you
+do, the observations will not get filed correctly by the automated
+routines.</b>
+<p>Please report unsuccessful attempts to detect objects listed here that
+are NOT listed as `updated' or that have not been updated in the past 24 hours
+using <a href="https://minorplanetcenter.net/NEOCPblog/">the NEOCP Blog</a>.
+You may use the <a href="/iau/NEO/ToConfirm.html#ObsComm">Observers Comment</a> to report failed or
+successful attempts to observe these objects.
+<p><b>Please note that observations and orbits of objects accessible via
+this service are made available only for your personal use.  They
+are not to be promulgated via any medium.  The data are preliminary until
+they appear on an <i>MPEC</i> or <i>MPS</i>.</b>
+<p>It is possible that some of the objects listed here are comets,
+either recognised or currently unrecognised as such.  
+All reports of new cometary activity should be made using the following
+<a href="https://minorplanetcenter.net/mpcops/submissions/cometary/" target="_blank">web form</a>
+(Reports of activity for known comets made to the above web form will be
+ignored.) <br>
+New reports of cometary activity must be made using
+this web form in order to be considered for inclusion in any resulting MPEC
+announcing cometary status.  We do not
+flag suspected comets on this page because we do not wish to influence
+observers.
+<p>You can now access ephemerides for the variant
+orbits used in the uncertainty plots from the pages listing the offsets
+from the nominal solutions.
+<p></b>Please <a href="/iau/MPCStatus.html">read</a>
+(or <a href="/iau/NEO/NEOCPNotes.html">here</a>)
+about the coloration used in the uncertainty plots.
+<p>If none of these objects are within the capabilities of your system,
+check out the <a href="/iau/NEO/LastObsNEO.html">Dates of Last Observation of
+NEOs not seen recently</a> (<a href="/iau/NEO/LastObsNEORA.html">in R.A.
+order</a>), the <a href="/iau/NEO/BrightRecovery.html">list of bright
+recovery opportunities</a>, or the <a href="http://neo.ssa.esa.int/web/guest/priority-list">
+Spaceguard Central Node's Priority List</a> for alternate useful targets.
+<!-- Body postamble -->
+      </div>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <footer id="footer">
+    <div class="holder">
+      <nav class="nav">
+        <ul>
+          <li><a href="/">Home</a></li>
+          <li><a href="/about">About</a></li>
+	  <!-- Contact link changed to Jira and name changed to helpdesk.
+	       Should be consistent with top right of banner -->
+          <li><a href="https://mpc-service.atlassian.net/servicedesk/customer/portals">Helpdesk</a></li>
+<!-- PP REMOVED 28 Feb 2023 - does not work MPC does not have one          <li><a href="https://www.cfa.harvard.edu/content/privacy-statement">Privacy</a></li> -->
+        </ul>
+      </nav>
+      
+      <a href="https://www.cfa.harvard.edu">
+      <img src="/images/CfA_Logo_Vertical_CMYK.png" width="110" height="47"></a>
+      <p>
+      <p>
+      <p>
+      <div class="copy">The Minor Planet Center is hosted by the Center for Astrophysics | Harvard &amp; Smithsonian.<center>The Minor Planet Center is funded by NASA.</center></div> 
+  </footer>
+
+<script type="text/javascript">
+  $(window).on('load', (function() {
+    $("table").tablesorter();
+  })); 
+</script>
+
+<script type="text/javascript">
+//<![CDATA[
+var _tag=new WebTrends();
+_tag.dcsGetId();
+//]]>
+</script>
+
+<script type="text/javascript">
+//<![CDATA[
+_tag.dcsCustom=function(){
+// Add custom parameters here.
+//_tag.DCSext.param_name=param_value;
+}
+_tag.dcsCollect();
+//]]>
+</script>
+
+<noscript>
+<div><img alt="DCSIMG" id="DCSIMG" width="1" height="1" src="//logs1.smithsonian.museum/dcsa7yzrmbdzpxzrosrn4tyep_5i1d/njs.gif?dcsuri=/nojavascript&amp;WT.js=No&amp;WT.tv=9.4.0&amp;dcssip=www.minorplanetcenter.net"/></div>
+</noscript>
+</body>
+
+
+</html>

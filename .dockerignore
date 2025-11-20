@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+*.log
+*.sqlite3
+.env
+config/site.yml
+config/horizon/
+*.png
