@@ -9,12 +9,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class StatusResponse(BaseModel):
-    telescope: dict
-    camera: dict
-    sequence: dict
-
-
 class SlewRequest(BaseModel):
     ra_deg: float = Field(..., description="Right ascension in degrees")
     dec_deg: float = Field(..., description="Declination in degrees")
@@ -47,6 +41,26 @@ class SequenceStatusResponse(BaseModel):
     name: Optional[str]
     current_index: int
     total: int
+
+
+class ConnectionToggle(BaseModel):
+    connect: bool
+
+
+class ParkRequest(BaseModel):
+    park: bool
+
+
+class FocuserMoveRequest(BaseModel):
+    position: int = Field(..., ge=0, le=100000)
+    speed: Optional[int] = Field(default=None, ge=1, le=10)
+
+
+class StatusResponse(BaseModel):
+    telescope: dict
+    camera: dict
+    sequence: dict
+    focuser: dict
 
 
 __all__ = [

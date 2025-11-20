@@ -32,6 +32,7 @@ docker compose up --build --pull always
 - Observability: `/api/observability` (GET for latest scores, POST `/api/observability/refresh` to recompute windows)
 - `neocp-fetcher`: background worker that polls MPC, persists snapshots/observations, and publishes logs via `docker compose logs -f neocp-fetcher`
 - `observability-engine`: background worker that periodically recomputes visibility scores using the latest weather, ephemerides, and site config (`docker compose logs -f observability-engine`)
+- `nina-bridge`: REST facade that fronts the real (or mock) NINA instance, enforces weather/manual overrides, and exposes simplified telescope/camera endpoints to the rest of the stack. Logs available via `docker compose logs -f nina-bridge`.
 - `neocp-fetcher` metrics: http://localhost:19500/metrics (Prometheus format; includes cycle latency, MPC request counts, rate-limit hits)
 - Ephemeris cache: `/api/observability/refresh` will fetch per-minute MPC ephemerides, store them in Postgres (`neoephemeris` table), and reuse cached values for future scoring runs.
 - Mock NINA: http://localhost:1888/api
@@ -75,6 +76,17 @@ docker compose run --rm api alembic upgrade head
   docker compose run --rm observability-engine python -m app.services.observability_engine --oneshot
   ```
 
+- Exercise the NINA bridge (example: enable manual override, then clear it):
+
+  ```bash
+  # Pause automation
+  curl -X POST http://localhost:1889/api/override -H "Content-Type: application/json" -d '{"manual_override": true}'
+  # Check aggregate status (includes weather + upstream NINA telemetry)
+  curl http://localhost:1889/api/status | jq
+  # Resume automation
+  curl -X POST http://localhost:1889/api/override -H "Content-Type: application/json" -d '{"manual_override": false}'
+  ```
+
 ### Site configuration
 
 - Populate `.env` with `SITE_LATITUDE`, `SITE_LONGITUDE`, and `SITE_ALTITUDE_M` for the observatory (already included by default).
@@ -90,9 +102,20 @@ docker compose run --rm api alembic upgrade head
       - name: Open-Meteo
         type: open-meteo
         endpoint: "https://api.open-meteo.com/v1/forecast?latitude=51.4769&longitude=-0.0005&current=temperature_2m,wind_speed_10m&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
+    equipment_profile:
+      camera:
+        type: mono        # or osc
+        filters: ["L", "R", "G", "B"]
+        max_binning: 2
+      focuser:
+        position_min: 10000
+        position_max: 80000
+      mount:
+        supports_parking: true
   ```
 - Update `.env` or `config/site.yml` and restart the API to ensure the default site record reflects any edits.
 - The compose stack mounts `./config` into the API container read-only, keeping sensitive files local while still letting the service read them.
+- The `equipment_profile` block is optional but recommended; it lets the NINA bridge validate filters/binning, constrain focuser moves, and tailor sequence templates to the active camera/mount.
 
 ### Sample data & utilities
 
@@ -104,6 +127,25 @@ docker compose run --rm api alembic upgrade head
   - `OBSERVABILITY_*` knobs for sampling cadence, altitude limits, sun/moon constraints, and maximum candidate age.
   - `OBSERVABILITY_REFRESH_MINUTES` to control how often the background worker recomputes visibility windows (default 15).
 - Tune observability thresholds via `.env` as needed (`OBSERVABILITY_MIN_ALTITUDE_DEG`, `OBSERVABILITY_MAX_SUN_ALTITUDE_DEG`, etc.); see `app/core/config.py` for the full list of knobs.
+- Configure the bridge service via `.env`:
+  - `NINA_BRIDGE_NINA_BASE_URL` to point at the live NINA REST API (defaults to the bundled mock at `http://mock-nina:1888/api`).
+  - `NINA_BRIDGE_HTTP_TIMEOUT`, `NINA_BRIDGE_MAX_RETRIES`, `NINA_BRIDGE_REQUIRE_WEATHER_SAFE` for networking/safety behavior.
+- The FastAPI backend now exposes `/api/bridge/*` endpoints that proxy to the bridge for scheduler/dashboard usage. Examples:
+
+  ```bash
+  # Check aggregate status (bridge, weather, equipment profile)
+  curl http://localhost:8000/api/bridge/status | jq
+
+  # Request a sequence template for a mag 18 target
+  curl -X POST http://localhost:8000/api/bridge/sequence/plan \
+    -H "Content-Type: application/json" \
+    -d '{"vmag": 18.0}' | jq
+
+  # Start a sequence using the returned plan
+  curl -X POST http://localhost:8000/api/bridge/sequence/start \
+    -H "Content-Type: application/json" \
+    -d '{"name":"medium","count":10,"filter":"L","binning":1,"exposure_seconds":45}'
+  ```
 - Configure weather gating via `.env`:
   - `WEATHER_SNAPSHOT_TTL_MINUTES` (default 15) controls how long cached Open-Meteo payloads remain valid.
   - `WEATHER_API_TIMEOUT` (default 10s) guards outbound HTTP calls.

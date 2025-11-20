@@ -14,11 +14,15 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .fits_utils import create_dummy_fits
 from .models import (
+    ConnectionToggle,
     CameraExposureRequest,
     CameraStatusResponse,
+    FocuserMoveRequest,
+    ParkRequest,
     SequenceStartRequest,
     SequenceStatusResponse,
     SlewRequest,
+    StatusResponse,
 )
 from .state import STATE, TelescopeState
 
@@ -41,12 +45,13 @@ async def log_middleware(request: Request, call_next: Callable[[Request], Awaita
 app.middleware("http")(log_middleware)
 
 
-def _snapshot_state() -> dict[str, Any]:
-    return {
-        "telescope": STATE.telescope.model_dump(),
-        "camera": STATE.camera.model_dump(),
-        "sequence": STATE.sequence.model_dump(),
-    }
+def _snapshot_state() -> StatusResponse:
+    return StatusResponse(
+        telescope=STATE.telescope.model_dump(),
+        camera=STATE.camera.model_dump(),
+        sequence=STATE.sequence.model_dump(),
+        focuser=STATE.focuser.model_dump(),
+    )
 
 
 def _current_utc() -> datetime:
@@ -61,6 +66,10 @@ class SequenceRunningError(Exception):
     """Raised when manual exposures are attempted during a running sequence."""
 
 
+class TelescopeNotReadyError(Exception):
+    """Raised when attempting an action while telescope is disconnected or parked."""
+
+
 async def _start_exposure(
     duration: float,
     filter_name: str,
@@ -68,6 +77,10 @@ async def _start_exposure(
     from_sequence: bool = False,
 ) -> datetime:
     async with state_lock:
+        if not STATE.telescope.is_connected:
+            raise TelescopeNotReadyError
+        if STATE.telescope.is_parked:
+            raise TelescopeNotReadyError
         if STATE.camera.is_exposing:
             raise ExposureRunningError
         if STATE.sequence.is_running and not from_sequence:
@@ -141,10 +154,32 @@ async def _perform_exposure(
 
 
 @app.get(f"{API_PREFIX}/status")
-async def status() -> dict[str, Any]:
-    """Return a snapshot of telescope, camera, and sequence state."""
+async def status() -> StatusResponse:
+    """Return a snapshot of telescope, camera, sequence, and focuser state."""
 
     return _snapshot_state()
+
+
+@app.post(f"{API_PREFIX}/telescope/connect")
+async def telescope_connect(payload: ConnectionToggle) -> dict[str, Any]:
+    async with state_lock:
+        STATE.telescope.is_connected = payload.connect
+        if not payload.connect:
+            STATE.telescope.is_parked = True
+    logger.info("Telescope connection set to %s", payload.connect)
+    return {"connected": STATE.telescope.is_connected, "parked": STATE.telescope.is_parked}
+
+
+@app.post(f"{API_PREFIX}/telescope/park")
+async def telescope_park(payload: ParkRequest) -> dict[str, Any]:
+    async with state_lock:
+        if not STATE.telescope.is_connected:
+            raise HTTPException(status_code=409, detail="telescope_disconnected")
+        STATE.telescope.is_parked = payload.park
+        if payload.park:
+            STATE.telescope.is_slewing = False
+    logger.info("Telescope park set to %s", payload.park)
+    return {"parked": STATE.telescope.is_parked}
 
 
 @app.post(f"{API_PREFIX}/telescope/slew")
@@ -152,6 +187,10 @@ async def telescope_slew(payload: SlewRequest) -> dict[str, Any]:
     """Simulate a telescope slew command."""
 
     async with state_lock:
+        if not STATE.telescope.is_connected:
+            raise HTTPException(status_code=409, detail="telescope_disconnected")
+        if STATE.telescope.is_parked:
+            raise HTTPException(status_code=409, detail="telescope_parked")
         STATE.telescope.is_slewing = True
     await asyncio.sleep(0.2)
     async with state_lock:
@@ -185,6 +224,8 @@ async def camera_start_exposure(
         raise HTTPException(status_code=409, detail="exposure_already_running") from None
     except SequenceRunningError:
         raise HTTPException(status_code=409, detail="sequence_running") from None
+    except TelescopeNotReadyError:
+        raise HTTPException(status_code=409, detail="telescope_not_ready") from None
 
     async def runner() -> None:
         await _complete_exposure(duration, payload.filter, payload.binning, force_fail)
@@ -205,6 +246,10 @@ async def sequence_start(payload: SequenceStartRequest) -> dict[str, Any]:
     async with state_lock:
         if STATE.sequence.is_running:
             raise HTTPException(status_code=409, detail="sequence_already_running")
+        if not STATE.telescope.is_connected:
+            raise HTTPException(status_code=409, detail="telescope_disconnected")
+        if STATE.telescope.is_parked:
+            raise HTTPException(status_code=409, detail="telescope_parked")
         STATE.sequence.is_running = True
         STATE.sequence.current_index = 0
         STATE.sequence.total = payload.count
@@ -237,6 +282,23 @@ async def sequence_start(payload: SequenceStartRequest) -> dict[str, Any]:
 @app.get(f"{API_PREFIX}/sequence/status")
 async def sequence_status() -> SequenceStatusResponse:
     return SequenceStatusResponse(**STATE.sequence.model_dump())
+
+
+@app.post(f"{API_PREFIX}/focuser/move")
+async def focuser_move(payload: FocuserMoveRequest) -> dict[str, Any]:
+    async with state_lock:
+        STATE.focuser.is_moving = True
+    await asyncio.sleep(0.1)
+    async with state_lock:
+        STATE.focuser.position = payload.position
+        STATE.focuser.is_moving = False
+    logger.info("Focuser moved to %s", payload.position)
+    return {"position": STATE.focuser.position}
+
+
+@app.get(f"{API_PREFIX}/focuser/status")
+async def focuser_status() -> dict[str, Any]:
+    return STATE.focuser.model_dump()
 
 
 @app.exception_handler(Exception)
