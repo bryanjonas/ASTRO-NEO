@@ -33,6 +33,35 @@ class WeatherSensorConfig(BaseModel):
     endpoint: str | None = None
 
 
+class CameraProfileConfig(BaseModel):
+    """Camera-specific capabilities."""
+
+    type: str = "mono"
+    filters: list[str] = Field(default_factory=list)
+    max_binning: int = 2
+
+
+class FocuserProfileConfig(BaseModel):
+    """Focuser range and behavior."""
+
+    position_min: int = 0
+    position_max: int = 100000
+
+
+class MountProfileConfig(BaseModel):
+    """Mount capabilities."""
+
+    supports_parking: bool = True
+
+
+class EquipmentProfileConfig(BaseModel):
+    """Aggregate equipment capabilities for the site."""
+
+    camera: CameraProfileConfig
+    focuser: FocuserProfileConfig | None = None
+    mount: MountProfileConfig | None = None
+
+
 class SiteFileConfig(BaseModel):
     """Site configuration representation loaded from config/site.yml."""
 
@@ -43,6 +72,7 @@ class SiteFileConfig(BaseModel):
     bortle: int | None = None
     horizon_mask: HorizonMaskConfig | None = None
     weather_sensors: list[WeatherSensorConfig] = Field(default_factory=list)
+    equipment_profile: EquipmentProfileConfig | None = None
 
 
 def load_site_config(path: str | Path | None = None) -> SiteFileConfig:
@@ -71,11 +101,14 @@ def _site_config_to_model(site_config: SiteFileConfig) -> dict[str, Any]:
         "bortle": site_config.bortle,
         "horizon_mask_path": site_config.horizon_mask.source if site_config.horizon_mask else None,
         "weather_sensors": None,
+        "equipment_profile": None,
     }
     if site_config.weather_sensors:
         payload["weather_sensors"] = json.dumps(
             [sensor.model_dump() for sensor in site_config.weather_sensors],
         )
+    if site_config.equipment_profile:
+        payload["equipment_profile"] = json.dumps(site_config.equipment_profile.model_dump())
     return payload
 
 
@@ -132,5 +165,6 @@ __all__ = [
     "SiteFileConfig",
     "WeatherSensorConfig",
     "HorizonMaskConfig",
+    "EquipmentProfileConfig",
     "sync_site_config_to_db",
 ]

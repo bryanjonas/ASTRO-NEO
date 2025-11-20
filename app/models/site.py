@@ -16,3 +16,7 @@ class SiteConfig(SQLModel, table=True):
     bortle: Optional[int] = None
     horizon_mask_path: Optional[str] = None
     weather_sensors: Optional[str] = None
+    equipment_profile: Optional[str] = Field(
+        default=None,
+        description="JSON blob describing active equipment capabilities (camera, focuser, mount).",
+    )

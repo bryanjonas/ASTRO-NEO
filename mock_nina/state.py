@@ -16,6 +16,8 @@ class TelescopeState(BaseModel):
     ra_deg: float = 0.0
     dec_deg: float = 0.0
     is_slewing: bool = False
+    is_connected: bool = True
+    is_parked: bool = False
 
 
 class CameraState(BaseModel):
@@ -33,6 +35,11 @@ class SequenceState(BaseModel):
     name: Optional[str] = None
 
 
+class FocuserState(BaseModel):
+    is_moving: bool = False
+    position: int = 50000
+
+
 class ObservatoryState:
     """Singleton-like state object shared across requests."""
 
@@ -40,6 +47,7 @@ class ObservatoryState:
         self.telescope = TelescopeState()
         self.camera = CameraState()
         self.sequence = SequenceState()
+        self.focuser = FocuserState()
         self._lock = asyncio.Lock()
         self._image_counter = 0
 

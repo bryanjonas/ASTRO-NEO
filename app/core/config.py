@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     weather_max_precip_probability_pct: float = 40.0
     weather_precip_block_threshold_mm: float = 0.1
     weather_max_cloud_cover_pct: float = 95.0
+    nina_bridge_url: str = "http://nina-bridge:8001/api"
+    nina_bridge_timeout: float = 15.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

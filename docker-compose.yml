@@ -53,6 +53,26 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+  nina-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+      - mock-nina
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      NINA_BRIDGE_NINA_BASE_URL: http://mock-nina:1888/api
+    command: ["uvicorn", "nina_bridge.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    restart: unless-stopped
+    ports:
+      - "1889:8001"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
   mock-nina:
     build:
       context: .
