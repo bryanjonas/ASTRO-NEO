@@ -1,0 +1,83 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+      - mock-nina
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      MOCK_NINA_URL: http://mock-nina:1888/api
+    ports:
+      - "18080:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+  neocp-fetcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+    command: ["python", "-m", "app.services.neocp_fetcher"]
+    restart: unless-stopped
+    ports:
+      - "19500:9500"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+  observability-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+    command: ["python", "-m", "app.services.observability_engine"]
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+  mock-nina:
+    build:
+      context: .
+      dockerfile: mock_nina/Dockerfile
+    pull_policy: build
+    environment:
+      MOCK_NINA_DATA_DIR: /data
+      MOCK_NINA_EXPOSURE_SECONDS: 5
+    volumes:
+      - mock_nina_data:/data
+    ports:
+      - "1888:1888"
+
+  db:
+    image: postgres:15
+    pull_policy: always
+    environment:
+      POSTGRES_DB: astro
+      POSTGRES_USER: astro
+      POSTGRES_PASSWORD: astro
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+  mock_nina_data:

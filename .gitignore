@@ -1,0 +1,35 @@
+# Python / build artifacts
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Editors / tooling
+.idea/
+.vscode/
+.DS_Store
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+.coverage*
+
+# Environment / secrets
+.env
+config/site.yml
+config/horizon/
+
+# Data artifacts
+/data/
+mock_nina_data/
+postgres_data/
+
+# Node/other
+node_modules/
