@@ -30,6 +30,7 @@ from nina_bridge.templates import select_template
 from app.db.session import get_session
 from app.services.equipment import EquipmentProfile, get_active_equipment_profile
 from app.services.weather import WeatherService, WeatherSummary
+from app.services.presets import select_preset
 
 logger = logging.getLogger("nina_bridge")
 
