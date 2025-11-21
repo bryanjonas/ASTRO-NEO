@@ -39,6 +39,8 @@ class CameraProfileConfig(BaseModel):
     type: str = "mono"
     filters: list[str] = Field(default_factory=list)
     max_binning: int = 2
+    gain_presets: dict[str, int] = Field(default_factory=dict)
+    offset_presets: dict[str, int] = Field(default_factory=dict)
 
 
 class FocuserProfileConfig(BaseModel):

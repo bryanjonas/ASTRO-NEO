@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     weather_max_cloud_cover_pct: float = 95.0
     nina_bridge_url: str = "http://nina-bridge:8001/api"
     nina_bridge_timeout: float = 15.0
+    data_root: str = "/data"
+    fits_retention_days: int = 14
+    calibration_dark_counts: int = 10
+    calibration_flat_counts: int = 10
+    calibration_bias_counts: int = 20
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
