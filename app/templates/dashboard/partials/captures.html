@@ -1,0 +1,16 @@
+<div class="panel-title small">Recent Captures</div>
+{% if captures %}
+  <ul class="list">
+    {% for cap in captures[-8:] %}
+      <li>
+        <span class="pill">{{ cap.kind }}</span>
+        <strong>{{ cap.target }}</strong>
+        {% if cap.sequence %}<span class="muted">seq={{ cap.sequence }} #{{ cap.index }}</span>{% endif %}
+        <div class="muted tiny">{{ cap.started_at }}</div>
+        <div class="muted tiny">{{ cap.path }}</div>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <div class="muted">No captures recorded.</div>
+{% endif %}
