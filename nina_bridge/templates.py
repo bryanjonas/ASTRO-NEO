@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from app.services.equipment import EquipmentProfile
 from app.services.presets import ExposurePreset, list_presets, select_preset
 
 
@@ -18,6 +19,8 @@ class SequenceTemplate:
     binning: int = 1
     tracking_mode: str = "sidereal"
     focus_offset: float | None = None
+    gain: int | None = None
+    offset: int | None = None
 
 
 def _from_preset(preset: ExposurePreset) -> SequenceTemplate:
@@ -30,11 +33,13 @@ def _from_preset(preset: ExposurePreset) -> SequenceTemplate:
         binning=preset.binning,
         tracking_mode=preset.tracking_mode,
         focus_offset=preset.focus_offset,
+        gain=preset.gain,
+        offset=preset.offset,
     )
 
 
-def select_template(vmag: float | None, urgency: float | None = None) -> SequenceTemplate:
-    return _from_preset(select_preset(vmag, profile=None, urgency=urgency))
+def select_template(vmag: float | None, urgency: float | None = None, profile: EquipmentProfile | None = None) -> SequenceTemplate:
+    return _from_preset(select_preset(vmag, profile=profile, urgency=urgency))
 
 
 def list_templates() -> Iterable[SequenceTemplate]:

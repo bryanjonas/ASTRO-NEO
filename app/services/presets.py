@@ -18,6 +18,8 @@ class ExposurePreset:
     binning: int
     tracking_mode: str = "sidereal"
     focus_offset: float | None = None
+    gain: int | None = None
+    offset: int | None = None
 
 
 DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
@@ -35,12 +37,16 @@ def list_presets(profile: EquipmentProfile | None = None) -> Iterable[ExposurePr
 def select_preset(vmag: float | None, profile: EquipmentProfile | None = None, urgency: float | None = None) -> ExposurePreset:
     """Choose an exposure preset based on target magnitude and optional urgency."""
     presets = list_presets(profile)
-    if vmag is None:
-        return presets[1]
-    for preset in presets:
-        if vmag <= preset.max_vmag:
-            return _apply_urgency(preset, urgency)
-    return _apply_urgency(presets[-1], urgency)
+    chosen = presets[1] if vmag is None else None
+    if chosen is None:
+        for preset in presets:
+            if vmag <= preset.max_vmag:
+                chosen = preset
+                break
+        if chosen is None:
+            chosen = presets[-1]
+    chosen = _apply_urgency(chosen, urgency)
+    return _apply_profile_overrides(chosen, profile)
 
 
 def _apply_urgency(preset: ExposurePreset, urgency: float | None) -> ExposurePreset:
@@ -58,6 +64,34 @@ def _apply_urgency(preset: ExposurePreset, urgency: float | None) -> ExposurePre
         binning=preset.binning,
         tracking_mode=preset.tracking_mode,
         focus_offset=preset.focus_offset,
+    )
+
+
+def _apply_profile_overrides(preset: ExposurePreset, profile: EquipmentProfile | None) -> ExposurePreset:
+    """Apply per-profile defaults for filter/gain/offset."""
+    if not profile:
+        return preset
+    camera = profile.camera
+    filter_name = preset.filter
+    if camera.filters:
+        filter_name = camera.filters[0]
+    gain = preset.gain
+    offset = preset.offset
+    if camera.gain_presets:
+        gain = camera.gain_presets.get(preset.name, gain)
+    if camera.offset_presets:
+        offset = camera.offset_presets.get(preset.name, offset)
+    return ExposurePreset(
+        name=preset.name,
+        max_vmag=preset.max_vmag,
+        exposure_seconds=preset.exposure_seconds,
+        count=preset.count,
+        filter=filter_name,
+        binning=preset.binning,
+        tracking_mode=preset.tracking_mode,
+        focus_offset=preset.focus_offset,
+        gain=gain,
+        offset=offset,
     )
 
 

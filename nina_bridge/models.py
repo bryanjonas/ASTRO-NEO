@@ -61,6 +61,9 @@ class SequencePlanResponse(BaseModel):
     exposure_seconds: float
     tracking_mode: str
     focus_offset: float | None = None
+    gain: int | None = None
+    offset: int | None = None
+    preset: str | None = None
 
 
 class ConnectionRequest(BaseModel):
