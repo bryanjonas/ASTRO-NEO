@@ -28,6 +28,7 @@ class ObservingSession:
     notes: str | None = None
     ended_at: datetime | None = None
     calibrations: List[SessionCalibration] = field(default_factory=list)
+    captures: List[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -45,6 +46,7 @@ class ObservingSession:
                 }
                 for cal in self.calibrations
             ],
+            "captures": self.captures,
         }
 
 
@@ -97,6 +99,16 @@ class SessionState:
     def run_calibrations(self) -> dict:
         """Execute remaining calibrations via the bridge."""
         return run_calibration_plan(self)
+
+    def add_capture(self, entry: dict) -> None:
+        if not self.current:
+            self.start()
+        assert self.current  # for type checkers
+        self.current.captures.append(entry)
+
+    def add_captures(self, entries: List[dict]) -> None:
+        for entry in entries:
+            self.add_capture(entry)
 
 
 def _plan_to_calibrations(plan: list[CalibrationPlan]) -> list[SessionCalibration]:

@@ -249,7 +249,7 @@ def _plan_from_template(
     payload: SequencePlanRequest,
     profile: EquipmentProfile | None,
 ) -> SequencePlanResponse:
-    template = select_template(payload.vmag, payload.urgency)
+    template = select_template(payload.vmag, payload.urgency, profile)
     filter_name, binning = _apply_camera_overrides(template.filter, template.binning, profile)
     tracking_mode = _tracking_mode_for(payload.rate_arcsec_per_min, template.tracking_mode)
     return SequencePlanResponse(
@@ -260,6 +260,9 @@ def _plan_from_template(
         exposure_seconds=template.exposure_seconds,
         tracking_mode=tracking_mode,
         focus_offset=template.focus_offset,
+        gain=template.gain,
+        offset=template.offset,
+        preset=template.name,
     )
 
 

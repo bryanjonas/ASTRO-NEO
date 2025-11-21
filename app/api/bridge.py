@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.services.nina_bridge import NinaBridgeService
+from app.services.imaging import build_fits_path
+from app.services.session import SESSION_STATE
 
 router = APIRouter(prefix="/bridge", tags=["bridge"])
 
@@ -46,6 +50,7 @@ class ExposurePayload(BaseModel):
     filter: str = Field(..., min_length=1, max_length=16)
     binning: int = Field(..., ge=1, le=4)
     exposure_seconds: float | None = Field(default=None, gt=0)
+    target: str | None = Field(default=None, max_length=128)
 
 
 class SequencePlanPayload(BaseModel):
@@ -60,6 +65,7 @@ class SequenceStartPayload(BaseModel):
     filter: str = Field(..., min_length=1, max_length=16)
     binning: int = Field(..., ge=1, le=4)
     exposure_seconds: float | None = Field(default=None, gt=0)
+    target: str | None = Field(default=None, max_length=128)
 
 
 @router.get("/status")
@@ -116,7 +122,23 @@ def focuser_move(
 def start_exposure(
     payload: ExposurePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    return bridge.start_exposure(payload.filter, payload.binning, payload.exposure_seconds)
+    started_at = datetime.utcnow()
+    expected_path = build_fits_path(
+        target_name=payload.target or "exposure",
+        start_time=started_at,
+        sequence_name="exposure",
+        index=1,
+    )
+    result = bridge.start_exposure(payload.filter, payload.binning, payload.exposure_seconds)
+    SESSION_STATE.add_capture(
+        {
+            "kind": "exposure",
+            "target": payload.target or "exposure",
+            "started_at": started_at.isoformat(),
+            "path": str(expected_path),
+        }
+    )
+    return {"expected_path": str(expected_path), "result": result}
 
 
 @router.post("/sequence/plan")
@@ -130,4 +152,26 @@ def plan_sequence(
 def start_sequence(
     payload: SequenceStartPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    return bridge.start_sequence(payload.model_dump(exclude_none=True))
+    started_at = datetime.utcnow()
+    captures: list[dict] = []
+    for idx in range(1, payload.count + 1):
+        path = build_fits_path(
+            target_name=payload.target or payload.name,
+            start_time=started_at,
+            sequence_name=payload.name,
+            index=idx,
+        )
+        captures.append(
+            {
+                "kind": "sequence",
+                "target": payload.target or payload.name,
+                "sequence": payload.name,
+                "index": idx,
+                "started_at": started_at.isoformat(),
+                "path": str(path),
+            }
+        )
+
+    result = bridge.start_sequence(payload.model_dump(exclude_none=True))
+    SESSION_STATE.add_captures(captures)
+    return {"expected_paths": captures, "result": result}

@@ -99,10 +99,10 @@ def run_calibration_plan(session_state: "SessionState", bridge: NinaBridgeServic
                 }
             )
 
-    return {
-        "session": session.to_dict(),
-        "captures": captures,
-    }
+    if session_state.current:
+        session_state.current.captures.extend(captures)
+
+    return {"session": session.to_dict(), "captures": captures}
 
 
 __all__ = ["CalibrationPlan", "nightly_calibration_plan", "calibration_output_path", "run_calibration_plan"]
