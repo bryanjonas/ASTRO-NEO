@@ -1,5 +1,6 @@
 """Service-layer utilities."""
 
+from .automation import AutomationPlan, AutomationService
 from .ephemeris import MpcEphemerisClient
 from .equipment import (
     CameraCapabilities,
@@ -23,4 +24,6 @@ __all__ = [
     "MountCapabilities",
     "get_active_equipment_profile",
     "NinaBridgeService",
+    "AutomationService",
+    "AutomationPlan",
 ]

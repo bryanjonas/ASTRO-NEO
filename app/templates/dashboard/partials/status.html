@@ -19,6 +19,16 @@
       <div class="stat">{{ retention.expired_count }} expired</div>
     </div>
   </div>
+  {% if bundle.notifications %}
+  <div class="subpanel">
+    <div class="panel-title small">Alerts</div>
+    <ul class="list">
+      {% for note in bundle.notifications %}
+        <li><span class="pill {{ note.level }}">{{ note.level }}</span> {{ note.message }} <span class="muted">{{ note.created_at }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <div class="subpanel">
     <div class="panel-title small">Session</div>
     {% if bundle.session %}
