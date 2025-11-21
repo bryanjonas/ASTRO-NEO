@@ -244,10 +244,13 @@ Add new questions or clarifications inline as they surface during development se
 
 | Tab | Purpose | Key Panels / Widgets |
 | --- | --- | --- |
-| `Overview` | At-a-glance system state | Pipeline status banner, newest NEOCP reports table, queue of "observable" targets with visibility window countdowns |
-| `Observatory` | Site & sky visibility | Location selector (lat/long/elevation), horizon mask editor, sky sector compass showing visible sectors, Open-Meteo (or configured API) summary, moon phase/altitude |
-| `Equipment` | Manage telescope/camera profiles | CRUD for equipment configs (mount, OTA, camera, filters, focuser), editable performance stats (limiting mag, pixel scale, FoV), ability to select the active profile |
-| `Targets` | Detailed target selection & current observation | Target detail card (RA/Dec, mag, uncertainty), current observation progress, ability to trigger/suspend imaging, historical observations timeline |
+| `Overview` | At-a-glance system state | Pipeline status banner, blockers/ready indicators, newest captures, retention summary |
+| `Observatory` | Site & sky visibility | Location selector (lat/long/elevation), horizon mask editor, sky sector compass showing visible sectors, Open-Meteo summary, moon phase/altitude |
+| `Equipment` | Manage telescope/camera profiles | CRUD for equipment configs (mount, OTA, camera, filters, focuser), editable performance stats (limiting mag, pixel scale, FoV), ability to select the active profile; preset gains/offsets per profile |
+| `Targets` | Detailed target selection & current observation | Target table with filters (mag/urgency/visible), detail drawer (RA/Dec, mag, uncertainty, observability window), CTA to send to NINA/sequence planner |
+| `Exposures` | Configure presets & tonight's plan | Exposure presets per profile, planned sequences, session controls (start/end), calibration run/reset, retention dry-run/prune |
+| `Live Status` | Hardware/control loop snapshot | Bridge ready/blockers, telescope/camera state, current session/captures, quick actions (override, park/unpark, abort sequence, run calibration) |
+| `Reports` | Compilation & submission workflow | Draft astrometric entries, validation status, send-to-MPC action with log of submissions, ability to attach comments |
 | `Reports` | Compilation & submission workflow | Draft astrometric entries, validation status, send-to-MPC action with log of submissions, ability to attach comments |
 
 **Cross-cutting UI elements**
