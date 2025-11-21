@@ -18,6 +18,7 @@ class CameraExposureRequest(BaseModel):
     exposure_seconds: Optional[float] = None
     filter: str = Field(..., min_length=1, max_length=8)
     binning: int = 1
+    filename: Optional[str] = Field(default=None, max_length=255)
 
 
 class CameraStatusResponse(BaseModel):

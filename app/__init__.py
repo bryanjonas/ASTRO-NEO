@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from .api import api_router
 from .core.config import settings
 from .core.site_config import bootstrap_site_config
+from .db.session import init_db
 
 
 def create_app() -> FastAPI:
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def _bootstrap_site_config() -> None:
         bootstrap_site_config()
+        init_db()
 
     return app
 
