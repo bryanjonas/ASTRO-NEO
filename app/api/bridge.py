@@ -9,6 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.services.automation import AutomationPlan, AutomationService
 from app.services.nina_bridge import NinaBridgeService
 from app.services.imaging import build_fits_path
 from app.services.session import SESSION_STATE
@@ -66,6 +67,20 @@ class SequenceStartPayload(BaseModel):
     binning: int = Field(..., ge=1, le=4)
     exposure_seconds: float | None = Field(default=None, gt=0)
     target: str | None = Field(default=None, max_length=128)
+
+
+class AutomationPayload(BaseModel):
+    target: str = Field(..., min_length=1, max_length=128)
+    ra_deg: float = Field(..., ge=0.0, lt=360.0)
+    dec_deg: float = Field(..., ge=-90.0, le=90.0)
+    filter: str | None = Field(default=None, min_length=1, max_length=16)
+    binning: int | None = Field(default=None, ge=1, le=4)
+    exposure_seconds: float | None = Field(default=None, gt=0)
+    count: int | None = Field(default=None, ge=1, le=999)
+    vmag: float | None = Field(default=None, ge=0.0)
+    urgency: float | None = Field(default=None, ge=0.0, le=1.0)
+    focus_position: int | None = Field(default=None, ge=0)
+    park_after: bool = Field(default=False)
 
 
 @router.get("/status")
@@ -175,3 +190,22 @@ def start_sequence(
     result = bridge.start_sequence(payload.model_dump(exclude_none=True))
     SESSION_STATE.add_captures(captures)
     return {"expected_paths": captures, "result": result}
+
+
+@router.post("/automation/run")
+def automation_run(payload: AutomationPayload) -> Any:
+    automation = AutomationService()
+    plan = automation.build_plan(
+        target=payload.target,
+        ra_deg=payload.ra_deg,
+        dec_deg=payload.dec_deg,
+        vmag=payload.vmag,
+        urgency=payload.urgency,
+        focus_position=payload.focus_position,
+        park_after=payload.park_after,
+        override_filter=payload.filter,
+        override_binning=payload.binning,
+        override_exposure_seconds=payload.exposure_seconds,
+        override_count=payload.count,
+    )
+    return automation.run_plan(plan)

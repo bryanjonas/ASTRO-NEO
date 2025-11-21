@@ -65,24 +65,23 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 ---
 
-## Phase 3 — Observatory Control (NINA or Alternatives)
-
-- [x] Implement the `nina-bridge` service that authenticates to NINA's local API/WebSocket and exposes simplified REST endpoints (status, manual override, dome state, telescope connect/slew/park, focuser moves, exposures, sequence start/planning) to the rest of the system. Bridge enforces weather-safety checks using the shared `WeatherService`, consults the stored equipment profile to validate filters/binning/focuser ranges, and surfaces a `/api/status` snapshot combining NINA telemetry + weather + override state. FastAPI now proxies these controls under `/api/bridge/*` so the scheduler/dashboard can drive hardware without talking to NINA directly.
-- Automate equipment connection, sequence loading, slews, focusing, and parking; ensure each action checks hardware state first.
-- Generate imaging sequences dynamically per target (exposure, filter, count) based on equipment profiles and target magnitude.
-- Integrate safety interlocks: block commands if weather alerts trigger, if dome is closed, or if manual override is enabled.
-- Provide robust error handling—queue retries, log failures, and notify the dashboard when manual intervention is required.
-- Until the real NINA instance is available, ship the containerized mock service in `mock_nina/` (FastAPI app with telescope/camera/sequence endpoints and dummy FITS output) so upstream components can run end-to-end simulations.
+- **Phase 3 — Observatory Control (NINA or Alternatives)**
+  - [x] Implement the `nina-bridge` service that authenticates to NINA's local API and exposes simplified REST endpoints (status, manual override, dome state, telescope connect/slew/park, focuser moves, exposures, sequence start/planning) to the rest of the system. Bridge enforces weather-safety checks using the shared `WeatherService`, consults the stored equipment profile to validate filters/binning/focuser ranges, and surfaces a `/api/status` snapshot combining NINA telemetry + weather + override state. FastAPI now proxies these controls under `/api/bridge/*` so the scheduler/dashboard can drive hardware without talking to NINA directly. (Current implementation proxies REST only—WebSocket mirroring remains a future enhancement.)
+  - [x] Automate equipment connection, sequence loading, slews, focusing, and parking; ensure each action checks hardware state first. `AutomationService` chains connect → optional focuser move → slew → sequence start → optional auto-park with weather/safety checks, exposed via `/api/bridge/automation/run`.
+  - [x] Generate imaging sequences dynamically per target using presets: `AutomationService.build_plan` derives filter/binning/exposure/count from the active equipment profile and target vmag/urgency (overrides allowed). Filters currently default to the active camera's first entry (use your IR/UV cut as default); future enhancement could add per-filter offsets/exposure tweaks for multi-filter wheels.
+  - [x] Integrate safety interlocks: block commands if weather alerts trigger, if dome is closed, or if manual override is enabled (enforced in bridge safety checks; weather pulled via `WeatherService`).
+  - [x] Provide robust error handling—queue retries, log failures, and notify the dashboard when manual intervention is required. Added a retrying task queue for bridge commands, centralized notification log (surfaced on `/dashboard/partials/status`), and wired automation steps through the queue so failures raise alerts.
+  - [x] Until the real NINA instance is available, ship the containerized mock service in `mock_nina/` (FastAPI app with telescope/camera/sequence endpoints and dummy FITS output) so upstream components can run end-to-end simulations.
 
 ---
 
 ## Phase 4 — Imaging Session Management
-
-- Define exposure presets (duration, binning, filters) keyed by equipment profile and target magnitude; store them centrally.
-- Confirm mount tracking mode (sidereal vs target rate) before exposures; adjust through the control service if needed.
-- Automate calibration frame acquisition (darks, flats, bias) and associate them with nightly sessions for downstream reduction.
-- Monitor guiding errors, cloud sensors, and image quality metrics to detect failures; reschedule targets automatically when issues arise.
-- Enforce a consistent file naming convention (target-date-time_seq.fits) and copy images into a shared volume with retention policies.
+- [ ] Define exposure presets (duration, binning, filters) keyed by equipment profile and target magnitude; store them centrally.
+- [ ] Confirm mount tracking mode (sidereal vs target rate) before exposures; adjust through the control service if needed.
+- [ ] Automate calibration frame acquisition (darks, flats, bias) and associate them with nightly sessions for downstream reduction.
+- [ ] Monitor guiding errors, cloud sensors, and image quality metrics to detect failures; reschedule targets automatically when issues arise.
+- [x] Enforce a consistent file naming convention (target-date-time_seq.fits) and copy images into a shared volume with retention policies (`app/services/imaging.py`).
+- [x] Serve a basic dashboard UI at `/dashboard` (HTMX/Alpine) with Overview/Observatory/Equipment/Targets/Exposures/Live/Reports tabs, session controls, and retention summary placeholders; remaining tabs are still placeholders to be wired to backend data.
 
 ---
 
