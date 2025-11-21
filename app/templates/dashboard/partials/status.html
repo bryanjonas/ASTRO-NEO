@@ -1,0 +1,36 @@
+<section class="panel">
+  <div class="panel-title">Status</div>
+  <div class="grid two">
+    <div>
+      <div class="label">Bridge</div>
+      {% if bundle.bridge_ready %}
+        <div class="stat good">Ready: slew={{ bundle.bridge_ready.ready_to_slew }}, expose={{ bundle.bridge_ready.ready_to_expose }}</div>
+      {% else %}
+        <div class="stat">Unknown</div>
+      {% endif %}
+      {% if bundle.bridge_blockers %}
+        <ul class="blockers">
+          {% for b in bundle.bridge_blockers %}<li>{{ b.reason if b.reason else b }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+    <div>
+      <div class="label">Retention</div>
+      <div class="stat">{{ retention.expired_count }} expired</div>
+    </div>
+  </div>
+  <div class="subpanel">
+    <div class="panel-title small">Session</div>
+    {% if bundle.session %}
+      <div class="stat">Started {{ bundle.session.started_at }}</div>
+      <div class="muted">Calibrations:</div>
+      <ul class="list">
+        {% for c in bundle.session.calibrations %}
+          <li>{{ c.type }} {{ c.completed }}/{{ c.required }} (remain {{ c.remaining }})</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="muted">No active session.</div>
+    {% endif %}
+  </div>
+</section>

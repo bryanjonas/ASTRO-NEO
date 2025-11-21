@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="tabs" x-data="{ tab: 'overview' }">
+  <nav class="tab-nav">
+    <button :class="{active: tab==='overview'}" @click="tab='overview'">Overview</button>
+    <button :class="{active: tab==='observatory'}" @click="tab='observatory'">Observatory</button>
+    <button :class="{active: tab==='equipment'}" @click="tab='equipment'">Equipment</button>
+    <button :class="{active: tab==='targets'}" @click="tab='targets'">Targets</button>
+    <button :class="{active: tab==='exposures'}" @click="tab='exposures'">Exposures</button>
+    <button :class="{active: tab==='live'}" @click="tab='live'">Live Status</button>
+    <button :class="{active: tab==='reports'}" @click="tab='reports'">Reports</button>
+  </nav>
+
+  <section x-show="tab==='overview'" class="panel" hx-get="/dashboard/partials/status" hx-trigger="load, every 8s" hx-target="this" hx-swap="outerHTML">
+    <div class="panel-title">Status</div>
+    <div class="muted">Loading...</div>
+  </section>
+
+  <section x-show="tab==='observatory'" class="panel placeholder">
+    <div class="panel-title">Observatory</div>
+    <p class="muted">Edit site location, horizons, and weather sources (to be wired).</p>
+  </section>
+
+  <section x-show="tab==='equipment'" class="panel placeholder">
+    <div class="panel-title">Equipment</div>
+    <p class="muted">Manage camera/mount/focuser profiles and preset gains/offsets (to be wired).</p>
+  </section>
+
+  <section x-show="tab==='targets'" class="panel placeholder">
+    <div class="panel-title">Targets</div>
+    <p class="muted">NEOCP list and filters coming next.</p>
+  </section>
+
+  <section x-show="tab==='exposures'" class="panel">
+    <div class="panel-title">Exposures & Session</div>
+    <div class="actions">
+      <button hx-post="/api/session/start" hx-trigger="click" class="ghost">Start Session</button>
+      <button hx-post="/api/session/calibration/run" hx-trigger="click" class="ghost">Run Calibrations</button>
+      <button hx-post="/api/session/calibration/reset" hx-trigger="click" class="ghost">Reset Calibrations</button>
+    </div>
+    <div class="subpanel" hx-get="/api/session/status" hx-trigger="load, every 10s" hx-target="this" hx-swap="outerHTML">
+      <div class="muted">Session status loading...</div>
+    </div>
+    <div class="subpanel" hx-get="/dashboard/partials/captures" hx-trigger="load, every 12s" hx-target="this" hx-swap="outerHTML">
+      <div class="muted">Captures loading...</div>
+    </div>
+    <div class="subpanel">
+      <div class="panel-title small">Retention</div>
+      <div hx-get="/api/retention/status" hx-trigger="load, every 30s" hx-target="#retention-summary" hx-swap="innerHTML">
+        <div id="retention-summary" class="muted">Checking retention...</div>
+      </div>
+      <button hx-post="/api/retention/prune" hx-vals='{"dry_run":true}' class="ghost">Dry-Run Prune</button>
+    </div>
+  </section>
+
+  <section x-show="tab==='live'" class="panel" hx-get="/dashboard/partials/status" hx-trigger="load, every 6s" hx-target="this" hx-swap="outerHTML">
+    <div class="panel-title">Live Status</div>
+    <div class="muted">Loading...</div>
+  </section>
+
+  <section x-show="tab==='reports'" class="panel placeholder">
+    <div class="panel-title">Reports</div>
+    <p class="muted">Submissions overview placeholder.</p>
+  </section>
+</div>
+{% endblock %}
