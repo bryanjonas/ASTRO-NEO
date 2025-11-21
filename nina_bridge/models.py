@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -22,6 +24,8 @@ class SequenceRequest(BaseModel):
     filter: str = Field(..., min_length=1, max_length=16)
     binning: int = Field(1, ge=1, le=4)
     exposure_seconds: float | None = Field(default=None, gt=0)
+    tracking_mode: str | None = Field(default=None, max_length=32)
+    focus_offset: float | None = Field(default=None)
 
 
 class OverrideUpdate(BaseModel):
@@ -34,6 +38,8 @@ class BridgeStatus(BaseModel):
     weather: dict | None = None
     nina_status: dict | None = None
     equipment_profile: dict | None = None
+    blockers: list[dict[str, Any]] = Field(default_factory=list)
+    ready: dict[str, bool] | None = None
 
 
 class DomeUpdate(BaseModel):
@@ -44,6 +50,7 @@ class SequencePlanRequest(BaseModel):
     vmag: float | None = Field(default=None, ge=0.0)
     urgency: float | None = Field(default=None, ge=0.0, le=1.0)
     profile: str | None = Field(default=None, max_length=64)
+    rate_arcsec_per_min: float | None = Field(default=None, ge=0.0)
 
 
 class SequencePlanResponse(BaseModel):
@@ -52,6 +59,8 @@ class SequencePlanResponse(BaseModel):
     binning: int
     count: int
     exposure_seconds: float
+    tracking_mode: str
+    focus_offset: float | None = None
 
 
 class ConnectionRequest(BaseModel):
