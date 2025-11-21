@@ -1,5 +1,6 @@
 """Database models."""
 
+from .capture import CaptureLog
 from .neocp import (
     NeoCandidate,
     NeoCPSnapshot,
@@ -12,6 +13,7 @@ from .site import SiteConfig
 from .weather import WeatherSnapshot
 
 __all__ = [
+    "CaptureLog",
     "SiteConfig",
     "NeoCandidate",
     "NeoCPSnapshot",

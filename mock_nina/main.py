@@ -106,6 +106,7 @@ async def _complete_exposure(
     duration: float,
     filter_name: str,
     binning: int,
+    filename: str | None = None,
     force_fail: bool = False,
 ) -> None:
     await asyncio.sleep(duration)
@@ -113,7 +114,7 @@ async def _complete_exposure(
     path = None
     status = "failed"
     if not fail:
-        path = await STATE.next_image_path()
+        path = Path(filename) if filename else await STATE.next_image_path()
         create_dummy_fits(path, duration, filter_name, binning)
         status = "complete"
     async with state_lock:
@@ -129,6 +130,7 @@ async def _perform_exposure(
     filter_name: str,
     binning: int,
     *,
+    filename: str | None = None,
     force_fail: bool = False,
     from_sequence: bool = False,
     background: bool = False,
@@ -137,7 +139,7 @@ async def _perform_exposure(
 
     async def runner() -> None:
         try:
-            await _complete_exposure(duration, filter_name, binning, force_fail)
+            await _complete_exposure(duration, filter_name, binning, filename=filename, force_fail=force_fail)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Exposure error: %s", exc)
             async with state_lock:
@@ -228,7 +230,7 @@ async def camera_start_exposure(
         raise HTTPException(status_code=409, detail="telescope_not_ready") from None
 
     async def runner() -> None:
-        await _complete_exposure(duration, payload.filter, payload.binning, force_fail)
+        await _complete_exposure(duration, payload.filter, payload.binning, filename=payload.filename, force_fail=force_fail)
 
     background_tasks.add_task(runner)
     finish_time = start_time + timedelta(seconds=duration)

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List
 
 from app.services.calibration import CalibrationPlan, nightly_calibration_plan, run_calibration_plan
+from app.services.captures import record_capture
 
 
 @dataclass
@@ -105,6 +106,11 @@ class SessionState:
             self.start()
         assert self.current  # for type checkers
         self.current.captures.append(entry)
+        try:
+            record_capture(entry)
+        except Exception:
+            # Persistence errors should not block capture logging.
+            pass
 
     def add_captures(self, entries: List[dict]) -> None:
         for entry in entries:
