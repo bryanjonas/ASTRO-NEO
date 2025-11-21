@@ -284,6 +284,18 @@ async def sequence_status() -> SequenceStatusResponse:
     return SequenceStatusResponse(**STATE.sequence.model_dump())
 
 
+@app.post(f"{API_PREFIX}/sequence/abort")
+async def sequence_abort() -> dict[str, Any]:
+    async with state_lock:
+        if not STATE.sequence.is_running:
+            return {"status": "idle"}
+        STATE.sequence.is_running = False
+        STATE.sequence.current_index = 0
+        STATE.sequence.name = None
+    logger.info("Sequence aborted")
+    return {"status": "aborted"}
+
+
 @app.post(f"{API_PREFIX}/focuser/move")
 async def focuser_move(payload: FocuserMoveRequest) -> dict[str, Any]:
     async with state_lock:

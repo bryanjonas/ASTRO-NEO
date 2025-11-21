@@ -9,6 +9,8 @@ from dataclasses import dataclass
 class BridgeState:
     manual_override: bool = False
     dome_closed: bool = False
+    sequence_running: bool = False
+    last_sequence_name: str | None = None
 
 
 STATE = BridgeState()
