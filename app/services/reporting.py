@@ -39,6 +39,7 @@ def generate_ades(measurements: Iterable[Measurement]) -> str:
       <ra>{m.ra_deg:.6f}</ra>
       <dec>{m.dec_deg:.6f}</dec>
       {"<mag>{:.2f}</mag>".format(m.magnitude) if m.magnitude is not None else ""}
+      {"<magSigma>{:.3f}</magSigma>".format(m.mag_sigma) if m.mag_sigma is not None else ""}
       {"<band>{}</band>".format(m.band) if m.band else ""}
       {"<astErr>{:.2f}</astErr>".format(m.ra_uncert_arcsec or m.dec_uncert_arcsec) if (m.ra_uncert_arcsec or m.dec_uncert_arcsec) else ""}
       {"<astCat>{}</astCat>".format(m.software) if m.software else ""}
