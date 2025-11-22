@@ -11,6 +11,7 @@ from app.api.deps import get_db
 from app.models import AstrometricSolution, Measurement
 from app.services.astrometry import AstrometryService
 from app.services.reporting import archive_report
+from app.services.submission import SubmissionService
 
 router = APIRouter(prefix="/astrometry", tags=["astrometry"])
 
@@ -54,3 +55,20 @@ def generate_report(
     measurements = session.exec(select(Measurement).where(Measurement.id.in_(measurement_ids))).all()
     log = archive_report(measurements, format=format, session=session)
     return {"submission_log_id": log.id, "report_path": log.report_path, "status": log.status}
+
+
+@router.post("/submit")
+def submit_report(
+    measurement_ids: list[int],
+    format: str = "ADES",
+    session: Session = Depends(get_db),
+) -> dict:
+    measurements = session.exec(select(Measurement).where(Measurement.id.in_(measurement_ids))).all()
+    svc = SubmissionService(session=session)
+    log = svc.submit(measurements, format=format)
+    return {
+        "submission_log_id": log.id,
+        "status": log.status,
+        "report_path": log.report_path,
+        "response": log.response,
+    }
