@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.api.deps import get_db
-from app.models import AstrometricSolution
+from app.models import AstrometricSolution, Measurement
 from app.services.astrometry import AstrometryService
+from app.services.reporting import archive_report
 
 router = APIRouter(prefix="/astrometry", tags=["astrometry"])
 
@@ -42,3 +43,14 @@ def list_solutions(
     if success is not None:
         stmt = stmt.where(AstrometricSolution.success == success)
     return session.exec(stmt).all()
+
+
+@router.post("/report")
+def generate_report(
+    measurement_ids: list[int],
+    format: str = "ADES",
+    session: Session = Depends(get_db),
+) -> dict:
+    measurements = session.exec(select(Measurement).where(Measurement.id.in_(measurement_ids))).all()
+    log = archive_report(measurements, format=format, session=session)
+    return {"submission_log_id": log.id, "report_path": log.report_path, "status": log.status}

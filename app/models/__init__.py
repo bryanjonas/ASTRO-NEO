@@ -3,6 +3,8 @@
 from .capture import CaptureLog
 from .astrometry import AstrometricSolution
 from .report import Measurement
+from .submission import SubmissionLog
+from .report import Measurement
 from .neocp import (
     NeoCandidate,
     NeoCPSnapshot,
@@ -18,6 +20,7 @@ __all__ = [
     "CaptureLog",
     "AstrometricSolution",
     "Measurement",
+    "SubmissionLog",
     "SiteConfig",
     "NeoCandidate",
     "NeoCPSnapshot",

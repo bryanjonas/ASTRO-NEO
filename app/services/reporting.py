@@ -1,12 +1,16 @@
-"""ADES/OBS80 report generation from measurements."""
+"""ADES/OBS80 report generation from measurements and submission logging."""
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 from typing import Iterable
 
-from app.models import Measurement
+from sqlmodel import Session
+
+from app.db.session import get_session
+from app.models import Measurement, SubmissionLog
 
 
 def validate_measurement(meas: Measurement) -> list[str]:
@@ -69,6 +73,39 @@ def generate_obs80(measurements: Iterable[Measurement]) -> str:
 def mark_reviewed(measurements: Iterable[Measurement]) -> None:
     for m in measurements:
         m.reviewed = True
+
+
+def archive_report(
+    measurements: Iterable[Measurement],
+    format: str = "ADES",
+    session: Session | None = None,
+    channel: str = "api",
+    notes: str | None = None,
+) -> SubmissionLog:
+    body = generate_ades(measurements) if format.upper() == "ADES" else generate_obs80(measurements)
+    target_path = Path("/data/reports") / f"report_{dt.datetime.utcnow().strftime('%Y%m%dT%H%M%S')}.{format.lower()}"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(body, encoding="utf-8")
+    ids = [m.id for m in measurements if m.id]
+
+    def _persist(db: Session) -> SubmissionLog:
+        log = SubmissionLog(
+            channel=channel,
+            status="pending",
+            response=None,
+            report_path=str(target_path),
+            measurement_ids=json.dumps(ids),
+            notes=notes,
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        return log
+
+    if session:
+        return _persist(session)
+    with get_session() as db:
+        return _persist(db)
 
 
 __all__ = ["generate_ades", "generate_obs80", "validate_measurement", "mark_reviewed"]

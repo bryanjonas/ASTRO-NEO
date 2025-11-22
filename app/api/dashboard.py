@@ -54,12 +54,18 @@ def solutions_partial(session: Session = Depends(get_db)) -> Any:
         "solutions": [
             {
                 "id": row.id,
+                "capture_id": row.capture_id,
+                "measurement_id": getattr(row, "measurement_id", None),
                 "path": row.path,
                 "ra_deg": row.ra_deg,
                 "dec_deg": row.dec_deg,
                 "uncertainty_arcsec": row.uncertainty_arcsec,
+                "snr": getattr(row, "snr", None),
+                "mag_inst": getattr(row, "mag_inst", None),
+                "flags": row.flags,
                 "solved_at": row.solved_at,
                 "success": row.success,
+                "target": row.target,
             }
             for row in rows
         ]

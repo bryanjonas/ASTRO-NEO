@@ -14,7 +14,7 @@ from photutils.detection import DAOStarFinder
 from sqlmodel import Session
 
 from app.db.session import get_session
-from app.models import AstrometricSolution, CaptureLog
+from app.models import AstrometricSolution, CaptureLog, Measurement
 from app.services.solver import SolveError, solve_fits
 
 
@@ -73,6 +73,8 @@ class AstrometryService:
                     success=not flags,
                     solver_info=json.dumps(result),
                 )
+                if capture:
+                    self._persist_measurement(db, capture, fields, quality, flags)
             except SolveError as exc:
                 duration = time.perf_counter() - started
                 model = AstrometricSolution(
@@ -144,6 +146,40 @@ class AstrometryService:
             elif snr < 5.0:
                 flags.append("low_snr")
         return flags
+
+    def _persist_measurement(
+        self,
+        db: Session,
+        capture: CaptureLog,
+        fields: dict[str, Any],
+        quality: dict[str, Any] | None,
+        flags: list[str],
+    ) -> Measurement:
+        station_code = None
+        observer = None
+        software = "ASTRO-NEO"
+        meas = Measurement(
+            capture_id=capture.id,
+            target=capture.target or "unknown",
+            obs_time=capture.started_at,
+            ra_deg=fields.get("ra_deg") or 0.0,
+            dec_deg=fields.get("dec_deg") or 0.0,
+            ra_uncert_arcsec=fields.get("uncertainty_arcsec"),
+            dec_uncert_arcsec=fields.get("uncertainty_arcsec"),
+            magnitude=quality.get("mag_inst") if quality else None,
+            band=None,
+            exposure_seconds=None,
+            tracking_mode=None,
+            station_code=station_code,
+            observer=observer,
+            software=software,
+            flags=json.dumps(flags) if flags else None,
+            reviewed=False,
+        )
+        db.add(meas)
+        db.commit()
+        db.refresh(meas)
+        return meas
 
 
 def _safe_float(value: Any) -> float | None:
