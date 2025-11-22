@@ -88,11 +88,12 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 ## Phase 5 — Astrometric Reduction
 ## Phase 5 — Astrometric Reduction
 
-- [ ] Containerize the astrometry workflow with astrometry.net's `solve-field` engine (preferred because it is Linux-native, scriptable, blind-solve capable, and battle-tested). Preload index sets `4200-4219` (covers ~5° down to ~2' scales, matching our expected optics) via mounted volumes. Target CPU-only constraints—no usable GPU is available—so enable AVX/SSE optimizations in the container build but avoid CUDA/OpenCL dependencies.
-- [ ] Automate plate solving, centroid measurement, photometry, and residual checks; reject measurements failing SNR or residual thresholds.
-- [ ] Persist measurement outputs (RA/Dec, uncertainties, magnitude) per image in the database and link them to the originating target/session.
+- [x] Containerize the astrometry workflow with astrometry.net's `solve-field` engine (CPU-only) and mount index files; `astrometry-worker` service added with a slim base and `/data/astrometry-indexes` mount. Keep index set trimmed for Intel N150/16GB constraints.
+- [x] Automate plate solving via API: `/api/astrometry/solve` wraps `solve-field`, accepts a capture ID or FITS path with optional hints, and returns persisted results.
+- [ ] Add centroid measurement, photometry, and residual checks; reject measurements failing SNR or residual thresholds.
+- [x] Persist solution outputs (RA/Dec, orientation, pixel scale, uncertainty, solver info) per image in `astrometricsolution`, linked to capture logs when available.
 - [ ] Expose status updates and logs back to the dashboard for QA.
-- [ ] Document any manual review steps and plan for future automation.
+- [ ] Document manual review steps and plan for future automation.
 
 ---
 
