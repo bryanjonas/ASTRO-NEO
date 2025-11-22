@@ -18,6 +18,7 @@ class Measurement(SQLModel, table=True):
     ra_uncert_arcsec: Optional[float] = None
     dec_uncert_arcsec: Optional[float] = None
     magnitude: Optional[float] = None
+    mag_sigma: Optional[float] = None
     band: Optional[str] = Field(default=None, max_length=8)
     exposure_seconds: Optional[float] = None
     tracking_mode: Optional[str] = Field(default=None, max_length=32)

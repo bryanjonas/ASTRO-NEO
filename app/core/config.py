@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     weather_max_cloud_cover_pct: float = 95.0
     guiding_max_rms_arcsec: float = 2.5
     iq_max_fwhm_arcsec: float = 4.0
+    station_code: str = "XXX"
+    observer_initials: str = "XX"
+    software_id: str = "ASTRO-NEO/0.1.0"
+    default_band: str = "R"
+    mag_uncert_floor: float = 0.05
     nina_bridge_url: str = "http://nina-bridge:8001/api"
     nina_bridge_timeout: float = 15.0
     data_root: str = "/data"

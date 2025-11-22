@@ -13,6 +13,7 @@ from astropy.stats import sigma_clipped_stats
 from photutils.detection import DAOStarFinder
 from sqlmodel import Session
 
+from app.core.config import settings
 from app.db.session import get_session
 from app.models import AstrometricSolution, CaptureLog, Measurement
 from app.services.solver import SolveError, solve_fits
@@ -155,9 +156,17 @@ class AstrometryService:
         quality: dict[str, Any] | None,
         flags: list[str],
     ) -> Measurement:
-        station_code = None
-        observer = None
-        software = "ASTRO-NEO"
+        station_code = settings.station_code
+        observer = settings.observer_initials
+        software = settings.software_id
+        band = settings.default_band or "R"
+        mag = quality.get("mag_inst") if quality else None
+        snr = quality.get("snr") if quality else None
+        mag_sigma = None
+        if snr:
+            mag_sigma = (1.0857 / snr) if snr > 0 else None
+            if settings.mag_uncert_floor:
+                mag_sigma = (mag_sigma**2 + settings.mag_uncert_floor**2) ** 0.5 if mag_sigma else settings.mag_uncert_floor
         meas = Measurement(
             capture_id=capture.id,
             target=capture.target or "unknown",
@@ -166,8 +175,9 @@ class AstrometryService:
             dec_deg=fields.get("dec_deg") or 0.0,
             ra_uncert_arcsec=fields.get("uncertainty_arcsec"),
             dec_uncert_arcsec=fields.get("uncertainty_arcsec"),
-            magnitude=quality.get("mag_inst") if quality else None,
-            band=None,
+            magnitude=mag,
+            mag_sigma=mag_sigma,
+            band=band,
             exposure_seconds=None,
             tracking_mode=None,
             station_code=station_code,
