@@ -6,8 +6,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0009_add_astrometry_quality_fields"
-down_revision = "0008_merge_astrometry_weather"
+revision = "0009_astrometry_q"
+down_revision = "0007_add_equipment_profile"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 

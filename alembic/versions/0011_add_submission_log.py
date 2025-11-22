@@ -6,8 +6,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0011_add_submission_log"
-down_revision = "0010_add_measurement_table"
+revision = "0011_submission_log"
+down_revision = "0010_measurements"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 
