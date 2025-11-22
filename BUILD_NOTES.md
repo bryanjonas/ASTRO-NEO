@@ -98,12 +98,11 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 ---
 
 ## Phase 6 — MPC Report Assembly
-
-- Build a report generator that emits ADES XML (standardize on ADES 2022 everywhere) and, when needed, legacy 80-column text using station codes stored in config. Use one serialization pipeline so the same payload can be attached to the onboarding email (station `XXX`) and later uploaded or queried via the MPC Observations API once the permanent code is issued.
-- Validate each report using MPC's checker (offline copies where possible) before marking it ready.
-- Include metadata: observer initials, software identifiers, photometric band, and measurement uncertainties.
-- Archive generated reports with versioning and tie them to the submission log.
-- Provide a command/API to mark reports as reviewed and ready to send.
+- [x] Build a report generator that emits ADES XML (standardize on ADES 2022 everywhere) and, when needed, legacy 80-column text using station codes stored in config. Use one serialization pipeline so the same payload can be attached to the onboarding email (station `XXX`) and later uploaded or queried via the MPC Observations API once the permanent code is issued.
+- [x] Validate each report using MPC's checker (offline copies where possible) before marking it ready. (Validation flags stored on measurements; XML/text generation skips invalid rows.)
+- [x] Include metadata: observer initials, software identifiers, photometric band, and measurement uncertainties.
+- [ ] Archive generated reports with versioning and tie them to the submission log.
+- [x] Provide a command/API to mark reports as reviewed and ready to send (measurements have a `reviewed` flag to gate inclusion).
 
 ---
 
