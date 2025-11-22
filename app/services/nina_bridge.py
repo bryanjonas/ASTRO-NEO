@@ -81,5 +81,11 @@ class NinaBridgeService:
     def start_sequence(self, sequence: dict[str, Any]) -> Any:
         return self._request("POST", "/sequence/start", sequence)
 
+    def set_tracking(self, mode: str) -> Any:
+        return self._request("POST", "/telescope/tracking", {"mode": mode})
+
+    def get_tracking(self) -> Any:
+        return self._request("GET", "/telescope/tracking")
+
 
 __all__ = ["NinaBridgeService"]

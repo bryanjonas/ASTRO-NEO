@@ -29,8 +29,20 @@ DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
 )
 
 
+def _coerce_preset(data: ExposurePreset | dict) -> ExposurePreset:
+    if isinstance(data, ExposurePreset):
+        return data
+    return ExposurePreset(**data)
+
+
 def list_presets(profile: EquipmentProfile | None = None) -> Iterable[ExposurePreset]:
-    """Return presets; profile hook reserved for future per-profile overrides."""
+    """Return presets, honoring any overrides on the active equipment profile."""
+    if profile and getattr(profile, "presets", None):
+        try:
+            return [_coerce_preset(item) for item in profile.presets]
+        except Exception:
+            # If profile presets are invalid, fall back to defaults
+            return DEFAULT_PRESETS
     return DEFAULT_PRESETS
 
 

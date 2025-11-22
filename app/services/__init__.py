@@ -11,6 +11,7 @@ from .equipment import (
 )
 from .nina_bridge import NinaBridgeService
 from .observability import ObservabilityService
+from .tracking import TrackingService
 from .weather import WeatherService, WeatherSummary
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "NinaBridgeService",
     "AutomationService",
     "AutomationPlan",
+    "TrackingService",
 ]
