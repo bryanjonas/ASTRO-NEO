@@ -92,7 +92,7 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 - [x] Automate plate solving via API: `/api/astrometry/solve` wraps `solve-field`, accepts a capture ID or FITS path with optional hints, and returns persisted results.
 - [x] Add centroid/photometry/residual validation: solver now records RMS/uncertainty and flags failures; SNR/photometry hooks are stubbed for extension.
 - [x] Persist solution outputs (RA/Dec, orientation, pixel scale, uncertainty, solver info) per image in `astrometricsolution`, linked to capture logs when available.
-- [x] Expose status updates and logs back to the dashboard for QA (alerts via notifications; add solves to dashboard bundles).
+- [x] Expose status updates and logs back to the dashboard for QA (recent solves panel under Exposures tab with success/fail badges and RMS).
 - [x] Document manual review steps: dashboard shows recent solves and alerts; failed solves can be rerun with hints; RMS/uncertainty fields highlight low-confidence solutions.
 
 ---

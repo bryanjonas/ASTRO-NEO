@@ -44,6 +44,9 @@
     <div class="subpanel" hx-get="/dashboard/partials/captures" hx-trigger="revealed, every 12s" hx-target="this" hx-swap="innerHTML">
       <div class="muted">Captures loading...</div>
     </div>
+    <div class="subpanel" hx-get="/dashboard/partials/solutions" hx-trigger="revealed, every 15s" hx-target="this" hx-swap="innerHTML">
+      <div class="muted">Astrometry solves loading...</div>
+    </div>
     <div class="subpanel">
       <div class="panel-title small">Retention</div>
       <div hx-get="/api/retention/status" hx-trigger="revealed, every 30s" hx-target="#retention-summary" hx-swap="innerHTML">
