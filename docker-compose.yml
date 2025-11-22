@@ -53,6 +53,15 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+  astrometry-worker:
+    build:
+      context: .
+      dockerfile: docker/astrometry.Dockerfile
+    pull_policy: build
+    volumes:
+      - ./data/astrometry-indexes:/data/indexes:ro
+      - ./data/fits:/data/fits:ro
+    command: ["sleep", "infinity"]
   nina-bridge:
     build:
       context: .
