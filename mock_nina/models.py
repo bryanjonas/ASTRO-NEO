@@ -35,6 +35,7 @@ class SequenceStartRequest(BaseModel):
     exposure_seconds: Optional[float] = None
     filter: str
     binning: int = 1
+    tracking_mode: Optional[str] = None
 
 
 class SequenceStatusResponse(BaseModel):
@@ -55,6 +56,10 @@ class ParkRequest(BaseModel):
 class FocuserMoveRequest(BaseModel):
     position: int = Field(..., ge=0, le=100000)
     speed: Optional[int] = Field(default=None, ge=1, le=10)
+
+
+class TrackingUpdate(BaseModel):
+    mode: str
 
 
 class StatusResponse(BaseModel):
