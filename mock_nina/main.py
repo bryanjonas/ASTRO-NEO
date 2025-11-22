@@ -23,6 +23,7 @@ from .models import (
     SequenceStatusResponse,
     SlewRequest,
     StatusResponse,
+    TrackingUpdate,
 )
 from .state import STATE, TelescopeState
 
@@ -170,6 +171,19 @@ async def telescope_connect(payload: ConnectionToggle) -> dict[str, Any]:
             STATE.telescope.is_parked = True
     logger.info("Telescope connection set to %s", payload.connect)
     return {"connected": STATE.telescope.is_connected, "parked": STATE.telescope.is_parked}
+
+
+@app.get(f"{API_PREFIX}/telescope/tracking")
+async def telescope_tracking_status() -> dict[str, Any]:
+    return {"mode": STATE.telescope.tracking_mode}
+
+
+@app.post(f"{API_PREFIX}/telescope/tracking")
+async def telescope_tracking_set(payload: TrackingUpdate) -> dict[str, Any]:
+    async with state_lock:
+        STATE.telescope.tracking_mode = payload.mode
+    logger.info("Tracking mode set to %s", payload.mode)
+    return {"mode": STATE.telescope.tracking_mode}
 
 
 @app.post(f"{API_PREFIX}/telescope/park")

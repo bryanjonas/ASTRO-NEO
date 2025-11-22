@@ -18,6 +18,7 @@ class TelescopeState(BaseModel):
     is_slewing: bool = False
     is_connected: bool = True
     is_parked: bool = False
+    tracking_mode: str = "sidereal"
 
 
 class CameraState(BaseModel):

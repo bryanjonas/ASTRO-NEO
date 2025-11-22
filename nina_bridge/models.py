@@ -74,6 +74,10 @@ class TrackingMode(str, Enum):
     solar = "solar"
 
 
+class TrackingPayload(BaseModel):
+    mode: TrackingMode
+
+
 class ConnectionRequest(BaseModel):
     connect: bool
 

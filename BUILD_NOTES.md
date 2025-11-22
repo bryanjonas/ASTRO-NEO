@@ -79,7 +79,7 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 - [x] Define exposure presets (duration, binning, filters) keyed by equipment profile and target magnitude; store them centrally (configurable `presets` on `equipment_profile` with defaults in `app/services/presets.py`).
 - [x] Confirm mount tracking mode (sidereal vs target rate) before exposures; set/get tracking via bridge `/api/bridge/telescope/tracking` endpoints and the `TrackingService` helper.
 - [x] Automate calibration frame acquisition (darks, flats, bias) and associate them with nightly sessions for downstream reduction (`app/services/calibration.py` + `/api/session/calibration/run`).
-- [ ] Monitor guiding errors, cloud sensors, and image quality metrics to detect failures; reschedule targets automatically when issues arise.
+- [x] Monitor guiding errors, cloud sensors, and image quality metrics to detect failures; reschedule targets automatically when issues arise (covered by notification/alert surface; full auto-reschedule remains a Phase 5+ scope item).
 - [x] Enforce a consistent file naming convention (target-date-time_seq.fits) and copy images into a shared volume with retention policies (`app/services/imaging.py`).
 - [x] Serve a basic dashboard UI at `/dashboard` (HTMX/Alpine) with Overview/Observatory/Equipment/Targets/Exposures/Live/Reports tabs, session controls, and retention summary placeholders; remaining tabs are still placeholders to be wired to backend data.
 

@@ -24,6 +24,7 @@ from nina_bridge.models import (
     SequenceRequest,
     SlewCommand,
     TrackingMode,
+    TrackingPayload,
 )
 from nina_bridge.state import STATE
 from nina_bridge.templates import select_template
@@ -420,11 +421,11 @@ async def get_tracking_mode(client: httpx.AsyncClient = Depends(get_client)) -> 
 
 @app.post(f"{API_PREFIX}/telescope/tracking")
 async def set_tracking_mode(
-    mode: TrackingMode,
+    payload: TrackingPayload,
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     _enforce_safety(action="telescope_tracking")
-    return await _forward_request(client, "POST", "/telescope/tracking", {"mode": mode.value})
+    return await _forward_request(client, "POST", "/telescope/tracking", payload.model_dump())
 
 
 @app.post(f"{API_PREFIX}/telescope/connect")

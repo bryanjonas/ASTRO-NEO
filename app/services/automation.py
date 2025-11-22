@@ -119,6 +119,7 @@ class AutomationService:
             "binning": plan.binning,
             "exposure_seconds": plan.exposure_seconds,
             "target": plan.target,
+            "tracking_mode": "sidereal",
         }
         TASK_QUEUE.submit(
             Task(
