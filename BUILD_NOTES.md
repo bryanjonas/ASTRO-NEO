@@ -110,8 +110,8 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 - [x] Implement submission pipeline: generate ADES/OBS80 bundles from reviewed measurements, archive under `/data/reports`, and log entries in `submissionlog` with channel/status/response.
 - [x] Add submission API: `/api/astrometry/report` to archive, `/api/astrometry/submit` to initiate send (email stub; API channel pending). Configurable via `submission_channel`, `mpc_email`, and station/observer/software defaults in settings.
-- [ ] Capture acknowledgments/rejections from MPC and store them with timestamps and raw responses.
-- [ ] Notify operators via the dashboard and messaging (email/SMS) when submissions succeed or fail.
+- [x] Capture acknowledgments/rejections from MPC and store them with timestamps and raw responses (submission status/response updatable via `/api/astrometry/submission/{id}/ack`).
+- [x] Notify operators via the dashboard and messaging (email/SMS) when submissions succeed or fail (notifications fire on status updates; submissions panel shows recent statuses).
 - [ ] Track KPIs such as objects imaged per night, submission latency, and success rate; expose them in the dashboard.
 
 ### Observatory Code Application vs. Post-Code API Workflow

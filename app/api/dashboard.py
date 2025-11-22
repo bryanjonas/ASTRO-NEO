@@ -72,4 +72,24 @@ def solutions_partial(session: Session = Depends(get_db)) -> Any:
     }
 
 
+@router.get("/partials/submissions")
+def submissions_partial(session: Session = Depends(get_db)) -> Any:
+    from app.models import SubmissionLog
+
+    stmt = select(SubmissionLog).order_by(SubmissionLog.created_at.desc()).limit(10)
+    rows = session.exec(stmt).all()
+    return {
+        "submissions": [
+            {
+                "id": row.id,
+                "status": row.status,
+                "channel": row.channel,
+                "created_at": row.created_at,
+                "report_path": row.report_path,
+            }
+            for row in rows
+        ]
+    }
+
+
 __all__ = ["router"]

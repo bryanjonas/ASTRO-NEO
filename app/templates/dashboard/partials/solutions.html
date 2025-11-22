@@ -23,3 +23,10 @@
     <div class="muted">No solves yet.</div>
   {% endif %}
 </section>
+
+<section class="panel">
+  <div class="panel-title">Submissions</div>
+  <div hx-get="/dashboard/partials/submissions" hx-trigger="revealed, every 20s" hx-target="this" hx-swap="outerHTML">
+    <div class="muted">Loading submissions...</div>
+  </div>
+</section>

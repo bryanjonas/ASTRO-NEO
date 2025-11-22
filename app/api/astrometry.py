@@ -72,3 +72,10 @@ def submit_report(
         "report_path": log.report_path,
         "response": log.response,
     }
+
+
+@router.post("/submission/{submission_id}/ack")
+def submission_ack(submission_id: int, status: str = "acked", response: str | None = None) -> dict:
+    svc = SubmissionService()
+    log = svc.update_status(submission_id, status=status, response=response)
+    return {"id": log.id, "status": log.status, "response": log.response}
