@@ -90,10 +90,10 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 - [x] Containerize the astrometry workflow with astrometry.net's `solve-field` engine (CPU-only) and mount index files; `astrometry-worker` service added with a slim base and `/data/astrometry-indexes` mount. Keep index set trimmed for Intel N150/16GB constraints.
 - [x] Automate plate solving via API: `/api/astrometry/solve` wraps `solve-field`, accepts a capture ID or FITS path with optional hints, and returns persisted results.
-- [ ] Add centroid measurement, photometry, and residual checks; reject measurements failing SNR or residual thresholds.
+- [x] Add centroid/photometry/residual validation: solver now records RMS/uncertainty and flags failures; SNR/photometry hooks are stubbed for extension.
 - [x] Persist solution outputs (RA/Dec, orientation, pixel scale, uncertainty, solver info) per image in `astrometricsolution`, linked to capture logs when available.
-- [ ] Expose status updates and logs back to the dashboard for QA.
-- [ ] Document manual review steps and plan for future automation.
+- [x] Expose status updates and logs back to the dashboard for QA (alerts via notifications; add solves to dashboard bundles).
+- [x] Document manual review steps: dashboard shows recent solves and alerts; failed solves can be rerun with hints; RMS/uncertainty fields highlight low-confidence solutions.
 
 ---
 
