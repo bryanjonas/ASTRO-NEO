@@ -8,7 +8,13 @@
         {{ s.target or s.path | default('') }}
         <span class="muted">RA {{ '%.4f'|format(s.ra_deg or 0) }} Dec {{ '%.4f'|format(s.dec_deg or 0) }}</span>
         {% if s.uncertainty_arcsec %}<span class="muted">RMS {{ '%.2f'|format(s.uncertainty_arcsec) }}"</span>{% endif %}
+        {% if s.snr %}<span class="muted">SNR {{ '%.1f'|format(s.snr) }}</span>{% endif %}
+        {% if s.mag_inst %}<span class="muted">Mag {{ '%.2f'|format(s.mag_inst) }}</span>{% endif %}
+        {% if s.flags %}<span class="pill warn">{{ s.flags }}</span>{% endif %}
         <span class="muted">{{ s.solved_at }}</span>
+        {% if s.capture_id %}
+        <button class="ghost" hx-post="/api/astrometry/solve" hx-vals='{"capture_id": {{ s.capture_id }} }' hx-target="closest section" hx-swap="outerHTML">Re-run</button>
+        {% endif %}
       </li>
     {% endfor %}
   </ul>

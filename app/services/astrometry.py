@@ -7,6 +7,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from astropy.io import fits
+from astropy.stats import sigma_clipped_stats
+from photutils.detection import DAOStarFinder
 from sqlmodel import Session
 
 from app.db.session import get_session
@@ -51,22 +55,29 @@ class AstrometryService:
                 )
                 duration = time.perf_counter() - started
                 fields = self._extract_fields(result)
+                quality = self._run_photometry(solve_path)
+                flags = self._collect_flags(fields, quality)
                 model = AstrometricSolution(
                     capture_id=capture.id if capture else None,
+                    target=capture.target if capture else None,
                     path=str(solve_path),
                     ra_deg=fields.get("ra_deg"),
                     dec_deg=fields.get("dec_deg"),
                     orientation_deg=fields.get("orientation_deg"),
                     pixel_scale_arcsec=fields.get("pixel_scale_arcsec"),
                     uncertainty_arcsec=fields.get("uncertainty_arcsec"),
+                    snr=quality.get("snr") if quality else None,
+                    mag_inst=quality.get("mag_inst") if quality else None,
+                    flags=json.dumps(flags) if flags else None,
                     duration_seconds=duration,
-                    success=True,
+                    success=not flags,
                     solver_info=json.dumps(result),
                 )
             except SolveError as exc:
                 duration = time.perf_counter() - started
                 model = AstrometricSolution(
                     capture_id=capture.id if capture else None,
+                    target=capture.target if capture else None,
                     path=str(solve_path),
                     success=False,
                     duration_seconds=duration,
@@ -94,6 +105,45 @@ class AstrometryService:
             "pixel_scale_arcsec": _safe_float(solution.get("pixscale")),
             "uncertainty_arcsec": _safe_float(solution.get("rms")),
         }
+
+    def _run_photometry(self, path: Path) -> dict[str, float] | None:
+        try:
+            data = fits.getdata(path)
+        except Exception:
+            return None
+        if data is None:
+            return None
+        data = np.asarray(data, dtype=float)
+        mean, median, std = sigma_clipped_stats(data, sigma=3.0)
+        threshold = median + (5.0 * std)
+        try:
+            finder = DAOStarFinder(fwhm=4.0, threshold=threshold - median)
+            sources = finder(data - median)
+        except Exception:
+            return None
+        if sources is None or len(sources) == 0:
+            return None
+        # Take the brightest source as proxy
+        brightest = sources[np.argmax(sources["flux"])]
+        snr = float(brightest["peak"] / std) if std else None
+        flux = float(brightest["flux"])
+        mag_inst = -2.5 * np.log10(flux) if flux > 0 else None
+        return {"snr": snr, "mag_inst": mag_inst}
+
+    def _collect_flags(self, fields: dict[str, Any], quality: dict[str, Any] | None) -> list[str]:
+        flags: list[str] = []
+        rms = fields.get("uncertainty_arcsec")
+        if rms is None:
+            flags.append("missing_rms")
+        elif rms > 5.0:
+            flags.append("high_residual")
+        if quality:
+            snr = quality.get("snr")
+            if snr is None:
+                flags.append("missing_snr")
+            elif snr < 5.0:
+                flags.append("low_snr")
+        return flags
 
 
 def _safe_float(value: Any) -> float | None:

@@ -11,12 +11,16 @@ from sqlmodel import Field, SQLModel
 class AstrometricSolution(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     capture_id: Optional[int] = Field(default=None, foreign_key="capturelog.id", index=True)
+    target: Optional[str] = Field(default=None, max_length=128, index=True)
     path: str = Field(max_length=512, index=True)
     ra_deg: Optional[float] = Field(default=None, index=True)
     dec_deg: Optional[float] = Field(default=None, index=True)
     orientation_deg: Optional[float] = None
     pixel_scale_arcsec: Optional[float] = None
     uncertainty_arcsec: Optional[float] = None
+    snr: Optional[float] = Field(default=None, description="Peak SNR from photometry")
+    mag_inst: Optional[float] = Field(default=None, description="Instrumental magnitude estimate")
+    flags: Optional[str] = Field(default=None, description="JSON list of quality flags")
     success: bool = Field(default=False, index=True)
     solver_info: Optional[str] = Field(default=None, description="JSON blob of solver output")
     solved_at: datetime = Field(default_factory=datetime.utcnow, index=True)
