@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: secrets/.*\.env\.enc$
+    keys:
+      - age1examplekey1234567890examplekey1234567890examplekey1234567890

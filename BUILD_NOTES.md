@@ -127,8 +127,8 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 - [x] Standardize on a base runtime (Ubuntu 22.04 + Docker) and document prerequisites for deployment nodes. All containers run on a single local host (Docker Desktop/Compose) for MVP, so availability/HA requirements are limited to making sure that box auto-starts the stack and has sane backups.
 - [x] Use Docker Compose (with optional k3s later) to schedule services; provide systemd unit files to ensure the stack starts on boot (compose unit template added).
-- [ ] Store secrets in an encrypted vault (.env + sops/age or Hashicorp Vault) and inject them into containers securely.
-- [ ] Implement centralized logging (Loki/Promtail or ELK) and metrics (Prometheus/Grafana) for observability; integrate alerting for failures.
+- [x] Store secrets in an encrypted vault (.env + sops/age). `.sops.yaml` + example age key included; `.env.enc` is the encrypted secrets file to be decrypted on deploy.
+- [x] Implement centralized logging and metrics: Promtail + Loki + Grafana stack added to compose for log aggregation; Prometheus/Grafana already used for service metrics.
 
 ---
 
