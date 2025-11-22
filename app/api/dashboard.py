@@ -12,6 +12,7 @@ from app.services.imaging import retention_candidates
 from app.services.notifications import NOTIFICATIONS
 from app.api.deps import get_db
 from app.models import AstrometricSolution
+from app.services.kpis import KPIService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -70,6 +71,13 @@ def solutions_partial(session: Session = Depends(get_db)) -> Any:
             for row in rows
         ]
     }
+
+
+@router.get("/partials/kpis")
+def kpis_partial() -> Any:
+    svc = KPIService()
+    data = svc.daily_counts()
+    return {"kpis": data}
 
 
 @router.get("/partials/submissions")

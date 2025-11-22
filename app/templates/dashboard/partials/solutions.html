@@ -30,3 +30,10 @@
     <div class="muted">Loading submissions...</div>
   </div>
 </section>
+
+<section class="panel">
+  <div class="panel-title">KPIs</div>
+  <div hx-get="/dashboard/partials/kpis" hx-trigger="revealed, every 25s" hx-target="this" hx-swap="outerHTML">
+    <div class="muted">Loading KPIs...</div>
+  </div>
+</section>

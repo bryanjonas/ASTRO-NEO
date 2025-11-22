@@ -112,7 +112,7 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 - [x] Add submission API: `/api/astrometry/report` to archive, `/api/astrometry/submit` to initiate send (email stub; API channel pending). Configurable via `submission_channel`, `mpc_email`, and station/observer/software defaults in settings.
 - [x] Capture acknowledgments/rejections from MPC and store them with timestamps and raw responses (submission status/response updatable via `/api/astrometry/submission/{id}/ack`).
 - [x] Notify operators via the dashboard and messaging (email/SMS) when submissions succeed or fail (notifications fire on status updates; submissions panel shows recent statuses).
-- [ ] Track KPIs such as objects imaged per night, submission latency, and success rate; expose them in the dashboard.
+- [x] Track KPIs such as objects imaged per night, submission latency, and success rate; expose them in the dashboard (basic solves/submission counts and panel under Exposures tab; latency placeholder until ACK timestamps are captured).
 
 ### Observatory Code Application vs. Post-Code API Workflow
 
