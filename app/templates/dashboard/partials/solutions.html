@@ -14,6 +14,7 @@
         <span class="muted">{{ s.solved_at }}</span>
         {% if s.capture_id %}
         <button class="ghost" hx-post="/api/astrometry/solve" hx-vals='{"capture_id": {{ s.capture_id }} }' hx-target="closest section" hx-swap="outerHTML">Re-run</button>
+        <button class="ghost" hx-post="/api/astrometry/report" hx-vals='{"measurement_ids":[{{ s.measurement_id or "" }}], "format":"ADES"}'>Report</button>
         {% endif %}
       </li>
     {% endfor %}
