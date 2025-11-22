@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlmodel import Session, select
 
 from app.api.session import dashboard_status as session_dashboard_status
 from app.services.imaging import retention_candidates
 from app.services.notifications import NOTIFICATIONS
+from app.api.deps import get_db
+from app.models import AstrometricSolution
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -33,6 +36,33 @@ def dashboard_status() -> Any:
         "session": session_bundle.get("session"),
         "retention": {"expired_count": len(expired)},
         "notifications": notifications,
+    }
+
+
+@router.get("/partials/captures")
+def captures_partial() -> Any:
+    from app.services.session import SESSION_STATE
+
+    return SESSION_STATE.current.captures if SESSION_STATE.current else []
+
+
+@router.get("/partials/solutions")
+def solutions_partial(session: Session = Depends(get_db)) -> Any:
+    stmt = select(AstrometricSolution).order_by(AstrometricSolution.solved_at.desc()).limit(15)
+    rows = session.exec(stmt).all()
+    return {
+        "solutions": [
+            {
+                "id": row.id,
+                "path": row.path,
+                "ra_deg": row.ra_deg,
+                "dec_deg": row.dec_deg,
+                "uncertainty_arcsec": row.uncertainty_arcsec,
+                "solved_at": row.solved_at,
+                "success": row.success,
+            }
+            for row in rows
+        ]
     }
 
 

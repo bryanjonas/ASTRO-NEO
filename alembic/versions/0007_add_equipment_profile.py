@@ -6,7 +6,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0007_add_equipment_profile"
-down_revision = "0006_add_weather_snapshot"
+down_revision = "0008_merge_astrometry_weather"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 

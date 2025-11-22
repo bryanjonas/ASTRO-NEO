@@ -1,0 +1,18 @@
+<section class="panel">
+  <div class="panel-title">Recent Solves</div>
+  {% if solutions %}
+  <ul class="list">
+    {% for s in solutions %}
+      <li>
+        <span class="pill {{ 'good' if s.success else 'bad' }}">{{ 'ok' if s.success else 'fail' }}</span>
+        {{ s.target or s.path | default('') }}
+        <span class="muted">RA {{ '%.4f'|format(s.ra_deg or 0) }} Dec {{ '%.4f'|format(s.dec_deg or 0) }}</span>
+        {% if s.uncertainty_arcsec %}<span class="muted">RMS {{ '%.2f'|format(s.uncertainty_arcsec) }}"</span>{% endif %}
+        <span class="muted">{{ s.solved_at }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <div class="muted">No solves yet.</div>
+  {% endif %}
+</section>

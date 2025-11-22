@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
 
+from app.api.deps import get_db
+from app.models import AstrometricSolution
 from app.services.astrometry import AstrometryService
 
 router = APIRouter(prefix="/astrometry", tags=["astrometry"])
@@ -27,3 +30,15 @@ def solve(payload: dict[str, Any]) -> Any:
         downsample=payload.get("downsample"),
     )
     return result
+
+
+@router.get("/solutions")
+def list_solutions(
+    limit: int = 20,
+    success: bool | None = None,
+    session: Session = Depends(get_db),
+) -> list[AstrometricSolution]:
+    stmt = select(AstrometricSolution).order_by(AstrometricSolution.solved_at.desc()).limit(limit)
+    if success is not None:
+        stmt = stmt.where(AstrometricSolution.success == success)
+    return session.exec(stmt).all()

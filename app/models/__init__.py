@@ -1,6 +1,7 @@
 """Database models."""
 
 from .capture import CaptureLog
+from .astrometry import AstrometricSolution
 from .neocp import (
     NeoCandidate,
     NeoCPSnapshot,
@@ -14,6 +15,7 @@ from .weather import WeatherSnapshot
 
 __all__ = [
     "CaptureLog",
+    "AstrometricSolution",
     "SiteConfig",
     "NeoCandidate",
     "NeoCPSnapshot",
