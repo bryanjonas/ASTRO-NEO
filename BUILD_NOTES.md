@@ -108,10 +108,11 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 ## Phase 7 — Submission & Monitoring
 
-- Determine and implement the authorized submission channel (email/SFTP/HTTPS) based on station code permissions; automate sending when approvals exist. After the observatory code is assigned, default to the MPC Observations API for production submissions; keep the email channel only for the initial application package or as a documented fallback.
-- Capture acknowledgments/rejections from MPC and store them with timestamps and raw responses.
-- Notify operators via the dashboard and messaging (email/SMS) when submissions succeed or fail.
-- Track KPIs such as objects imaged per night, submission latency, and success rate; expose them in the dashboard.
+- [x] Implement submission pipeline: generate ADES/OBS80 bundles from reviewed measurements, archive under `/data/reports`, and log entries in `submissionlog` with channel/status/response.
+- [x] Add submission API: `/api/astrometry/report` to archive, `/api/astrometry/submit` to initiate send (email stub; API channel pending). Configurable via `submission_channel`, `mpc_email`, and station/observer/software defaults in settings.
+- [ ] Capture acknowledgments/rejections from MPC and store them with timestamps and raw responses.
+- [ ] Notify operators via the dashboard and messaging (email/SMS) when submissions succeed or fail.
+- [ ] Track KPIs such as objects imaged per night, submission latency, and success rate; expose them in the dashboard.
 
 ### Observatory Code Application vs. Post-Code API Workflow
 

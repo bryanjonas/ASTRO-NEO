@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     software_id: str = "ASTRO-NEO/0.1.0"
     default_band: str = "R"
     mag_uncert_floor: float = 0.05
+    mpc_email: str = ""
+    submission_channel: str = "email"  # email|api
     nina_bridge_url: str = "http://nina-bridge:8001/api"
     nina_bridge_timeout: float = 15.0
     data_root: str = "/data"
