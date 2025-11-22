@@ -107,6 +107,25 @@ docker compose run --rm api alembic upgrade head
         type: mono        # or osc
         filters: ["L", "R", "G", "B"]
         max_binning: 2
+      presets:
+        - name: bright
+          max_vmag: 15.0
+          exposure_seconds: 20.0
+          count: 8
+          filter: L
+          binning: 1
+        - name: medium
+          max_vmag: 18.5
+          exposure_seconds: 45.0
+          count: 10
+          filter: L
+          binning: 1
+        - name: faint
+          max_vmag: 99.0
+          exposure_seconds: 90.0
+          count: 12
+          filter: L
+          binning: 2
       focuser:
         position_min: 10000
         position_max: 80000

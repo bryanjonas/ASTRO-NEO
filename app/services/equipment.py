@@ -34,6 +34,7 @@ class EquipmentProfile(BaseModel):
     camera: CameraCapabilities
     focuser: FocuserCapabilities | None = None
     mount: MountCapabilities | None = None
+    presets: list[dict] = Field(default_factory=list, description="Optional exposure presets")
 
 
 def _load_profile(session: Session) -> EquipmentProfile | None:

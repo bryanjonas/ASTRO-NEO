@@ -67,6 +67,7 @@ class SequenceStartPayload(BaseModel):
     binning: int = Field(..., ge=1, le=4)
     exposure_seconds: float | None = Field(default=None, gt=0)
     target: str | None = Field(default=None, max_length=128)
+    tracking_mode: str | None = Field(default=None, max_length=32)
 
 
 class AutomationPayload(BaseModel):

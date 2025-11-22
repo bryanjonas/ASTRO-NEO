@@ -1,4 +1,4 @@
-"""Stubs for calibration frame planning and bookkeeping."""
+"""Calibration frame planning and execution via the bridge."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.services.imaging import build_fits_path
 from app.services.nina_bridge import NinaBridgeService
+from app.services.notifications import NOTIFICATIONS
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.services.session import SessionCalibration, SessionState
@@ -98,6 +99,11 @@ def run_calibration_plan(session_state: "SessionState", bridge: NinaBridgeServic
                     "exposure_seconds": exposure_seconds,
                 }
             )
+        NOTIFICATIONS.add(
+            "info",
+            f"Calibration {cal.type} frames completed ({cal.completed}/{cal.required})",
+            {"filter": filt, "exposure_seconds": exposure_seconds},
+        )
 
     if session_state.current:
         session_state.current.captures.extend(captures)

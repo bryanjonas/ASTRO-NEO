@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -64,6 +65,13 @@ class SequencePlanResponse(BaseModel):
     gain: int | None = None
     offset: int | None = None
     preset: str | None = None
+
+
+class TrackingMode(str, Enum):
+    sidereal = "sidereal"
+    target = "target"
+    lunar = "lunar"
+    solar = "solar"
 
 
 class ConnectionRequest(BaseModel):
