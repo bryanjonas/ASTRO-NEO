@@ -38,16 +38,14 @@
       {% else %}
         <div class="stat">Bridge status unknown</div>
       {% endif %}
-      {% if bundle.bridge_blockers %}
+      {% set blockers = bundle.bridge_blockers_filtered if bundle.bridge_blockers_filtered is defined else bundle.bridge_blockers %}
+      {% if blockers %}
         <ul class="blockers">
-          {% for b in bundle.bridge_blockers %}<li>{{ b.reason if b.reason else b }}</li>{% endfor %}
+          {% for b in blockers %}<li>{{ b.reason if b.reason else b }}</li>{% endfor %}
         </ul>
       {% endif %}
     </div>
-    <div>
-      <div class="label">Retention</div>
-      <div class="stat">{{ retention.expired_count }} expired</div>
-    </div>
+    <div></div>
   </div>
 
   <div class="telemetry-grid">

@@ -142,6 +142,36 @@ class SessionState:
             self.current.selected_preset = snapshot
         return snapshot
 
+    def update_preset_config(
+        self,
+        *,
+        exposure_seconds: float,
+        count: int,
+        delay_seconds: float,
+        binning: int,
+        filter_name: str,
+    ) -> dict[str, Any]:
+        if not self.selected_preset:
+            raise ValueError("no_preset_selected")
+        snapshot = dict(self.selected_preset)
+        snapshot.update(
+            {
+                "exposure_seconds": exposure_seconds,
+                "count": count,
+                "delay_seconds": delay_seconds,
+                "binning": binning,
+                "filter": filter_name,
+            }
+        )
+        snapshot["total_minutes"] = round(
+            (count * exposure_seconds + max(0, count - 1) * delay_seconds) / 60.0,
+            2,
+        )
+        self.selected_preset = snapshot
+        if self.current:
+            self.current.selected_preset = snapshot
+        return snapshot
+
     def set_target_mode(self, mode: str) -> None:
         mode = mode.lower()
         if mode not in {"auto", "manual"}:

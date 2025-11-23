@@ -6,10 +6,10 @@
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
 {% if selected_preset %}
-  <div class="selected-preset-card">
+  <form class="selected-preset-card" hx-post="/dashboard/exposure/config" hx-target="closest .subpanel" hx-swap="innerHTML">
     <div class="selected-preset-header">
       <div>
-        <div class="selected-preset-label">Selected preset</div>
+        <div class="selected-preset-label">Imaging configuration</div>
         <div class="selected-preset-name">{{ selected_preset.name|capitalize }}</div>
       </div>
       <div class="selected-preset-summary">
@@ -18,21 +18,36 @@
         <span>{{ selected_preset.filter }} @ bin {{ selected_preset.binning }}</span>
       </div>
     </div>
-    <div class="selected-preset-grid">
+    <div class="selected-config-grid">
+      <label>
+        <span class="selected-label">Exposure (s)</span>
+        <input type="number" step="1" min="1" name="exposure_seconds" value="{{ selected_preset.exposure_seconds }}">
+      </label>
+      <label>
+        <span class="selected-label">Count</span>
+        <input type="number" min="1" name="count" value="{{ selected_preset.count }}">
+      </label>
+      <label>
+        <span class="selected-label">Spacing (s)</span>
+        <input type="number" min="0" name="delay_seconds" value="{{ selected_preset.delay_seconds }}">
+      </label>
+      <label>
+        <span class="selected-label">Filter</span>
+        <input type="text" name="filter" value="{{ selected_preset.filter }}">
+      </label>
+      <label>
+        <span class="selected-label">Binning</span>
+        <input type="number" min="1" name="binning" value="{{ selected_preset.binning }}">
+      </label>
       <div>
         <span class="selected-label">Est. duration</span>
         <span class="selected-value">{{ selected_preset.total_minutes }} min</span>
       </div>
-      <div>
-        <span class="selected-label">Tracking</span>
-        <span class="selected-value">{{ selected_preset.tracking_mode|capitalize }}</span>
-      </div>
-      <div>
-        <span class="selected-label">Focus offset</span>
-        <span class="selected-value">{{ selected_preset.focus_offset if selected_preset.focus_offset is not none else "None" }}</span>
-      </div>
     </div>
-  </div>
+    <div class="actions">
+      <button type="submit" class="btn-primary">💾 Save imaging configuration</button>
+    </div>
+  </form>
 {% else %}
   <div class="muted tiny">No preset selected yet. Choose one below to arm the next imaging sequence.</div>
 {% endif %}

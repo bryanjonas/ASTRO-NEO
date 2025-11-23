@@ -1,0 +1,15 @@
+<div class="panel-title small">FITS Preview</div>
+{% if error %}
+  <div class="error">{{ error }}</div>
+{% endif %}
+{% if preview %}
+  <div class="capture-preview">
+    <img src="data:image/png;base64,{{ preview }}" alt="FITS preview of {{ meta.target if meta else '' }}">
+  </div>
+  <div class="muted tiny">
+    {{ meta.target if meta and meta.target else "Unknown target" }} · {{ meta.started_at if meta and meta.started_at else "" }}
+  </div>
+  <div class="muted tiny">{{ meta.path if meta else '' }}</div>
+{% elif not error %}
+  <div class="muted">Select a capture to preview the FITS frame.</div>
+{% endif %}
