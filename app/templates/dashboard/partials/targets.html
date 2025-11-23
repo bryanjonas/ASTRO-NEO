@@ -1,0 +1,72 @@
+{% set manual_mode = target_mode == 'manual' %}
+{% set best_target = targets|first if targets else None %}
+
+<div class="panel-title">Targets</div>
+{% if manual_mode %}
+  <p class="panel-description">Manual mode engaged — targets are locked. Switch to auto to keep them sorted.</p>
+{% else %}
+  <p class="panel-description">Let automation chase the top-ranked object or swap to manual when you need a specific follow-up.</p>
+  <div class="targets-controls">
+    <form hx-post="/dashboard/targets/mode" hx-target="closest section" hx-swap="outerHTML">
+      <input type="hidden" name="mode" value="auto">
+      <button type="submit" class="btn-toggle active">Auto (best)</button>
+    </form>
+    <form hx-post="/dashboard/targets/mode" hx-target="closest section" hx-swap="outerHTML">
+      <input type="hidden" name="mode" value="manual">
+      <button type="submit" class="btn-toggle">Manual pick</button>
+    </form>
+  </div>
+{% endif %}
+
+{% if manual_mode %}
+  {% if selected_target %}
+    <div class="status-banner info">Manual target locked to {{ selected_target }} until you switch back to auto.</div>
+  {% else %}
+    <div class="status-banner warn">Manual mode enabled. Use the Targets tab to pick a trksub.</div>
+  {% endif %}
+{% else %}
+  {% if best_target %}
+    <div class="status-banner info">
+      Automation will image {{ best_target.trksub }} first
+      {% if best_target.score is not none %}(score {{ '%.1f'|format(best_target.score) }}){% endif %}.
+    </div>
+  {% endif %}
+  {% if targets %}
+    <div class="targets-controls">
+      <form hx-post="/dashboard/targets/mode" hx-target="closest section" hx-swap="outerHTML">
+        <input type="hidden" name="mode" value="manual">
+        <button type="submit" class="btn-toggle">Switch to manual</button>
+      </form>
+    </div>
+  {% endif %}
+{% endif %}
+
+{% if not manual_mode %}
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if targets %}
+    <ul class="target-list">
+      {% for t in targets %}
+        <li class="target-item">
+          <div class="target-main">
+            <div>
+              <span class="pill {% if t.is_observable %}good{% else %}warn{% endif %}">{{ 'visible' if t.is_observable else 'blocked' }}</span>
+              <strong>{{ t.trksub }}</strong>
+              {% if t.vmag %}<span class="muted">V {{ '%.1f'|format(t.vmag) }}</span>{% endif %}
+              {% if t.score is not none %}<span class="muted">Score {{ '%.1f'|format(t.score) }}</span>{% endif %}
+            </div>
+            <div class="muted tiny">
+              {% if t.duration_minutes %}Window {{ '%.0f'|format(t.duration_minutes) }} min ·{% endif %}
+              {% if t.max_altitude_deg %} Max alt {{ '%.1f'|format(t.max_altitude_deg) }}° ·{% endif %}
+              {% if t.min_moon_separation_deg %} Moon sep {{ '%.0f'|format(t.min_moon_separation_deg) }}°{% endif %}
+            </div>
+            {% if t.window_start %}
+              <div class="muted tiny">Visibility {{ t.window_start }} → {{ t.window_end }}</div>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="muted">No observability results yet. Run /api/observability/refresh.</div>
+  {% endif %}
+{% endif %}
