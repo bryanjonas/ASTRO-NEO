@@ -1,12 +1,42 @@
+{% set nina = bundle.bridge_status or {} %}
+{% set telescope = nina.get("telescope", {}) %}
+{% set camera = nina.get("camera", {}) %}
+{% set sequence = nina.get("sequence", {}) %}
+{% set focuser = nina.get("focuser", {}) %}
+{% set session = bundle.session %}
+{% set session_active = session is not none %}
+{% set session_paused = session and session.get("paused") %}
+{% set seq_total = sequence.get("total") if sequence and sequence.get("total") is not none else 0 %}
+{% set seq_index = sequence.get("current_index") if sequence and sequence.get("current_index") is not none else 0 %}
+{% set exposures_left = seq_total - seq_index %}
+{% if exposures_left < 0 %}{% set exposures_left = 0 %}{% endif %}
+
 <section class="panel">
   <div class="panel-title">Status</div>
+  {% if status_banner %}
+    <div class="status-banner {{ status_banner.kind }}">{{ status_banner.text }}</div>
+  {% endif %}
   <div class="grid two">
     <div>
-      <div class="label">Bridge</div>
+      <div class="label">Bridge & Camera</div>
       {% if bundle.bridge_ready %}
-        <div class="stat good">Ready: slew={{ bundle.bridge_ready.ready_to_slew }}, expose={{ bundle.bridge_ready.ready_to_expose }}</div>
+        <div class="chip-list">
+          <span class="chip-label">Ready</span>
+          <span class="chip {{ 'good' if bundle.bridge_ready.ready_to_slew else 'warn' }}">Slew {{ 'OK' if bundle.bridge_ready.ready_to_slew else 'BLOCKED' }}</span>
+          <span class="chip {{ 'good' if bundle.bridge_ready.ready_to_expose else 'warn' }}">Expose {{ 'OK' if bundle.bridge_ready.ready_to_expose else 'BLOCKED' }}</span>
+        </div>
+        <div class="chip-list">
+          <span class="chip-label">Camera</span>
+          <span class="chip {{ 'good' if camera and camera.get('is_exposing') else '' }}">
+            {% if camera and camera.get('is_exposing') %}Exposing{% else %}Idle{% endif %}
+          </span>
+          <span class="chip-label">Sequence</span>
+          <span class="chip {{ 'good' if sequence and sequence.get('is_running') else '' }}">
+            {% if sequence and sequence.get('is_running') %}Running{% else %}Stopped{% endif %}
+          </span>
+        </div>
       {% else %}
-        <div class="stat">Unknown</div>
+        <div class="stat">Bridge status unknown</div>
       {% endif %}
       {% if bundle.bridge_blockers %}
         <ul class="blockers">
@@ -19,28 +49,110 @@
       <div class="stat">{{ retention.expired_count }} expired</div>
     </div>
   </div>
-  {% if bundle.notifications %}
-  <div class="subpanel">
-    <div class="panel-title small">Alerts</div>
-    <ul class="list">
-      {% for note in bundle.notifications %}
-        <li><span class="pill {{ note.level }}">{{ note.level }}</span> {{ note.message }} <span class="muted">{{ note.created_at }}</span></li>
-      {% endfor %}
-    </ul>
+
+  <div class="telemetry-grid">
+    <div class="telemetry-card">
+      <div class="telemetry-label">Sequence</div>
+      <div class="telemetry-value">{{ sequence.get("name") if sequence and sequence.get("name") else "Idle" }}</div>
+      <div class="telemetry-meta">
+        {% if sequence and sequence.get("total") %}
+          Photos left: {{ exposures_left }} / {{ sequence.get("total") }}
+        {% else %}
+          Waiting for next plan
+        {% endif %}
+      </div>
+      {% if sequence and sequence.get("is_running") %}
+        <div class="telemetry-meta">Index {{ sequence.get("current_index") }} of {{ sequence.get("total") }}</div>
+      {% endif %}
+    </div>
+
+    <div class="telemetry-card">
+      <div class="telemetry-label">Telescope</div>
+      <div class="telemetry-value">
+        RA {{ "%.2f"|format(telescope.get("ra_deg")) if telescope and telescope.get("ra_deg") is not none else "—" }}°
+        · DEC {{ "%.2f"|format(telescope.get("dec_deg")) if telescope and telescope.get("dec_deg") is not none else "—" }}°
+      </div>
+      <div class="telemetry-meta">
+        Tracking: {{ telescope.get("tracking_mode") if telescope and telescope.get("tracking_mode") else "unknown" }}
+        · {{ "Connected" if telescope and telescope.get("is_connected") else "Disconnected" }}
+        · {{ "Parked" if telescope and telescope.get("is_parked") else "Unparked" }}
+      </div>
+    </div>
+
+    <div class="telemetry-card">
+      <div class="telemetry-label">Camera</div>
+      <div class="telemetry-value">
+        {% if camera and camera.get("is_exposing") %}Exposing{% else %}{{ camera.get("last_status") if camera and camera.get("last_status") else "Idle" }}{% endif %}
+      </div>
+      <div class="telemetry-meta">
+        Last exposure {{ camera.get("last_exposure_duration") if camera and camera.get("last_exposure_duration") else "—" }}s
+        {% if camera and camera.get("last_image_path") %}
+          · Last file {{ camera.get("last_image_path") }}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="telemetry-card">
+      <div class="telemetry-label">Focuser</div>
+      <div class="telemetry-value">
+        Position {{ focuser.get("position") if focuser and focuser.get("position") is not none else "—" }}
+      </div>
+      <div class="telemetry-meta">
+        {{ "Moving" if focuser and focuser.get("is_moving") else "Idle" }}
+      </div>
+    </div>
   </div>
-  {% endif %}
-  <div class="subpanel">
-    <div class="panel-title small">Session</div>
-    {% if bundle.session %}
-      <div class="stat">Started {{ bundle.session.started_at }}</div>
-      <div class="muted">Calibrations:</div>
+
+  {% if bundle.notifications %}
+    <div class="subpanel">
+      <div class="panel-title small">Alerts</div>
       <ul class="list">
-        {% for c in bundle.session.calibrations %}
-          <li>{{ c.type }} {{ c.completed }}/{{ c.required }} (remain {{ c.remaining }})</li>
+        {% for note in bundle.notifications %}
+          <li><span class="pill {{ note.level }}">{{ note.level }}</span> {{ note.message }} <span class="muted">{{ note.created_at }}</span></li>
         {% endfor %}
       </ul>
+    </div>
+  {% endif %}
+
+  <div class="subpanel">
+    <div class="panel-title small">Session</div>
+    {% if session_active %}
+      <div class="stat">Started {{ bundle.session.started_at }}</div>
+      <div class="muted tiny">Captures logged: {{ bundle.session.captures | length }}</div>
+      {% if session_paused %}
+        <div class="muted tiny">Status: Paused</div>
+      {% endif %}
     {% else %}
       <div class="muted">No active session.</div>
     {% endif %}
+    <div class="actions">
+      <button
+        class="btn-primary {% if session_active %}disabled{% endif %}"
+        hx-post="/dashboard/night/start"
+        hx-target="closest section"
+        hx-swap="outerHTML"
+        {% if session_active %}disabled{% endif %}
+      >
+        🚀 Start Session
+      </button>
+      <button
+        class="btn-secondary {% if not session_active %}disabled{% endif %}"
+        hx-post="/dashboard/night/pause"
+        hx-target="closest section"
+        hx-swap="outerHTML"
+        {% if not session_active %}disabled{% endif %}
+      >
+        {% if session_paused %}▶️ Resume Session{% else %}⏸️ Pause Session{% endif %}
+      </button>
+      <button
+        class="btn-secondary {% if not session_active %}disabled{% endif %}"
+        hx-post="/dashboard/night/end"
+        hx-target="closest section"
+        hx-swap="outerHTML"
+        {% if not session_active %}disabled{% endif %}
+      >
+        🛑 End Session
+      </button>
+    </div>
   </div>
 </section>
