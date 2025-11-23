@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import base64
 import json
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
+import numpy as np
+from astropy.io import fits
+from astropy.visualization import ZScaleInterval
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from PIL import Image
 from sqlmodel import select
 
 from app.api.session import dashboard_status as session_dashboard_status
@@ -59,6 +66,16 @@ def _render_status_panel(
 ) -> HTMLResponse:
     bundle = bundle or session_dashboard_status()
     retention = retention or retention_status()
+    raw_blockers = bundle.get("bridge_blockers") or []
+    ignored = {"camera_exposing", "sequence_running"}
+    filtered_blockers = []
+    for item in raw_blockers:
+        reason = item.get("reason") if isinstance(item, dict) else item
+        if reason in ignored:
+            continue
+        filtered_blockers.append(item)
+    bundle = dict(bundle)
+    bundle["bridge_blockers_filtered"] = filtered_blockers
     return templates.TemplateResponse(
         "dashboard/partials/status.html",
         {
@@ -252,6 +269,30 @@ def _bridge_is_ready(bundle: dict[str, Any]) -> bool:
     return bool(ready_flags) and ready_flags.get("ready_to_slew") and ready_flags.get("ready_to_expose")
 
 
+def _generate_fits_preview(path: str) -> str:
+    fits_path = Path(path)
+    if not fits_path.exists():
+        raise FileNotFoundError("Capture file missing.")
+    data = fits.getdata(fits_path)
+    if data is None:
+        raise ValueError("No data in FITS frame.")
+    if data.ndim > 2:
+        data = data[0]
+    interval = ZScaleInterval()
+    vmin, vmax = interval.get_limits(data)
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+        vmin, vmax = np.nanmin(data), np.nanmax(data)
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+            raise ValueError("Unable to scale FITS data.")
+    clipped = np.clip(data, vmin, vmax)
+    norm = (clipped - vmin) / (vmax - vmin)
+    image_array = (norm * 255).astype(np.uint8)
+    img = Image.fromarray(image_array)
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 @router.get("/dashboard/partials/reports", response_class=HTMLResponse)
 def reports_partial(request: Request) -> Any:
     """Render submission log for the Reports tab."""
@@ -291,6 +332,19 @@ def exposure_config_partial(request: Request) -> Any:
     return _render_exposure_partial(request, presets, SESSION_STATE.selected_preset)
 
 
+@router.get("/dashboard/partials/session_status", response_class=HTMLResponse)
+def session_status_partial_panel(request: Request) -> Any:
+    """Render session status for the exposures tab."""
+    session_info = {"active": False}
+    if SESSION_STATE.current:
+        session_info = SESSION_STATE.current.to_dict()
+        session_info["active"] = True
+    return templates.TemplateResponse(
+        "dashboard/partials/session_status.html",
+        {"request": request, "session": session_info},
+    )
+
+
 @router.post("/dashboard/exposure/select", response_class=HTMLResponse)
 async def exposure_select(request: Request) -> Any:
     """HTMX handler to mark a preset as active for the current session."""
@@ -317,6 +371,36 @@ async def exposure_select(request: Request) -> Any:
         )
     SESSION_STATE.select_preset(chosen)
     return _render_exposure_partial(request, presets, SESSION_STATE.selected_preset)
+
+
+@router.post("/dashboard/exposure/config", response_class=HTMLResponse)
+async def exposure_config_update(request: Request) -> Any:
+    """Allow editing of the active imaging configuration."""
+    form = await request.form()
+    profile = get_active_equipment_profile()
+    presets = list(list_presets(profile))
+    error = None
+    try:
+        exposure_seconds = float(form.get("exposure_seconds") or 0)
+        count = int(form.get("count") or 0)
+        delay_seconds = float(form.get("delay_seconds") or 0)
+        binning = int(form.get("binning") or 1)
+        filter_name = (form.get("filter") or "").strip() or "L"
+        if exposure_seconds <= 0 or count <= 0 or delay_seconds < 0 or binning <= 0:
+            raise ValueError("invalid_range")
+        SESSION_STATE.update_preset_config(
+            exposure_seconds=exposure_seconds,
+            count=count,
+            delay_seconds=delay_seconds,
+            binning=binning,
+            filter_name=filter_name,
+        )
+    except ValueError as exc:
+        if str(exc) == "no_preset_selected":
+            error = "Select a preset before editing the imaging configuration."
+        else:
+            error = "Provide positive values for exposure, count, spacing, and binning."
+    return _render_exposure_partial(request, presets, SESSION_STATE.selected_preset, error=error)
 
 
 @router.post("/dashboard/night/start", response_class=HTMLResponse)
@@ -397,6 +481,28 @@ def _default_preset(presets: list) -> Any | None:
         if getattr(preset, "name", "").lower() == "bright":
             return preset
     return presets[0] if presets else None
+
+
+@router.get("/dashboard/partials/capture_viewer", response_class=HTMLResponse)
+def capture_viewer_partial(request: Request, path: str | None = None, target: str | None = None, index: str | None = None, started_at: str | None = None) -> Any:
+    """Render a lightweight FITS preview for the selected capture."""
+    preview = None
+    error = None
+    meta = {"target": target, "index": index, "started_at": started_at, "path": path}
+    if path:
+        try:
+            preview = _generate_fits_preview(path)
+        except Exception as exc:  # noqa: BLE001
+            error = f"Unable to render FITS preview: {exc}"
+    return templates.TemplateResponse(
+        "dashboard/partials/capture_viewer.html",
+        {
+            "request": request,
+            "preview": preview,
+            "error": error,
+            "meta": meta,
+        },
+    )
 
 
 @router.post("/dashboard/targets/mode", response_class=HTMLResponse)

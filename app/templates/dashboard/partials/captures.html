@@ -3,11 +3,17 @@
   <ul class="list">
     {% for cap in captures[-8:] %}
       <li>
-        <span class="pill">{{ cap.kind }}</span>
-        <strong>{{ cap.target }}</strong>
-        {% if cap.sequence %}<span class="muted">seq={{ cap.sequence }} #{{ cap.index }}</span>{% endif %}
-        <div class="muted tiny">{{ cap.started_at }}</div>
-        <div class="muted tiny">{{ cap.path }}</div>
+        <button class="capture-row"
+                hx-get="/dashboard/partials/capture_viewer"
+                hx-target="#capture-viewer-panel"
+                hx-swap="innerHTML"
+                hx-vals='{"path":"{{ cap.path }}","target":"{{ cap.target }}","index":"{{ cap.index }}","started_at":"{{ cap.started_at }}"}'>
+          <span class="pill">{{ cap.kind }}</span>
+          <strong>{{ cap.target }}</strong>
+          {% if cap.sequence %}<span class="muted">seq={{ cap.sequence }} #{{ cap.index }}</span>{% endif %}
+          <div class="muted tiny">{{ cap.started_at }}</div>
+          <div class="muted tiny">{{ cap.path }}</div>
+        </button>
       </li>
     {% endfor %}
   </ul>
