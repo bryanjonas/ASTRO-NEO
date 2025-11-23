@@ -1,0 +1,180 @@
+<div class="panel-title">Observatory Configuration</div>
+<p class="panel-description">Fine‑tune the coordinates, sky quality, and environmental data that drive observability scoring.</p>
+{% if saved %}<div class="pill good">Saved</div>{% endif %}
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+{% if site %}
+  <div class="snapshot-grid">
+    <div class="snapshot-card">
+      <div class="snapshot-label">Site Coordinates</div>
+      <div class="snapshot-value">
+        {{ "%.4f"|format(site.latitude) if site.latitude is not none else "—" }}° N /
+        {{ "%.4f"|format(site.longitude) if site.longitude is not none else "—" }}° E
+      </div>
+      <div class="snapshot-meta">Altitude {{ "%.0f"|format(site.altitude_m) if site.altitude_m is not none else "—" }} m</div>
+    </div>
+    <div class="snapshot-card">
+      <div class="snapshot-label">Sky Quality</div>
+      <div class="snapshot-value">Bortle {{ site.bortle if site.bortle is not none else "—" }}</div>
+      <div class="snapshot-meta">
+        {{ "Dark suburban skies" if site and site.bortle and site.bortle <= 5 else "Adjust for your SQM reading" }}
+      </div>
+    </div>
+    <div class="snapshot-card">
+      <div class="snapshot-label">Weather & Horizon</div>
+      {% if weather_summary %}
+        <div class="weather-metrics">
+          <span>{{ weather_summary.temperature_c if weather_summary.temperature_c is not none else "—" }}°C</span>
+          <span>
+            {{ weather_summary.wind_speed_mps if weather_summary.wind_speed_mps is not none else "—" }} m/s wind
+          </span>
+          <span>
+            {{ weather_summary.cloud_cover_pct if weather_summary.cloud_cover_pct is not none else "—" }}% clouds
+          </span>
+          <span>
+            {{ weather_summary.precipitation_probability_pct if weather_summary.precipitation_probability_pct is not none else "—" }}% rain
+          </span>
+        </div>
+        <div class="snapshot-meta">
+          <span class="weather-pill {{ 'good' if weather_summary.is_safe else 'warn' }}">
+            {{ "Clear" if weather_summary.is_safe else "Blocked" }}
+          </span>
+          {% if weather_summary.reasons %}
+            {{ weather_summary.reasons | join(', ') }}
+          {% else %}
+            Conditions within limits
+          {% endif %}
+          <div class="muted tiny">
+            Updated {{ weather_summary.fetched_at.strftime("%H:%M UTC") }}
+          </div>
+        </div>
+      {% else %}
+        <div class="snapshot-value">Weather feed unavailable</div>
+      {% endif %}
+      <div class="snapshot-meta">
+        Horizon {{ "loaded" if site.horizon_mask_json else "missing" }}
+      </div>
+      <div class="snapshot-meta">
+        {% if weather_sources %}
+          <div class="sensor-list compact">
+            {% for sensor in weather_sources %}
+              <span class="sensor-pill">
+                {{ sensor.get("name", "Unnamed sensor") }}
+                {% if sensor.get("type") %}<span class="sensor-meta">· {{ sensor.get("type") }}</span>{% endif %}
+              </span>
+            {% endfor %}
+          </div>
+        {% else %}
+          No sensors configured
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% else %}
+  <div class="empty-state-small">
+    <div class="muted">No site details stored yet—fill out the form below.</div>
+  </div>
+{% endif %}
+
+<form hx-post="/dashboard/observatory/save" hx-target="closest section" hx-swap="innerHTML">
+
+  <!-- Location Section -->
+  <div class="form-section">
+    <div class="section-header">
+      <span class="section-icon">📍</span>
+      <span class="section-title">Site Location</span>
+    </div>
+    <p class="section-description">Precise coordinates keep altitude/azimuth conversions aligned with astroplan predictions.</p>
+    <div class="form-grid three-col">
+      <label>
+        <span class="label-text">Latitude</span>
+        <input type="number" name="latitude" step="0.0001" value="{{ site.latitude if site else '' }}" required>
+        <span class="hint">Decimal degrees (N positive)</span>
+      </label>
+      <label>
+        <span class="label-text">Longitude</span>
+        <input type="number" name="longitude" step="0.0001" value="{{ site.longitude if site else '' }}" required>
+        <span class="hint">Decimal degrees (E positive)</span>
+      </label>
+      <label>
+        <span class="label-text">Altitude</span>
+        <input type="number" name="altitude_m" step="0.1" value="{{ site.altitude_m if site else '' }}" required>
+        <span class="hint">Meters above sea level</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Sky Conditions Section -->
+  <div class="form-section">
+    <div class="section-header">
+      <span class="section-icon">🌌</span>
+      <span class="section-title">Sky Conditions</span>
+    </div>
+    <p class="section-description">Use your latest SQM or light-pollution reading so targets respect limiting magnitude.</p>
+    <div class="form-grid">
+      <label>
+        <span class="label-text">Bortle Scale</span>
+        <input type="number" name="bortle" min="1" max="9" value="{{ site.bortle if site else '' }}">
+        <span class="hint">1 (darkest) to 9 (brightest) sky</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Advanced Configuration Section -->
+  <div class="form-section with-aside">
+    <div>
+      <div class="section-header">
+        <span class="section-icon">⚙️</span>
+        <span class="section-title">Advanced Configuration</span>
+      </div>
+      <p class="section-description">Horizon and weather blocks gate observability, automation, and safety interlocks.</p>
+      <div class="form-grid">
+        <label class="full-width">
+          <span class="label-text">Horizon Mask</span>
+          <textarea name="horizon_mask_json" placeholder='Paste full PVGIS JSON here or use simple format: [{"az_deg": 0, "alt_deg": 20}]'>{{ site.horizon_mask_json if site and site.horizon_mask_json else '' }}</textarea>
+          <span class="hint">Paste the complete PVGIS horizon JSON (with outputs.horizon_profile) or simple [{az_deg, alt_deg}] format. PVGIS azimuth is auto-converted (0=S) to astronomical convention (0=N).</span>
+        </label>
+        <label class="full-width">
+          <span class="label-text">Weather Sensors</span>
+          <textarea name="weather_sensors" placeholder='[{"name": "open-meteo", "type": "remote"}]'>{{ site.weather_sensors if site else '' }}</textarea>
+          <span class="hint">JSON array of weather data sources (remote APIs or local sensors)</span>
+        </label>
+        {% if weather_sources %}
+          <div class="weather-summary">
+            <div class="weather-summary-title">Configured feeds</div>
+            <div class="sensor-list">
+              {% for sensor in weather_sources %}
+                <div class="sensor-pill">
+                  <div class="sensor-name">{{ sensor.get("name", "Unnamed sensor") }}</div>
+                  <div class="sensor-meta">
+                    {{ sensor.get("type", "remote") }}
+                    {% if sensor.get("thresholds") %}
+                      · thresholds set
+                    {% endif %}
+                    {% if sensor.get("endpoint") %}
+                      · {{ sensor.get("endpoint") }}
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="section-aside helper-card">
+      <div class="helper-title">Need a horizon mask?</div>
+      <p>Download obstruction data from PVGIS, or paste your manual azimuth/altitude samples. Aim for 1° resolution near the horizon break.</p>
+      <ul class="helper-list">
+        <li>Ensure azimuth degrees (0–360) and altitude (>−5 to +90)</li>
+        <li>Include at least four points; more yields smoother interpolation</li>
+        <li>Use comments like “Trees NE ridge” inside your JSON for clarity</li>
+      </ul>
+      <a href="https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/pvgis-tools/horizon-profile_en" target="_blank" class="help-link">📊 Open PVGIS Horizon Tool</a>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button type="submit" class="btn-primary">💾 Save Configuration</button>
+  </div>
+</form>

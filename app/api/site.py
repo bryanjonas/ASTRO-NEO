@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.api.deps import get_db
 from app.models import SiteConfig
 
 router = APIRouter(prefix="/site", tags=["site"])
+
+
+class SiteConfigPayload(BaseModel):
+    name: str = Field(default="default")
+    latitude: float
+    longitude: float
+    altitude_m: float
+    bortle: Optional[int] = None
+    horizon_mask_path: Optional[str] = None
+    horizon_mask_json: Optional[str] = None
+    weather_sensors: Optional[str] = None  # JSON string or description
+    equipment_profile: Optional[str] = Field(
+        default=None,
+        description="Optional JSON blob of the active equipment profile (mirrors selected profile).",
+    )
 
 
 @router.get("/", response_model=List[SiteConfig])
@@ -41,3 +57,22 @@ def get_site(name: str, session: Session = Depends(get_db)) -> SiteConfig:
     if not site:
         raise HTTPException(status_code=404, detail="site_not_found")
     return site
+
+
+@router.put("/{name}", response_model=SiteConfig)
+def update_site(name: str, payload: SiteConfigPayload, session: Session = Depends(get_db)) -> SiteConfig:
+    """Update or create the site config."""
+    record = session.exec(select(SiteConfig).where(SiteConfig.name == name)).first()
+    if record:
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            setattr(record, field, value)
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        return record
+
+    model = SiteConfig(**payload.model_dump())
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+    return model

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.session import SESSION_STATE
 from app.services.nina_bridge import NinaBridgeService
+from app.services.night_ops import NightSessionError, kickoff_imaging
+from app.services.session import SESSION_STATE
 
 router = APIRouter(prefix="/session", tags=["session"])
 
@@ -28,6 +29,10 @@ class CalibrationResetPayload(BaseModel):
     type: str | None = Field(default=None, min_length=1, max_length=16, description="Reset a single type or all when omitted.")
 
 
+class SessionPausePayload(BaseModel):
+    pause: bool = Field(default=True)
+
+
 @router.post("/calibration/run")
 def calibration_run() -> Any:
     if not SESSION_STATE.current:
@@ -44,13 +49,21 @@ def session_status() -> Any:
 
 
 @router.post("/start")
-def session_start(payload: SessionStartPayload) -> Any:
-    session = SESSION_STATE.start(
-        notes=payload.notes,
-        calibration_filter=payload.calibration_filter,
-        calibration_exposure_seconds=payload.calibration_exposure_seconds,
-    )
-    return {"active": True, "session": session.to_dict()}
+def session_start(payload: SessionStartPayload | None = Body(None)) -> Any:
+    if payload:
+        session = SESSION_STATE.start(
+            notes=payload.notes,
+            calibration_filter=payload.calibration_filter,
+            calibration_exposure_seconds=payload.calibration_exposure_seconds,
+        )
+    else:
+        session = SESSION_STATE.start()
+    try:
+        automation = kickoff_imaging()
+    except NightSessionError as exc:
+        SESSION_STATE.end()
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {"active": True, "session": session.to_dict(), "automation": automation}
 
 
 @router.post("/end")
@@ -70,11 +83,21 @@ def calibration_record(payload: CalibrationRecordPayload) -> Any:
 
 
 @router.post("/calibration/reset")
-def calibration_reset(payload: CalibrationResetPayload) -> Any:
+def calibration_reset(payload: CalibrationResetPayload | None = Body(None)) -> Any:
     if not SESSION_STATE.current:
         raise HTTPException(status_code=404, detail="no_active_session")
-    SESSION_STATE.reset_calibrations(payload.type)
+    reset_type = payload.type if payload else None
+    SESSION_STATE.reset_calibrations(reset_type)
     return {"active": True, "session": SESSION_STATE.current.to_dict()}
+
+
+@router.post("/pause")
+def session_pause(payload: SessionPausePayload | None = Body(None)) -> Any:
+    if not SESSION_STATE.current:
+        raise HTTPException(status_code=404, detail="no_active_session")
+    pause = True if payload is None else payload.pause
+    session = SESSION_STATE.pause() if pause else SESSION_STATE.resume()
+    return {"active": True, "session": session.to_dict()}
 
 
 @router.get("/dashboard/status")

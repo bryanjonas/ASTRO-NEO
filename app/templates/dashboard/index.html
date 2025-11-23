@@ -7,7 +7,6 @@
     <button :class="{active: tab==='equipment'}" @click="tab='equipment'">Equipment</button>
     <button :class="{active: tab==='targets'}" @click="tab='targets'">Targets</button>
     <button :class="{active: tab==='exposures'}" @click="tab='exposures'">Exposures</button>
-    <button :class="{active: tab==='live'}" @click="tab='live'">Live Status</button>
     <button :class="{active: tab==='reports'}" @click="tab='reports'">Reports</button>
   </nav>
 
@@ -16,19 +15,19 @@
     <div class="muted">Loading...</div>
   </section>
 
-  <section x-show="tab==='observatory'" class="panel placeholder">
+  <section x-show="tab==='observatory'" class="panel" hx-get="/dashboard/partials/observatory" hx-trigger="revealed, every 30s" hx-target="this" hx-swap="innerHTML">
     <div class="panel-title">Observatory</div>
-    <p class="muted">Edit site location, horizons, and weather sources (to be wired).</p>
+    <p class="muted">Loading observatory snapshot...</p>
   </section>
 
-  <section x-show="tab==='equipment'" class="panel placeholder">
+  <section x-show="tab==='equipment'" class="panel" hx-get="/dashboard/partials/equipment" hx-trigger="revealed, every 30s" hx-target="this" hx-swap="innerHTML">
     <div class="panel-title">Equipment</div>
-    <p class="muted">Manage camera/mount/focuser profiles and preset gains/offsets (to be wired).</p>
+    <p class="muted">Loading equipment profile...</p>
   </section>
 
-  <section x-show="tab==='targets'" class="panel placeholder">
+  <section x-show="tab==='targets'" class="panel" hx-get="/dashboard/partials/targets" hx-trigger="revealed, every 20s" hx-target="this" hx-swap="innerHTML">
     <div class="panel-title">Targets</div>
-    <p class="muted">NEOCP list and filters coming next.</p>
+    <p class="muted">Loading targets...</p>
   </section>
 
   <section x-show="tab==='exposures'" class="panel">
@@ -37,6 +36,9 @@
       <button hx-post="/api/session/start" hx-trigger="click" class="ghost">Start Session</button>
       <button hx-post="/api/session/calibration/run" hx-trigger="click" class="ghost">Run Calibrations</button>
       <button hx-post="/api/session/calibration/reset" hx-trigger="click" class="ghost">Reset Calibrations</button>
+    </div>
+    <div class="subpanel" hx-get="/dashboard/partials/exposure_config" hx-trigger="revealed" hx-target="this" hx-swap="innerHTML">
+      <div class="muted">Exposure configuration loading...</div>
     </div>
     <div class="subpanel" hx-get="/api/session/status" hx-trigger="revealed, every 10s" hx-target="this" hx-swap="innerHTML">
       <div class="muted">Session status loading...</div>
@@ -56,14 +58,9 @@
     </div>
   </section>
 
-  <section x-show="tab==='live'" class="panel" hx-get="/dashboard/partials/status" hx-trigger="revealed, every 6s" hx-target="this" hx-swap="innerHTML">
-    <div class="panel-title">Live Status</div>
-    <div class="muted">Loading...</div>
-  </section>
-
-  <section x-show="tab==='reports'" class="panel placeholder">
+  <section x-show="tab==='reports'" class="panel" hx-get="/dashboard/partials/reports" hx-trigger="revealed, every 25s" hx-target="this" hx-swap="innerHTML">
     <div class="panel-title">Reports</div>
-    <p class="muted">Submissions overview placeholder.</p>
+    <p class="muted">Loading reports...</p>
   </section>
 </div>
 {% endblock %}

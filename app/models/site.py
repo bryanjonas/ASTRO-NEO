@@ -15,6 +15,9 @@ class SiteConfig(SQLModel, table=True):
     altitude_m: float
     bortle: Optional[int] = None
     horizon_mask_path: Optional[str] = None
+    horizon_mask_json: Optional[str] = Field(
+        default=None, description="JSON horizon mask points (az_deg/alt_deg list)."
+    )
     weather_sensors: Optional[str] = None
     equipment_profile: Optional[str] = Field(
         default=None,
