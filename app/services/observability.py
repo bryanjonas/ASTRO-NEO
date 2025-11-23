@@ -50,10 +50,17 @@ class HorizonMask:
         if not profile:
             return None
 
+        # Detect if this is PVGIS format (uses 0=South convention) vs astro format (0=North)
+        is_pvgis = "A" in (profile[0] if profile else {})
+
         azimuths = []
         altitudes = []
         for entry in profile:
-            azimuths.append(float(entry.get("A") or entry.get("azimuth") or 0.0))
+            az = float(entry.get("A") or entry.get("azimuth") or 0.0)
+            # Convert PVGIS azimuth (0=S, 90=W, -90=E) to astro (0=N, 90=E, 180=S, 270=W)
+            if is_pvgis:
+                az = (az + 180.0) % 360.0
+            azimuths.append(az)
             altitudes.append(float(entry.get("H_hor") or entry.get("altitude") or 0.0))
 
         if not azimuths:

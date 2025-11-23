@@ -26,14 +26,35 @@
 
 <section class="panel">
   <div class="panel-title">Submissions</div>
-  <div hx-get="/dashboard/partials/submissions" hx-trigger="revealed, every 20s" hx-target="this" hx-swap="outerHTML">
-    <div class="muted">Loading submissions...</div>
-  </div>
+  {% if submissions %}
+  <ul class="list">
+    {% for sub in submissions %}
+      <li>
+        <span class="pill {% if sub.status in ['failed', 'error'] %}bad{% elif sub.status in ['acked', 'sent'] %}good{% else %}warn{% endif %}">{{ sub.status }}</span>
+        <strong>#{{ sub.id }}</strong>
+        <span class="muted">{{ sub.channel }}</span>
+        {% if sub.report_path %}<span class="muted">{{ sub.report_path }}</span>{% endif %}
+        <span class="muted">{{ sub.created_at }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <div class="muted">No submissions yet.</div>
+  {% endif %}
 </section>
 
 <section class="panel">
   <div class="panel-title">KPIs</div>
-  <div hx-get="/dashboard/partials/kpis" hx-trigger="revealed, every 25s" hx-target="this" hx-swap="outerHTML">
-    <div class="muted">Loading KPIs...</div>
-  </div>
+  {% set solved_total = kpis.solved_per_day.values() | sum %}
+  {% set submissions_total = kpis.submissions_per_day.values() | sum %}
+  <ul class="list">
+    <li>Solves (7d): {{ solved_total }}</li>
+    <li>Submissions (7d): {{ submissions_total }}</li>
+  </ul>
+  {% if kpis.solved_per_day %}
+    <div class="muted tiny">Solves per day: {{ kpis.solved_per_day }}</div>
+  {% endif %}
+  {% if kpis.submissions_per_day %}
+    <div class="muted tiny">Submissions per day: {{ kpis.submissions_per_day }}</div>
+  {% endif %}
 </section>

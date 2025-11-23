@@ -1,0 +1,257 @@
+<div class="panel-title">Equipment Profiles</div>
+<p class="panel-description">Keep telescope, camera, and automation limits in sync so bridge commands never exceed hardware constraints.</p>
+{% if saved %}<div class="pill good">Saved</div>{% endif %}
+
+{% set active_record = (profiles | selectattr('is_active', 'equalto', True) | list | first) if profiles else None %}
+
+{% if profile %}
+  <div class="active-profile-card">
+    <div class="profile-card-header">
+      <div>
+        <div class="profile-badge">
+          <span class="badge-icon">✓</span>
+          <span>Active Profile</span>
+        </div>
+        <h3 class="profile-name">{{ active_record.name if active_record else "Configured Rig" }}</h3>
+        <p class="muted tiny">These limits inform presets, slews, parking commands, and safety interlocks.</p>
+      </div>
+      <div class="profile-chip-row">
+        <span class="stat-chip">
+          <span class="stat-label">Camera</span>
+          <span class="stat-value">{{ profile.camera.type }}</span>
+        </span>
+        <span class="stat-chip">
+          <span class="stat-label">Max Binning</span>
+          <span class="stat-value">{{ profile.camera.max_binning }}×{{ profile.camera.max_binning }}</span>
+        </span>
+        <span class="stat-chip">
+          <span class="stat-label">Parking</span>
+          <span class="stat-value">
+            {% if profile.mount and profile.mount.supports_parking %}Supported{% else %}Manual only{% endif %}
+          </span>
+        </span>
+      </div>
+    </div>
+
+    <div class="profile-stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Filter Wheel</div>
+        <div class="stat-value">
+          {% if profile.camera.filters %}
+            {{ profile.camera.filters | join(', ') }}
+          {% else %}
+            No filters configured
+          {% endif %}
+        </div>
+        <div class="stat-meta">Reorder to match physical wheel slots.</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Focuser Travel</div>
+        <div class="stat-value">
+          {% if profile.focuser %}
+            {{ profile.focuser.position_min }} – {{ profile.focuser.position_max }}
+          {% else %}
+            Not specified
+          {% endif %}
+        </div>
+        <div class="stat-meta">Bridge clamps autofocus within this range.</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Preset Count</div>
+        <div class="stat-value">{{ profile.presets | length }}</div>
+        <div class="stat-meta">Mapped to scheduler urgency buckets.</div>
+      </div>
+    </div>
+
+    {% if profile.presets %}
+      <div class="profile-section">
+        <div class="profile-section-title">📸 Exposure Presets</div>
+        <div class="preset-tags">
+          {% for p in profile.presets %}
+            <span class="preset-tag">
+              <strong>{{ p.get('name', 'preset') }}</strong>: {{ p.get('exposure') }}s
+              {% if p.get('filter') %} · {{ p.get('filter') }}{% endif %}
+              · bin {{ p.get('binning', 1) }}
+            </span>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <div class="empty-icon">📦</div>
+    <div class="muted">No active equipment profile configured</div>
+  </div>
+{% endif %}
+
+<div class="subpanel">
+  <div class="panel-title small">Saved Profiles</div>
+  {% if profiles %}
+    <div class="profile-list">
+      {% for p in profiles %}
+        <div class="profile-item">
+          <div>
+            <div class="profile-item-info">
+              <strong>{{ p.name }}</strong>
+              {% if p.is_active %}<span class="pill good">active</span>{% endif %}
+            </div>
+            <div class="muted tiny">Updated {{ p.updated_at.strftime("%Y-%m-%d %H:%M UTC") }}</div>
+          </div>
+          <form hx-post="/dashboard/equipment/activate" hx-target="closest section" hx-swap="innerHTML" style="display:inline;">
+            <input type="hidden" name="profile_id" value="{{ p.id }}">
+            <button type="submit" class="ghost-small" {% if p.is_active %}disabled{% endif %}>
+              {% if p.is_active %}Active{% else %}Activate{% endif %}
+            </button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state-small">
+      <span class="muted">No saved profiles yet</span>
+    </div>
+  {% endif %}
+</div>
+
+<div class="subpanel">
+  <div class="panel-title small">Add / Update Profile</div>
+  <div class="form-stepper">
+    <span class="step active">1. Identity</span>
+    <span class="step">2. Camera</span>
+    <span class="step">3. Mechanics</span>
+    <span class="step">4. Presets</span>
+  </div>
+  <form hx-post="/dashboard/equipment/save" hx-target="closest section" hx-swap="innerHTML">
+
+    <!-- Profile Identity -->
+    <div class="form-section compact">
+      <div class="section-header">
+        <span class="section-icon">🏷️</span>
+        <span class="section-title">Profile Name</span>
+      </div>
+      <p class="section-description">Use a descriptive name (e.g., “C11 + 2600MM”) so everyone knows which rig is active.</p>
+      <div class="form-grid">
+        <label class="full-width">
+          <span class="label-text">Name</span>
+          <input type="text" name="name" required placeholder="e.g., Main Imaging Rig">
+        </label>
+      </div>
+    </div>
+
+    <!-- Camera Configuration -->
+    <div class="form-section compact with-aside">
+      <div>
+        <div class="section-header">
+          <span class="section-icon">📷</span>
+          <span class="section-title">Camera Configuration</span>
+        </div>
+        <p class="section-description">Scheduler limits exposure/temperature offsets using these capabilities.</p>
+        <div class="form-grid">
+          <label>
+            <span class="label-text">Camera Type</span>
+            <input type="text" name="camera_type" value="{{ profile.camera.type if profile else 'mono' }}" placeholder="mono, color, OSC">
+            <span class="hint">mono, color, OSC, etc.</span>
+          </label>
+          <label>
+            <span class="label-text">Max Binning</span>
+            <input type="number" name="camera_max_binning" value="{{ profile.camera.max_binning if profile else 1 }}" min="1">
+            <span class="hint">1×1, 2×2, 3×3, 4×4</span>
+          </label>
+          <label class="full-width">
+            <span class="label-text">Available Filters</span>
+            <input type="text" name="camera_filters" value="{{ profile.camera.filters | join(', ') if profile else '' }}" placeholder="L, R, G, B, Ha, SII, OIII">
+            <span class="hint">Comma-separated list</span>
+          </label>
+        </div>
+      </div>
+      <div class="section-aside helper-card">
+        <div class="helper-title">Filter naming tips</div>
+        <p>Match wheel slot labels exactly so preset commands hit the correct filter.</p>
+        <ul class="helper-list">
+          <li>Use uppercase abbreviations (L, R, G, B, Ha, OIII)</li>
+          <li>List narrowband filters last for clarity</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Focuser & Mount -->
+    <div class="form-section compact with-aside">
+      <div>
+        <div class="section-header">
+          <span class="section-icon">🔧</span>
+          <span class="section-title">Focuser & Mount</span>
+        </div>
+        <p class="section-description">Define mechanical travel so autofocus and parking automation stay safe.</p>
+        <div class="form-grid">
+          <label>
+            <span class="label-text">Focuser Min Position</span>
+            <input type="number" name="focuser_min" value="{{ profile.focuser.position_min if profile and profile.focuser else '' }}" placeholder="0">
+            <span class="hint">Minimum focuser position</span>
+          </label>
+          <label>
+            <span class="label-text">Focuser Max Position</span>
+            <input type="number" name="focuser_max" value="{{ profile.focuser.position_max if profile and profile.focuser else '' }}" placeholder="65535">
+            <span class="hint">Maximum focuser position</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="mount_supports_parking" {% if profile and profile.mount and profile.mount.supports_parking %}checked{% endif %}>
+            <span class="label-text">Mount supports parking</span>
+          </label>
+        </div>
+      </div>
+      <div class="section-aside helper-card">
+        <div class="helper-title">Mount safety</div>
+        <p>Disable parking support if the mount is controlled manually or lacks a reliable home sensor.</p>
+      </div>
+    </div>
+
+    <!-- Exposure Preset -->
+    <div class="form-section compact with-aside">
+      <div>
+        <div class="section-header">
+          <span class="section-icon">⏱️</span>
+          <span class="section-title">Add Exposure Preset (Optional)</span>
+        </div>
+        <p class="section-description">Extend or override the default bright/medium/faint presets right from the dashboard.</p>
+        <div class="form-grid">
+          <label>
+            <span class="label-text">Preset Name</span>
+            <input type="text" name="preset_name" placeholder="Luminance">
+            <span class="hint">e.g., Luminance, Red, Ha</span>
+          </label>
+          <label>
+            <span class="label-text">Exposure (seconds)</span>
+            <input type="number" step="0.1" name="preset_exposure" placeholder="20">
+          </label>
+          <label>
+            <span class="label-text">Binning</span>
+            <input type="number" name="preset_binning" value="1" min="1">
+          </label>
+          <label>
+            <span class="label-text">Filter</span>
+            <input type="text" name="preset_filter" placeholder="L">
+          </label>
+        </div>
+      </div>
+      <div class="section-aside helper-card">
+        <div class="helper-title">Preset guidance</div>
+        <p>Pair presets with target magnitude bands. Keep sequences to 3–6 frames for MPC submissions.</p>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="form-section compact">
+      <div class="form-grid">
+        <label class="checkbox-label">
+          <input type="checkbox" name="activate">
+          <span class="label-text">Set as active profile after saving</span>
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn-primary">💾 Save Profile</button>
+      </div>
+    </div>
+
+  </form>
+</div>

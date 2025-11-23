@@ -1,0 +1,15 @@
+<section class="panel">
+  <div class="panel-title">KPIs (7d)</div>
+  {% set solved_total = kpis.solved_per_day.values() | sum %}
+  {% set submissions_total = kpis.submissions_per_day.values() | sum %}
+  <ul class="list">
+    <li>Solves: {{ solved_total }}</li>
+    <li>Submissions: {{ submissions_total }}</li>
+  </ul>
+  {% if kpis.solved_per_day %}
+    <div class="muted tiny">Solves per day: {{ kpis.solved_per_day }}</div>
+  {% endif %}
+  {% if kpis.submissions_per_day %}
+    <div class="muted tiny">Submissions per day: {{ kpis.submissions_per_day }}</div>
+  {% endif %}
+</section>

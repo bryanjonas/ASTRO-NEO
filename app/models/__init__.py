@@ -5,6 +5,7 @@ from .astrometry import AstrometricSolution
 from .report import Measurement
 from .submission import SubmissionLog
 from .report import Measurement
+from .equipment import EquipmentProfileRecord
 from .neocp import (
     NeoCandidate,
     NeoCPSnapshot,
@@ -29,4 +30,5 @@ __all__ = [
     "NeoObservability",
     "NeoObservabilityRead",
     "WeatherSnapshot",
+    "EquipmentProfileRecord",
 ]
