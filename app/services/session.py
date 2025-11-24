@@ -35,6 +35,8 @@ class ObservingSession:
     target_mode: str = "auto"
     selected_target: str | None = None
     paused: bool = False
+    associations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    master_calibrations: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -57,6 +59,8 @@ class ObservingSession:
             "target_mode": self.target_mode,
             "selected_target": self.selected_target,
             "paused": self.paused,
+            "associations": self.associations,
+            "master_calibrations": self.master_calibrations,
         }
 
 
@@ -68,6 +72,8 @@ class SessionState:
         self.selected_preset: dict[str, Any] | None = None
         self.target_mode: str = "auto"
         self.selected_target: str | None = None
+        self.associations: dict[str, dict[str, Any]] = {}
+        self.master_calibrations: dict[str, str] = {}
 
     def start(
         self,
@@ -84,6 +90,8 @@ class SessionState:
             target_mode=self.target_mode,
             selected_target=self.selected_target,
             paused=False,
+            associations=self.associations,
+            master_calibrations=self.master_calibrations,
         )
         self.current = session
         return session
@@ -192,6 +200,7 @@ class SessionState:
         if self.current:
             self.current.selected_target = self.selected_target
             self.current.target_mode = self.target_mode
+            self.current.associations = self.associations
 
     def pause(self) -> ObservingSession | None:
         if not self.current:
@@ -204,6 +213,20 @@ class SessionState:
             return None
         self.current.paused = False
         return self.current
+
+    def set_association(self, path: str, ra_deg: float, dec_deg: float) -> dict[str, Any]:
+        entry = {"ra_deg": ra_deg, "dec_deg": dec_deg}
+        self.associations[path] = entry
+        if self.current:
+            self.current.associations = self.associations
+        return entry
+
+    def set_master(self, cal_type: str, path: str) -> dict[str, str]:
+        cal_type = cal_type.lower()
+        self.master_calibrations[cal_type] = path
+        if self.current:
+            self.current.master_calibrations = self.master_calibrations
+        return self.master_calibrations
 
 
 def _plan_to_calibrations(plan: list[CalibrationPlan]) -> list[SessionCalibration]:

@@ -8,6 +8,7 @@
     <button :class="{active: tab==='targets'}" @click="tab='targets'">Targets</button>
     <button :class="{active: tab==='exposures'}" @click="tab='exposures'">Exposures</button>
     <button :class="{active: tab==='solver'}" @click="tab='solver'">Solver</button>
+    <button :class="{active: tab==='association'}" @click="tab='association'">Association</button>
     <button :class="{active: tab==='reports'}" @click="tab='reports'">Reports</button>
   </nav>
 
@@ -34,12 +35,14 @@
   <section x-show="tab==='exposures'" class="panel">
     <div class="panel-title">Exposures & Session</div>
     <div class="actions">
-      <button hx-post="/api/session/start" hx-trigger="click" hx-swap="none" class="ghost">Start Session</button>
       <button hx-post="/api/session/calibration/run" hx-trigger="click" hx-swap="none" class="ghost">Run Calibrations</button>
       <button hx-post="/api/session/calibration/reset" hx-trigger="click" hx-swap="none" class="ghost">Reset Calibrations</button>
     </div>
     <div class="subpanel" hx-get="/dashboard/partials/exposure_config" hx-trigger="revealed" hx-target="this" hx-swap="innerHTML">
       <div class="muted">Exposure configuration loading...</div>
+    </div>
+    <div class="subpanel" hx-get="/dashboard/partials/masters" hx-trigger="revealed, every 30s" hx-target="this" hx-swap="innerHTML">
+      <div class="muted">Loading master frames...</div>
     </div>
     <div class="subpanel" hx-get="/dashboard/partials/session_status" hx-trigger="revealed, every 10s" hx-target="this" hx-swap="innerHTML">
       <div class="muted">Session status loading...</div>
@@ -49,9 +52,6 @@
     </div>
     <div class="subpanel capture-viewer" id="capture-viewer-panel" hx-get="/dashboard/partials/capture_viewer" hx-trigger="revealed" hx-target="this" hx-swap="innerHTML">
       <div class="muted">Select a recent capture to preview the FITS frame.</div>
-    </div>
-    <div class="subpanel" hx-get="/dashboard/partials/solutions" hx-trigger="revealed, every 15s" hx-target="this" hx-swap="innerHTML">
-      <div class="muted">Astrometry solves loading...</div>
     </div>
     <div class="subpanel">
       <div class="panel-title small">Retention</div>
@@ -65,6 +65,11 @@
   <section x-show="tab==='solver'" class="panel" hx-get="/dashboard/partials/solutions" hx-trigger="revealed, every 15s" hx-target="this" hx-swap="innerHTML">
     <div class="panel-title">Solver</div>
     <div class="muted">Loading astrometry solves...</div>
+  </section>
+
+  <section x-show="tab==='association'" class="panel" hx-get="/dashboard/partials/association" hx-trigger="revealed, every 20s" hx-target="this" hx-swap="innerHTML">
+    <div class="panel-title">Association</div>
+    <div class="muted">Loading association workflow...</div>
   </section>
 
   <section x-show="tab==='reports'" class="panel" hx-get="/dashboard/partials/reports" hx-trigger="revealed, every 25s" hx-target="this" hx-swap="innerHTML">

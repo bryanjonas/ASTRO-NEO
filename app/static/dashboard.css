@@ -146,6 +146,15 @@ form { display: block; width: 100%; }
 .capture-row:hover { color: var(--accent); }
 .capture-preview { margin-top: 12px; }
 .capture-preview img { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
+.solver-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.solver-table th, .solver-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+.solver-table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+.association-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.association-form input { width: 120px; background: #0f141b; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--text); font-size: 12px; }
+.association-form input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(93, 212, 255, 0.2); }
+.master-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 10px; }
+.master-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: rgba(255, 255, 255, 0.02); }
+.file-input { color: var(--text); font-size: 12px; margin: 6px 0; }
 
 /* Preset tags */
 .preset-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
