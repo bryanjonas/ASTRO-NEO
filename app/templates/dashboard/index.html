@@ -53,13 +53,6 @@
     <div class="subpanel capture-viewer" id="capture-viewer-panel" hx-get="/dashboard/partials/capture_viewer" hx-trigger="revealed" hx-target="this" hx-swap="innerHTML">
       <div class="muted">Select a recent capture to preview the FITS frame.</div>
     </div>
-    <div class="subpanel">
-      <div class="panel-title small">Retention</div>
-      <div hx-get="/api/retention/status" hx-trigger="revealed, every 30s" hx-target="#retention-summary" hx-swap="innerHTML">
-        <div id="retention-summary" class="muted">Checking retention...</div>
-      </div>
-      <button hx-post="/api/retention/prune" hx-vals='{"dry_run":true}' class="ghost">Dry-Run Prune</button>
-    </div>
   </section>
 
   <section x-show="tab==='solver'" class="panel" hx-get="/dashboard/partials/solutions" hx-trigger="revealed, every 15s" hx-target="this" hx-swap="innerHTML">

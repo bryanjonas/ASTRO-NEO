@@ -8,6 +8,7 @@ from .core.config import settings
 from .core.site_config import bootstrap_site_config
 from .db.session import init_db
 from .dashboard import router as dashboard_router
+from .services.captures import prune_missing_captures
 
 
 def create_app() -> FastAPI:
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     def _bootstrap_site_config() -> None:
         bootstrap_site_config()
         init_db()
+        prune_missing_captures()
 
     return app
 
