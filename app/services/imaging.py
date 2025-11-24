@@ -1,11 +1,11 @@
-"""Imaging helpers for FITS naming and retention calculations."""
+"""Imaging helpers for FITS naming and file naming."""
 
 from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable
 
 from app.core.config import settings
 
@@ -42,27 +42,4 @@ def build_fits_path(
     return root / filename
 
 
-def retention_candidates(root: str | Path | None = None, retention_days: int | None = None) -> Iterator[Path]:
-    """
-    Yield FITS files older than the retention window.
-    Caller decides whether to delete; this function is read-only.
-    """
-
-    base = Path(root or settings.data_root) / "fits"
-    window_days = retention_days if retention_days is not None else settings.fits_retention_days
-    cutoff = datetime.utcnow() - timedelta(days=max(0, window_days))
-    if not base.exists():
-        return iter(())
-
-    def _iter_files(paths: Iterable[Path]) -> Iterator[Path]:
-        for path in paths:
-            if not path.is_file():
-                continue
-            mtime = datetime.utcfromtimestamp(path.stat().st_mtime)
-            if mtime < cutoff:
-                yield path
-
-    return _iter_files(base.rglob("*.fits"))
-
-
-__all__ = ["build_fits_path", "sanitize_target_name", "retention_candidates"]
+__all__ = ["build_fits_path", "sanitize_target_name"]

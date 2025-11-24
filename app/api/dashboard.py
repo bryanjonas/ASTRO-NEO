@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.api.session import dashboard_status as session_dashboard_status
-from app.services.imaging import retention_candidates
 from app.services.notifications import NOTIFICATIONS
 from app.api.deps import get_db
 from app.models import AstrometricSolution
@@ -20,7 +19,6 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("/status")
 def dashboard_status() -> Any:
     session_bundle = session_dashboard_status()
-    expired = list(retention_candidates())
     notifications = [
         {
             "level": n.level,
@@ -35,7 +33,6 @@ def dashboard_status() -> Any:
         "bridge_ready": session_bundle.get("bridge_ready"),
         "bridge_status": session_bundle.get("bridge_status"),
         "session": session_bundle.get("session"),
-        "retention": {"expired_count": len(expired)},
         "notifications": notifications,
     }
 

@@ -19,7 +19,6 @@ from sqlmodel import select
 from sqlalchemy import func
 
 from app.api.session import dashboard_status as session_dashboard_status
-from app.api.retention import retention_status
 from app.db.session import get_session
 from app.models import (
     AstrometricSolution,
@@ -64,10 +63,8 @@ def _render_status_panel(
     status_banner: dict[str, str] | None = None,
     status_code: int = 200,
     bundle: dict | None = None,
-    retention: dict | None = None,
 ) -> HTMLResponse:
     bundle = bundle or session_dashboard_status()
-    retention = retention or retention_status()
     raw_blockers = bundle.get("bridge_blockers") or []
     ignored = {"camera_exposing", "sequence_running"}
     filtered_blockers = []
@@ -83,7 +80,6 @@ def _render_status_panel(
         {
             "request": request,
             "bundle": bundle,
-            "retention": retention,
             "status_banner": status_banner,
         },
         status_code=status_code,
@@ -509,7 +505,6 @@ async def exposure_config_update(request: Request) -> Any:
 def night_start(request: Request) -> Any:
     """Convenience button on Live tab to kick off nightly session prep."""
     bundle = session_dashboard_status()
-    retention = retention_status()
     if not _bridge_is_ready(bundle):
         return _render_status_panel(
             request,
@@ -519,14 +514,12 @@ def night_start(request: Request) -> Any:
             },
             status_code=400,
             bundle=bundle,
-            retention=retention,
         )
     if SESSION_STATE.current:
         return _render_status_panel(
             request,
             status_banner={"kind": "info", "text": "Session already running. Use Pause or End to change state."},
             bundle=bundle,
-            retention=retention,
         )
     SESSION_STATE.start(notes="night-start")
     try:
