@@ -1,60 +1,55 @@
-<section class="panel">
-  <div class="panel-title">Recent Solves</div>
-  {% if solutions %}
-  <ul class="list">
-    {% for s in solutions %}
-      <li>
-        <span class="pill {{ 'good' if s.success else 'bad' }}">{{ 'ok' if s.success else 'fail' }}</span>
-        {{ s.target or s.path | default('') }}
-        <span class="muted">RA {{ '%.4f'|format(s.ra_deg or 0) }} Dec {{ '%.4f'|format(s.dec_deg or 0) }}</span>
-        {% if s.uncertainty_arcsec %}<span class="muted">RMS {{ '%.2f'|format(s.uncertainty_arcsec) }}"</span>{% endif %}
-        {% if s.snr %}<span class="muted">SNR {{ '%.1f'|format(s.snr) }}</span>{% endif %}
-        {% if s.mag_inst %}<span class="muted">Mag {{ '%.2f'|format(s.mag_inst) }}</span>{% endif %}
-        {% if s.flags %}<span class="pill warn">{{ s.flags }}</span>{% endif %}
-        <span class="muted">{{ s.solved_at }}</span>
-        {% if s.capture_id %}
-        <button class="ghost" hx-post="/api/astrometry/solve" hx-vals='{"capture_id": {{ s.capture_id }} }' hx-target="closest section" hx-swap="outerHTML">Re-run</button>
-        <button class="ghost" hx-post="/api/astrometry/report" hx-vals='{"measurement_ids":[{{ s.measurement_id or "" }}], "format":"ADES"}'>Report</button>
-        {% endif %}
-      </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-    <div class="muted">No solves yet.</div>
-  {% endif %}
-</section>
+<div class="panel-title">Solver</div>
+{% if solver_activity %}<div class="status-banner info">{{ solver_activity }}</div>{% endif %}
 
-<section class="panel">
-  <div class="panel-title">Submissions</div>
-  {% if submissions %}
-  <ul class="list">
-    {% for sub in submissions %}
-      <li>
-        <span class="pill {% if sub.status in ['failed', 'error'] %}bad{% elif sub.status in ['acked', 'sent'] %}good{% else %}warn{% endif %}">{{ sub.status }}</span>
-        <strong>#{{ sub.id }}</strong>
-        <span class="muted">{{ sub.channel }}</span>
-        {% if sub.report_path %}<span class="muted">{{ sub.report_path }}</span>{% endif %}
-        <span class="muted">{{ sub.created_at }}</span>
-      </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-    <div class="muted">No submissions yet.</div>
-  {% endif %}
-</section>
+{% if targets %}
+  <form class="targets-controls" hx-get="/dashboard/partials/solutions" hx-target="closest section" hx-swap="outerHTML">
+    <label class="muted tiny">Select target</label>
+    <select name="target" onchange="this.form.submit()">
+      {% for t in targets %}
+        <option value="{{ t.name }}" {% if t.name == selected_target %}selected{% endif %}>
+          {{ t.name }} ({{ t.count }})
+        </option>
+      {% endfor %}
+    </select>
+  </form>
+{% endif %}
 
-<section class="panel">
-  <div class="panel-title">KPIs</div>
-  {% set solved_total = kpis.solved_per_day.values() | sum %}
-  {% set submissions_total = kpis.submissions_per_day.values() | sum %}
-  <ul class="list">
-    <li>Solves (7d): {{ solved_total }}</li>
-    <li>Submissions (7d): {{ submissions_total }}</li>
-  </ul>
-  {% if kpis.solved_per_day %}
-    <div class="muted tiny">Solves per day: {{ kpis.solved_per_day }}</div>
-  {% endif %}
-  {% if kpis.submissions_per_day %}
-    <div class="muted tiny">Submissions per day: {{ kpis.submissions_per_day }}</div>
-  {% endif %}
-</section>
+{% if captures %}
+  <table class="solver-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Started</th>
+        <th>Status</th>
+        <th>RA</th>
+        <th>Dec</th>
+        <th>RMS (")</th>
+        <th>SNR</th>
+        <th>Mag</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cap in captures %}
+        {% set sol = solutions_map.get(cap.id) if solutions_map else None %}
+        <tr>
+          <td>{{ cap.index or '-' }}</td>
+          <td>{{ cap.started_at }}</td>
+          <td>
+            {% if sol %}
+              <span class="pill {{ 'good' if sol.success else 'warn' }}">{{ 'solved' if sol.success else 'failed' }}</span>
+            {% else %}
+              <span class="pill warn">pending</span>
+            {% endif %}
+          </td>
+          <td>{{ '%.4f'|format(sol.ra_deg) if sol and sol.ra_deg is not none else '—' }}</td>
+          <td>{{ '%.4f'|format(sol.dec_deg) if sol and sol.dec_deg is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(sol.uncertainty_arcsec) if sol and sol.uncertainty_arcsec is not none else '—' }}</td>
+          <td>{{ '%.1f'|format(sol.snr) if sol and sol.snr is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(sol.mag_inst) if sol and sol.mag_inst is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="muted">No captures found for this target.</div>
+{% endif %}

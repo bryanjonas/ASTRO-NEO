@@ -14,6 +14,10 @@
           <div class="muted tiny">{{ cap.started_at }}</div>
           <div class="muted tiny">{{ cap.path }}</div>
         </button>
+        <form hx-post="/dashboard/capture/delete" hx-target="closest .subpanel" hx-swap="innerHTML" style="display:inline;">
+          <input type="hidden" name="path" value="{{ cap.path }}">
+          <button type="submit" class="ghost-small">Delete</button>
+        </form>
       </li>
     {% endfor %}
   </ul>

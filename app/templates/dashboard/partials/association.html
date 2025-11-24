@@ -1,0 +1,64 @@
+<div class="panel-title">Association</div>
+<p class="panel-description">Align detections to the predicted NEOCP position; add manual centroids when automation is unsure.</p>
+
+{% if targets %}
+  <form class="targets-controls" hx-get="/dashboard/partials/association" hx-target="closest section" hx-swap="outerHTML">
+    <label class="muted tiny">Select target</label>
+    <select name="target" onchange="this.form.submit()">
+      {% for t in targets %}
+        <option value="{{ t.name }}" {% if t.name == selected_target %}selected{% endif %}>
+          {{ t.name }} ({{ t.count }})
+        </option>
+      {% endfor %}
+    </select>
+  </form>
+{% endif %}
+
+{% if captures %}
+  <table class="solver-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Started</th>
+        <th>Predicted RA/Dec</th>
+        <th>Manual RA/Dec</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cap in captures %}
+        {% set assoc = associations.get(cap.path) if associations else None %}
+        <tr>
+          <td>{{ cap.index or '-' }}</td>
+          <td>{{ cap.started_at }}</td>
+          <td class="muted tiny">Ephemeris pending</td>
+          <td>
+            {% if assoc %}
+              {{ '%.5f'|format(assoc.ra_deg) }}, {{ '%.5f'|format(assoc.dec_deg) }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            {% if assoc %}
+              <span class="pill good">manual</span>
+            {% else %}
+              <span class="pill warn">pending</span>
+            {% endif %}
+          </td>
+          <td>
+            <form class="association-form" hx-post="/dashboard/association/manual" hx-target="closest section" hx-swap="outerHTML">
+              <input type="hidden" name="path" value="{{ cap.path }}">
+              <input type="number" step="0.00001" name="ra_deg" placeholder="RA deg">
+              <input type="number" step="0.00001" name="dec_deg" placeholder="Dec deg">
+              <button type="submit" class="btn-secondary">Save</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="muted">No captures recorded for association yet.</div>
+{% endif %}

@@ -18,14 +18,6 @@
     </ul>
   {% endif %}
 
-  {% if session.captures %}
-    <div class="panel-title small">Recent captures</div>
-    <ul class="list">
-      {% for cap in session.captures[-3:] %}
-        <li>{{ cap.target }} #{{ cap.index }} <span class="muted tiny">{{ cap.started_at }}</span></li>
-      {% endfor %}
-    </ul>
-  {% endif %}
 {% else %}
   <div class="muted">No active session.</div>
 {% endif %}

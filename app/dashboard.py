@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from PIL import Image
 from sqlmodel import select
+from sqlalchemy import func
 
 from app.api.session import dashboard_status as session_dashboard_status
 from app.api.retention import retention_status
@@ -23,6 +24,7 @@ from app.db.session import get_session
 from app.models import (
     AstrometricSolution,
     EquipmentProfileRecord,
+    CaptureLog,
     NeoCandidate,
     NeoObservability,
     SiteConfig,
@@ -106,42 +108,46 @@ def captures_partial(request: Request) -> Any:
 
 @router.get("/dashboard/partials/solutions", response_class=HTMLResponse)
 def solutions_partial(request: Request) -> Any:
-    """Render recent astrometry solutions plus submissions and KPIs in one shot."""
+    """Render solver view with target selector and per-frame solve status."""
+    selected_target = request.query_params.get("target")
     with get_session() as session:
-        stmt = (
-            select(AstrometricSolution)
-            .order_by(AstrometricSolution.solved_at.desc())
-            .limit(15)
-        )
-        rows = session.exec(stmt).all()
-        sub_stmt = select(SubmissionLog).order_by(SubmissionLog.created_at.desc()).limit(10)
-        submissions = session.exec(sub_stmt).all()
-    kpis = KPIService().daily_counts()
-    solutions = [
-        {
-            "id": row.id,
-            "capture_id": row.capture_id,
-            "measurement_id": getattr(row, "measurement_id", None),
-            "path": row.path,
-            "ra_deg": row.ra_deg,
-            "dec_deg": row.dec_deg,
-            "uncertainty_arcsec": row.uncertainty_arcsec,
-            "snr": getattr(row, "snr", None),
-            "mag_inst": getattr(row, "mag_inst", None),
-            "flags": row.flags,
-            "solved_at": row.solved_at,
-            "success": row.success,
-            "target": row.target,
-        }
-        for row in rows
-    ]
+        target_rows = session.exec(
+            select(CaptureLog.target, func.count().label("count"), func.max(CaptureLog.started_at).label("latest"))
+            .group_by(CaptureLog.target)
+            .order_by(func.max(CaptureLog.started_at).desc())
+            .limit(30)
+        ).all()
+        targets = [{"name": row[0], "count": row[1], "latest": row[2]} for row in target_rows]
+        if not selected_target and targets:
+            selected_target = targets[0]["name"]
+        captures = []
+        solutions_map: dict[int, AstrometricSolution] = {}
+        solver_activity = None
+        if selected_target:
+            capture_rows = session.exec(
+                select(CaptureLog).where(CaptureLog.target == selected_target).order_by(CaptureLog.started_at.desc())
+            ).all()
+            captures = list(capture_rows)
+            capture_ids = [c.id for c in captures if c.id]
+            if capture_ids:
+                solution_rows = session.exec(
+                    select(AstrometricSolution).where(AstrometricSolution.capture_id.in_(capture_ids))
+                ).all()
+                solutions_map = {row.capture_id: row for row in solution_rows if row.capture_id}
+            pending = [c for c in captures if c.id not in solutions_map]
+            if pending:
+                solver_activity = f"Pending solves: {len(pending)}"
+            elif solutions_map:
+                solver_activity = "All frames solved for this target."
     return templates.TemplateResponse(
         "dashboard/partials/solutions.html",
         {
             "request": request,
-            "solutions": solutions,
-            "submissions": submissions,
-            "kpis": kpis,
+            "targets": targets,
+            "selected_target": selected_target,
+            "captures": captures,
+            "solutions_map": solutions_map,
+            "solver_activity": solver_activity,
         },
     )
 
@@ -345,6 +351,102 @@ def session_status_partial_panel(request: Request) -> Any:
     )
 
 
+@router.get("/dashboard/partials/association", response_class=HTMLResponse)
+def association_partial(request: Request) -> Any:
+    """Association workflow view: select target and annotate centroids."""
+    captures = SESSION_STATE.current.captures if SESSION_STATE.current else []
+    targets: list[dict[str, Any]] = []
+    by_target: dict[str, list[dict[str, Any]]] = {}
+    for cap in captures:
+        tgt = cap.get("target") or "unknown"
+        by_target.setdefault(tgt, []).append(cap)
+    for tgt, items in by_target.items():
+        latest = items[-1]["started_at"] if items else None
+        targets.append({"name": tgt, "count": len(items), "latest": latest})
+    targets = sorted(targets, key=lambda t: t["latest"] or "", reverse=True)
+    selected_target = request.query_params.get("target")
+    if not selected_target and targets:
+        selected_target = targets[0]["name"]
+    selected_captures = by_target.get(selected_target, []) if selected_target else []
+    associations = SESSION_STATE.associations if SESSION_STATE else {}
+    return templates.TemplateResponse(
+        "dashboard/partials/association.html",
+        {
+            "request": request,
+            "targets": targets,
+            "selected_target": selected_target,
+            "captures": selected_captures,
+            "associations": associations,
+        },
+    )
+
+
+@router.post("/dashboard/association/manual", response_class=HTMLResponse)
+async def association_manual(request: Request) -> Any:
+    """Record a manual centroid for a capture path."""
+    form = await request.form()
+    path = form.get("path")
+    ra = form.get("ra_deg")
+    dec = form.get("dec_deg")
+    error = None
+    if not path or not ra or not dec:
+        error = "Provide path, RA, and Dec."
+    else:
+        try:
+            ra_f = float(ra)
+            dec_f = float(dec)
+            SESSION_STATE.set_association(path, ra_f, dec_f)
+        except Exception:
+            error = "Invalid RA/Dec values."
+    # Re-render association partial
+    return association_partial(request)
+
+
+@router.get("/dashboard/partials/masters", response_class=HTMLResponse)
+def masters_partial(request: Request) -> Any:
+    """Render master calibration upload/selection pane."""
+    master_root = Path("/data/masters")
+    types = ["bias", "dark", "flat"]
+    existing: dict[str, list[str]] = {}
+    for t in types:
+        paths = []
+        for p in (master_root / t).glob("*"):
+            if p.is_file():
+                paths.append(str(p))
+        existing[t] = sorted(paths)
+    selected = SESSION_STATE.master_calibrations if SESSION_STATE else {}
+    return templates.TemplateResponse(
+        "dashboard/partials/masters.html",
+        {"request": request, "existing": existing, "selected": selected},
+    )
+
+
+@router.post("/dashboard/masters/upload", response_class=HTMLResponse)
+async def masters_upload(request: Request) -> Any:
+    form = await request.form()
+    cal_type = (form.get("cal_type") or "").lower()
+    file = form.get("file")
+    if cal_type not in {"bias", "dark", "flat"} or not file:
+        return masters_partial(request)
+    master_root = Path("/data/masters") / cal_type
+    master_root.mkdir(parents=True, exist_ok=True)
+    dest = master_root / (file.filename or f"{cal_type}.fits")
+    content = await file.read()
+    dest.write_bytes(content)
+    SESSION_STATE.set_master(cal_type, str(dest))
+    return masters_partial(request)
+
+
+@router.post("/dashboard/masters/select", response_class=HTMLResponse)
+async def masters_select(request: Request) -> Any:
+    form = await request.form()
+    cal_type = (form.get("cal_type") or "").lower()
+    path = form.get("path")
+    if cal_type and path:
+        SESSION_STATE.set_master(cal_type, path)
+    return masters_partial(request)
+
+
 @router.post("/dashboard/exposure/select", response_class=HTMLResponse)
 async def exposure_select(request: Request) -> Any:
     """HTMX handler to mark a preset as active for the current session."""
@@ -473,6 +575,43 @@ def night_end(request: Request) -> Any:
     return _render_status_panel(
         request,
         status_banner={"kind": "info", "text": "Session ended. Start again when ready."},
+    )
+
+
+@router.post("/dashboard/capture/delete", response_class=HTMLResponse)
+async def capture_delete(request: Request) -> Any:
+    """Delete a capture log entry and associated file/solution."""
+    form = await request.form()
+    path = form.get("path")
+    if not path:
+        return templates.TemplateResponse(
+            "dashboard/partials/captures.html",
+            {"request": request, "captures": SESSION_STATE.current.captures if SESSION_STATE.current else []},
+            status_code=400,
+        )
+    # Remove from DB and solutions
+    with get_session() as session:
+        rows = session.exec(select(CaptureLog).where(CaptureLog.path == path)).all()
+        capture_ids = [row.id for row in rows if row.id]
+        if capture_ids:
+            session.exec(select(AstrometricSolution).where(AstrometricSolution.capture_id.in_(capture_ids))).all()
+            session.exec(AstrometricSolution.__table__.delete().where(AstrometricSolution.capture_id.in_(capture_ids)))
+        session.exec(CaptureLog.__table__.delete().where(CaptureLog.path == path))
+        session.commit()
+    # Remove file on disk
+    try:
+        fits_path = Path(path)
+        if fits_path.exists():
+            fits_path.unlink()
+    except Exception:
+        pass
+    # Remove from in-memory session captures
+    if SESSION_STATE.current:
+        SESSION_STATE.current.captures = [c for c in SESSION_STATE.current.captures if c.get("path") != path]
+    captures = SESSION_STATE.current.captures if SESSION_STATE.current else []
+    return templates.TemplateResponse(
+        "dashboard/partials/captures.html",
+        {"request": request, "captures": captures},
     )
 
 
