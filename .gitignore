@@ -33,3 +33,5 @@ postgres_data/
 
 # Node/other
 node_modules/
+
+test_images/
