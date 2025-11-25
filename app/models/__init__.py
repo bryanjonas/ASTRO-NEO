@@ -1,5 +1,6 @@
 """Database models."""
 
+from .analysis import CandidateAssociation
 from .capture import CaptureLog
 from .astrometry import AstrometricSolution
 from .report import Measurement
@@ -18,6 +19,7 @@ from .site import SiteConfig
 from .weather import WeatherSnapshot
 
 __all__ = [
+    "CandidateAssociation",
     "CaptureLog",
     "AstrometricSolution",
     "Measurement",

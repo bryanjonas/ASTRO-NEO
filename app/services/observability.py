@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
-from astropy.coordinates import AltAz, SkyCoord, get_moon
+from astropy.coordinates import AltAz, SkyCoord, get_body
 from astropy.time import Time
 import astropy.units as u
 from astroplan import FixedTarget, Observer
@@ -216,7 +216,7 @@ class ObservabilityService:
         altitude_ok = altitudes >= np.maximum(horizon_limits, self.min_altitude)
         sun_ok = self.sun_altitudes <= self.max_sun_altitude
 
-        moon_coords = get_moon(self.time_grid, location=self.observer.location)
+        moon_coords = get_body("moon", self.time_grid, location=self.observer.location)
         moon_separation = coords_for_moon.separation(moon_coords).deg
         moon_ok = moon_separation >= self.min_moon_separation
 

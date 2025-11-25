@@ -37,6 +37,7 @@ class ObservingSession:
     paused: bool = False
     associations: dict[str, dict[str, Any]] = field(default_factory=dict)
     master_calibrations: dict[str, str] = field(default_factory=dict)
+    predicted: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +62,7 @@ class ObservingSession:
             "paused": self.paused,
             "associations": self.associations,
             "master_calibrations": self.master_calibrations,
+            "predicted": self.predicted,
         }
 
 
@@ -74,6 +76,7 @@ class SessionState:
         self.selected_target: str | None = None
         self.associations: dict[str, dict[str, Any]] = {}
         self.master_calibrations: dict[str, str] = {}
+        self.predicted: dict[str, dict[str, Any]] = {}
 
     def start(
         self,
@@ -92,6 +95,7 @@ class SessionState:
             paused=False,
             associations=self.associations,
             master_calibrations=self.master_calibrations,
+            predicted=self.predicted,
         )
         self.current = session
         return session
@@ -219,6 +223,13 @@ class SessionState:
         self.associations[path] = entry
         if self.current:
             self.current.associations = self.associations
+        return entry
+
+    def set_prediction(self, path: str, ra_deg: float, dec_deg: float) -> dict[str, Any]:
+        entry = {"ra_deg": ra_deg, "dec_deg": dec_deg}
+        self.predicted[path] = entry
+        if self.current:
+            self.current.predicted = self.predicted
         return entry
 
     def set_master(self, cal_type: str, path: str) -> dict[str, str]:

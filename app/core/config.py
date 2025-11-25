@@ -60,11 +60,22 @@ class Settings(BaseSettings):
     nina_bridge_timeout: float = 15.0
     data_root: str = "/data"
     fits_retention_days: int = 14
+    astrometry_worker_url: str | None = "http://astrometry-worker:8100"
+    astrometry_worker_timeout: float = 300.0
+    astrometry_config_path: str = "/app/astrometry.cfg"
+    astrometry_scale_low_arcsec: float | None = None
+    astrometry_scale_high_arcsec: float | None = None
+    astrometry_search_radius_deg: float | None = None
+    astrometry_downsample: int | None = None
     calibration_dark_counts: int = 10
     calibration_flat_counts: int = 10
     calibration_bias_counts: int = 20
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

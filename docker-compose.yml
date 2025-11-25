@@ -19,6 +19,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - ./data:/data
   neocp-fetcher:
     build:
       context: .
@@ -58,10 +59,13 @@ services:
       context: .
       dockerfile: docker/astrometry.Dockerfile
     pull_policy: build
+    environment:
+      ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
+      ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
     volumes:
-      - ./data/astrometry-indexes:/data/indexes:ro
-      - ./data/fits:/data/fits:ro
-    command: ["sleep", "infinity"]
+      - ./data:/data
+    ports:
+      - "18100:8100"
   nina-bridge:
     build:
       context: .

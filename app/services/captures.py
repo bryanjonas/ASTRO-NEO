@@ -9,7 +9,7 @@ from typing import Any, Optional
 from sqlmodel import Session, select
 
 from app.db.session import get_session
-from app.models import AstrometricSolution, CaptureLog
+from app.models import AstrometricSolution, CaptureLog, CandidateAssociation
 
 
 def record_capture(entry: dict[str, Any], session: Optional[Session] = None) -> None:
@@ -24,6 +24,12 @@ def record_capture(entry: dict[str, Any], session: Optional[Session] = None) -> 
     )
 
     def _save(db: Session) -> None:
+        # Check for existing capture by path
+        existing = db.exec(select(CaptureLog).where(CaptureLog.path == model.path)).first()
+        if existing:
+            # Update existing? Or just skip?
+            # For now, let's just skip adding if it exists to prevent duplicates
+            return
         db.add(model)
         db.commit()
 
@@ -55,8 +61,9 @@ def prune_missing_captures(session: Session | None = None) -> int:
             if not row.path:
                 continue
             if not Path(row.path).exists():
-                # Delete associated solutions
+                # Delete associated solutions and associations
                 db.exec(AstrometricSolution.__table__.delete().where(AstrometricSolution.capture_id == row.id))
+                db.exec(CandidateAssociation.__table__.delete().where(CandidateAssociation.capture_id == row.id))
                 db.exec(CaptureLog.__table__.delete().where(CaptureLog.id == row.id))
                 removed += 1
         db.commit()

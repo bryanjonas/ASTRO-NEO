@@ -25,6 +25,7 @@ dependencies = [
     "prometheus-client~=0.20",
     "photutils~=1.12",
     "Pillow~=10.4",
+    "scipy~=1.11",
 ]
 
 [project.optional-dependencies]

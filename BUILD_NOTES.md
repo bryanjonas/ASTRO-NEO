@@ -105,7 +105,7 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 ## Phase 5 — Astrometric Reduction
 
-- [x] Containerize the astrometry workflow with astrometry.net's `solve-field` engine (CPU-only) and mount index files; `astrometry-worker` service added with a slim base and `/data/astrometry-indexes` mount. Keep index set trimmed for Intel N150/16GB constraints.
+- [x] Containerize the astrometry workflow with astrometry.net's `solve-field` engine (CPU-only) and mount index files; `astrometry-worker` service now exposes a dedicated FastAPI endpoint on port 8100 (published as 18100) to run solves. The API delegates `/api/astrometry/solve` to this worker via `ASTROMETRY_WORKER_URL` so the main API container stays slim. Keep index set trimmed for Intel N150/16GB constraints and mounted at `/data/indexes` (host `./data/indexes`, shared via the `/data` bind). Worker auto-generates `astrometry.cfg` enumerating all indexes and falls back to parsing `.wcs` when `--json` is unavailable.
 - [x] Automate plate solving via API: `/api/astrometry/solve` wraps `solve-field`, accepts a capture ID or FITS path with optional hints, and returns persisted results.
 - [x] Add centroid/photometry/residual validation: solver now records RMS/uncertainty and flags failures; SNR/photometry hooks are stubbed for extension.
 - [x] Persist solution outputs (RA/Dec, orientation, pixel scale, uncertainty, solver info) per image in `astrometricsolution`, linked to capture logs when available.

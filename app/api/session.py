@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.services.nina_bridge import NinaBridgeService
 from app.services.night_ops import NightSessionError, kickoff_imaging
 from app.services.session import SESSION_STATE
+from datetime import datetime
 
 router = APIRouter(prefix="/session", tags=["session"])
 
@@ -31,6 +32,17 @@ class CalibrationResetPayload(BaseModel):
 
 class SessionPausePayload(BaseModel):
     pause: bool = Field(default=True)
+
+
+class CaptureIn(BaseModel):
+    kind: str = Field(default="synthetic", max_length=32)
+    target: str = Field(..., max_length=128)
+    sequence: str | None = Field(default=None, max_length=128)
+    index: int | None = Field(default=None)
+    path: str = Field(..., max_length=512)
+    started_at: datetime = Field(...)
+    predicted_ra_deg: float | None = Field(default=None)
+    predicted_dec_deg: float | None = Field(default=None)
 
 
 @router.post("/calibration/run")
@@ -98,6 +110,29 @@ def session_pause(payload: SessionPausePayload | None = Body(None)) -> Any:
     pause = True if payload is None else payload.pause
     session = SESSION_STATE.pause() if pause else SESSION_STATE.resume()
     return {"active": True, "session": session.to_dict()}
+
+
+@router.post("/ingest_captures")
+def ingest_captures(captures: list[CaptureIn]) -> Any:
+    """Inject captures into the in-memory session for association/solver workflows."""
+    if not SESSION_STATE.current:
+        SESSION_STATE.start(notes="synthetic-ingest")
+    payloads: list[dict[str, Any]] = []
+    for cap in captures:
+        payloads.append(
+            {
+                "kind": cap.kind,
+                "target": cap.target,
+                "sequence": cap.sequence,
+                "index": cap.index,
+                "path": cap.path,
+                "started_at": cap.started_at.isoformat(),
+            }
+        )
+        if cap.predicted_ra_deg is not None and cap.predicted_dec_deg is not None:
+            SESSION_STATE.set_prediction(cap.path, cap.predicted_ra_deg, cap.predicted_dec_deg)
+    SESSION_STATE.add_captures(payloads)
+    return {"active": True, "session": SESSION_STATE.current.to_dict(), "count": len(payloads)}
 
 
 @router.get("/dashboard/status")
