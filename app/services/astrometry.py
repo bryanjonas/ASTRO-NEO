@@ -58,6 +58,8 @@ class AstrometryService:
                 fields = self._extract_fields(result)
                 quality = self._run_photometry(solve_path)
                 flags = self._collect_flags(fields, quality)
+                # missing_rms is not a critical failure
+                critical_flags = [f for f in flags if f != "missing_rms"]
                 model = AstrometricSolution(
                     capture_id=capture.id if capture else None,
                     target=capture.target if capture else None,
@@ -71,11 +73,32 @@ class AstrometryService:
                     mag_inst=quality.get("mag_inst") if quality else None,
                     flags=json.dumps(flags) if flags else None,
                     duration_seconds=duration,
-                    success=not flags,
+                    success=not critical_flags,
                     solver_info=json.dumps(result),
                 )
                 if capture:
                     self._persist_measurement(db, capture, fields, quality, flags)
+                    
+                    # Attempt automatic association
+                    try:
+                        from app.services.analysis import AnalysisService
+                        from astropy.wcs import WCS
+                        
+                        # Reconstruct WCS from solver info (simplified)
+                        # Ideally we'd load the .wcs file or use the header from the image if updated
+                        # But for now, let's assume we can get it from the file or rebuild it
+                        # Actually, solve_fits returns the WCS object in some modes, or we can load it
+                        # Let's try to load the WCS from the file if it was updated, or from the .wcs file
+                        
+                        wcs_path = solve_path.with_suffix(".wcs")
+                        if wcs_path.exists():
+                            wcs = WCS(str(wcs_path))
+                            analysis = AnalysisService(db)
+                            analysis.auto_associate(db, capture, wcs)
+                    except Exception:
+                        # Don't fail the solve if association fails
+                        pass
+                        
             except SolveError as exc:
                 duration = time.perf_counter() - started
                 model = AstrometricSolution(

@@ -22,9 +22,11 @@ from app.api.session import dashboard_status as session_dashboard_status
 from app.db.session import get_session
 from app.models import (
     AstrometricSolution,
+    CandidateAssociation,
     EquipmentProfileRecord,
     CaptureLog,
     NeoCandidate,
+    NeoEphemeris,
     NeoObservability,
     SiteConfig,
     SubmissionLog,
@@ -44,6 +46,7 @@ from app.services.night_ops import NightSessionError, kickoff_imaging
 from app.services.weather import WeatherService
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["basename"] = lambda p: Path(p).name if p else ""
 router = APIRouter()
 
 
@@ -350,29 +353,87 @@ def session_status_partial_panel(request: Request) -> Any:
 @router.get("/dashboard/partials/association", response_class=HTMLResponse)
 def association_partial(request: Request) -> Any:
     """Association workflow view: select target and annotate centroids."""
-    captures = SESSION_STATE.current.captures if SESSION_STATE.current else []
-    targets: list[dict[str, Any]] = []
-    by_target: dict[str, list[dict[str, Any]]] = {}
-    for cap in captures:
-        tgt = cap.get("target") or "unknown"
-        by_target.setdefault(tgt, []).append(cap)
-    for tgt, items in by_target.items():
-        latest = items[-1]["started_at"] if items else None
-        targets.append({"name": tgt, "count": len(items), "latest": latest})
-    targets = sorted(targets, key=lambda t: t["latest"] or "", reverse=True)
     selected_target = request.query_params.get("target")
-    if not selected_target and targets:
-        selected_target = targets[0]["name"]
-    selected_captures = by_target.get(selected_target, []) if selected_target else []
-    associations = SESSION_STATE.associations if SESSION_STATE else {}
+    
+    with get_session() as session:
+        # Load targets with recent captures
+        target_rows = session.exec(
+            select(CaptureLog.target, func.count().label("count"), func.max(CaptureLog.started_at).label("latest"))
+            .group_by(CaptureLog.target)
+            .order_by(func.max(CaptureLog.started_at).desc())
+            .limit(30)
+        ).all()
+        targets = [{"name": row[0], "count": row[1], "latest": row[2]} for row in target_rows]
+        
+        if not selected_target and targets:
+            selected_target = targets[0]["name"]
+            
+        captures = []
+        associations = {}
+        predicted = {}
+        
+        if selected_target:
+            # Load captures for the selected target
+            capture_rows = session.exec(
+                select(CaptureLog).where(CaptureLog.target == selected_target).order_by(CaptureLog.started_at.desc())
+            ).all()
+            captures = list(capture_rows)
+            capture_ids = [c.id for c in captures if c.id]
+            
+            if capture_ids:
+                # Load existing manual associations
+                assoc_rows = session.exec(
+                    select(CandidateAssociation).where(CandidateAssociation.capture_id.in_(capture_ids))
+                ).all()
+                associations = {row.capture_id: row for row in assoc_rows}
+                
+                # Load predictions (ephemeris) - simplified logic: find nearest ephemeris
+                # Ideally we'd interpolate, but for now we'll just look for a close match if we have the candidate
+                candidate = session.exec(select(NeoCandidate).where(NeoCandidate.trksub == selected_target)).first()
+                if candidate:
+                    # Fetch ephemeris for the time range of captures
+                    min_time = min(c.started_at for c in captures)
+                    max_time = max(c.started_at for c in captures)
+                    # Pad the range slightly
+                    eph_rows = session.exec(
+                        select(NeoEphemeris)
+                        .where(
+                            NeoEphemeris.candidate_id == candidate.id,
+                            NeoEphemeris.epoch >= min_time,
+                            NeoEphemeris.epoch <= max_time
+                        )
+                    ).all()
+                    
+                    # Map each capture to the nearest ephemeris point (simple approach)
+                    for cap in captures:
+                        best_eph = None
+                        min_diff = float("inf")
+                        for eph in eph_rows:
+                            diff = abs((eph.epoch - cap.started_at).total_seconds())
+                            if diff < min_diff:
+                                min_diff = diff
+                                best_eph = eph
+                        
+                        if best_eph and min_diff < 300: # Within 5 minutes
+                             predicted[cap.path] = {"ra_deg": best_eph.ra_deg, "dec_deg": best_eph.dec_deg}
+                             # Also map by ID for template convenience if needed, but template uses path currently
+                             # We might need to adjust template to use ID or keep using path as key
+                             
+    # Transform associations to map by path for the template compatibility
+    associations_by_path = {}
+    for cap in captures:
+        if cap.id in associations:
+            associations_by_path[cap.path] = associations[cap.id]
+
     return templates.TemplateResponse(
         "dashboard/partials/association.html",
         {
             "request": request,
             "targets": targets,
             "selected_target": selected_target,
-            "captures": selected_captures,
-            "associations": associations,
+            "captures": captures,
+            "associations": associations_by_path,
+            "predicted": predicted,
         },
     )
 
@@ -385,17 +446,77 @@ async def association_manual(request: Request) -> Any:
     ra = form.get("ra_deg")
     dec = form.get("dec_deg")
     error = None
+    
     if not path or not ra or not dec:
         error = "Provide path, RA, and Dec."
     else:
         try:
             ra_f = float(ra)
             dec_f = float(dec)
-            SESSION_STATE.set_association(path, ra_f, dec_f)
+            
+            with get_session() as session:
+                # Find the capture log entry
+                capture = session.exec(select(CaptureLog).where(CaptureLog.path == path)).first()
+                if capture and capture.id:
+                    # Check for existing association
+                    existing = session.exec(
+                        select(CandidateAssociation).where(CandidateAssociation.capture_id == capture.id)
+                    ).first()
+                    
+                    if existing:
+                        existing.ra_deg = ra_f
+                        existing.dec_deg = dec_f
+                        session.add(existing)
+                    else:
+                        new_assoc = CandidateAssociation(
+                            capture_id=capture.id,
+                            ra_deg=ra_f,
+                            dec_deg=dec_f
+                        )
+                        session.add(new_assoc)
+                    session.commit()
+                else:
+                    error = "Capture log not found for this file."
+                    
         except Exception:
             error = "Invalid RA/Dec values."
+            
     # Re-render association partial
     return association_partial(request)
+
+
+@router.post("/dashboard/analysis/resolve_click")
+async def analysis_resolve_click(request: Request) -> Any:
+    """Resolve a click on an image to a precise centroid and RA/Dec."""
+    try:
+        data = await request.json()
+    except json.JSONDecodeError:
+        return {"error": "Invalid JSON"}
+        
+    path = data.get("path")
+    click_x = data.get("x")
+    click_y = data.get("y")
+    polygon = data.get("polygon")
+    
+    if not path or (polygon is None and (click_x is None or click_y is None)):
+        return {"error": "Missing path, x/y, or polygon"}
+        
+    with get_session() as session:
+        capture = session.exec(select(CaptureLog).where(CaptureLog.path == path)).first()
+        if not capture:
+            return {"error": "Capture not found"}
+            
+        from app.services.analysis import AnalysisService
+        svc = AnalysisService(session)
+        
+        x_val = float(click_x) if click_x is not None else None
+        y_val = float(click_y) if click_y is not None else None
+        
+        result = svc.resolve_click(capture, x_val, y_val, polygon=polygon)
+        
+        if result:
+            return result
+        return {"error": "Could not resolve source at this location"}
 
 
 @router.get("/dashboard/partials/masters", response_class=HTMLResponse)
@@ -589,6 +710,7 @@ async def capture_delete(request: Request) -> Any:
         if capture_ids:
             session.exec(select(AstrometricSolution).where(AstrometricSolution.capture_id.in_(capture_ids))).all()
             session.exec(AstrometricSolution.__table__.delete().where(AstrometricSolution.capture_id.in_(capture_ids)))
+            session.exec(CandidateAssociation.__table__.delete().where(CandidateAssociation.capture_id.in_(capture_ids)))
         session.exec(CaptureLog.__table__.delete().where(CaptureLog.path == path))
         session.commit()
     # Remove file on disk
@@ -605,6 +727,57 @@ async def capture_delete(request: Request) -> Any:
     return templates.TemplateResponse(
         "dashboard/partials/captures.html",
         {"request": request, "captures": captures},
+    )
+
+
+def _default_preset(presets: list) -> Any | None:
+    for preset in presets:
+        if getattr(preset, "name", "").lower() == "bright":
+            return preset
+    return presets[0] if presets else None
+
+
+@router.get("/dashboard/partials/capture_viewer", response_class=HTMLResponse)
+def capture_viewer_partial(request: Request, path: str | None = None, target: str | None = None, index: str | None = None, started_at: str | None = None) -> Any:
+    """Render a lightweight FITS preview for the selected capture."""
+    preview = None
+    error = None
+    meta = {"target": target, "index": index, "started_at": started_at, "path": path}
+    if path:
+        try:
+            preview = _generate_fits_preview(path)
+        except Exception as exc:  # noqa: BLE001
+            error = f"Unable to render FITS preview: {exc}"
+    return templates.TemplateResponse(
+        "dashboard/partials/capture_viewer.html",
+        {
+            "request": request,
+            "preview": preview,
+            "error": error,
+            "meta": meta,
+        },
+    )
+
+
+@router.get("/dashboard/partials/review_modal", response_class=HTMLResponse)
+def review_modal_partial(request: Request, path: str) -> Any:
+    """Render the interactive review modal."""
+    preview = None
+    error = None
+    meta = {"path": path}
+    try:
+        preview = _generate_fits_preview(path)
+    except Exception as exc:
+        error = f"Unable to render FITS preview: {exc}"
+        
+    return templates.TemplateResponse(
+        "dashboard/partials/review_modal.html",
+        {
+            "request": request,
+            "preview": preview,
+            "error": error,
+            "meta": meta,
+        },
     )
 
 
