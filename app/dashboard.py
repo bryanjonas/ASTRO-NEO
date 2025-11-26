@@ -12,7 +12,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from PIL import Image
 from sqlmodel import select
@@ -28,8 +28,9 @@ from app.models import (
     NeoCandidate,
     NeoEphemeris,
     NeoObservability,
-    SiteConfig,
+    Measurement,
     SubmissionLog,
+    SiteConfig,
 )
 from app.core.config import settings
 from app.services.equipment import (
@@ -209,13 +210,49 @@ def observatory_partial(request: Request) -> Any:
 
 
 @router.get("/dashboard/partials/equipment", response_class=HTMLResponse)
-def equipment_partial(request: Request) -> Any:
-    """Render active equipment profile summary."""
-    profile = get_active_equipment_profile()
+def equipment_partial(request: Request, edit_profile_id: int | None = None) -> Any:
+    """Render the equipment management panel."""
     profiles = list_profiles()
+    
+    # Fetch site config for telescope details
+    with get_session() as session:
+        site_config = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
+        
+        # Determine which profile to load into the form
+        form_profile = None
+        if edit_profile_id:
+            form_profile = session.get(EquipmentProfileRecord, edit_profile_id)
+            if form_profile:
+                # Parse JSON payload for template access
+                # The template expects an object with attributes, but payload_json is a string
+                # We need to attach the parsed payload to the object or return a dict
+                import json
+                payload = json.loads(form_profile.payload_json)
+                # Create a simple object wrapper or dict merge
+                # Let's just pass the payload dict, but we need 'name' from the record
+                form_profile_data = payload
+                form_profile_data['name'] = form_profile.name
+                form_profile = form_profile_data
+        else:
+            # Default to active profile if available, or empty?
+            # Current behavior was: value="{{ profile.camera.type if profile else 'mono' }}"
+            # where 'profile' was the active one.
+            # To maintain "Add New" behavior, we might want form_profile to be None if not editing.
+            # But the user might want to see the active config.
+            # Let's stick to: if edit_profile_id is passed, use that.
+            # If not, use active profile (current behavior).
+            active = get_active_equipment_profile()
+            form_profile = active
+        
     return templates.TemplateResponse(
         "dashboard/partials/equipment.html",
-        {"request": request, "profile": profile, "profiles": profiles},
+        {
+            "request": request, 
+            "profile": get_active_equipment_profile(), # Always show active at top
+            "profiles": profiles,
+            "site_config": site_config,
+            "form_profile": form_profile # Profile to populate the form
+        },
     )
 
 
@@ -351,7 +388,7 @@ def session_status_partial_panel(request: Request) -> Any:
 
 
 @router.get("/dashboard/partials/association", response_class=HTMLResponse)
-def association_partial(request: Request) -> Any:
+def association_partial(request: Request, error: str | None = None) -> Any:
     """Association workflow view: select target and annotate centroids."""
     selected_target = request.query_params.get("target")
     
@@ -434,6 +471,7 @@ def association_partial(request: Request) -> Any:
             "captures": captures,
             "associations": associations_by_path,
             "predicted": predicted,
+            "error": error,
         },
     )
 
@@ -474,6 +512,38 @@ async def association_manual(request: Request) -> Any:
                             dec_deg=dec_f
                         )
                         session.add(new_assoc)
+                    
+                    # Sync to Measurement table for reporting
+                    # We assume a measurement exists for this capture (created by solver)
+                    # If not, we should probably create one, but typically solver creates it.
+                    measurement = session.exec(
+                        select(Measurement).where(Measurement.capture_id == capture.id)
+                    ).first()
+                    
+                    if measurement:
+                        measurement.ra_deg = ra_f
+                        measurement.dec_deg = dec_f
+                        measurement.reviewed = True
+                        session.add(measurement)
+                    else:
+                        # Create new measurement if missing (self-healing)
+                        from app.models import Measurement
+                        measurement = Measurement(
+                            capture_id=capture.id,
+                            target=capture.target or "unknown",
+                            obs_time=capture.started_at,
+                            ra_deg=ra_f,
+                            dec_deg=dec_f,
+                            reviewed=True,
+                            # Defaults
+                            ra_uncert_arcsec=None,
+                            dec_uncert_arcsec=None,
+                            magnitude=None,
+                            band="R", # Default
+                            station_code=settings.station_code
+                        )
+                        session.add(measurement)
+                    
                     session.commit()
                 else:
                     error = "Capture log not found for this file."
@@ -482,7 +552,50 @@ async def association_manual(request: Request) -> Any:
             error = "Invalid RA/Dec values."
             
     # Re-render association partial
-    return association_partial(request)
+    return association_partial(request, error=error)
+
+
+@router.post("/dashboard/analysis/project")
+async def analysis_project(request: Request) -> Any:
+    """Project RA/Dec to pixel coordinates for a given capture."""
+    form = await request.form()
+    path = form.get("path")
+    ra = form.get("ra_deg")
+    dec = form.get("dec_deg")
+    
+    if not path or not ra or not dec:
+        return JSONResponse({"error": "Missing parameters"}, status_code=400)
+        
+    try:
+        ra_f = float(ra)
+        dec_f = float(dec)
+        
+        # Load WCS
+        from astropy.wcs import WCS
+        from astropy.io import fits
+        import warnings
+        
+        with fits.open(path) as hdul:
+            header = hdul[0].header
+            
+        wcs_path = Path(path).with_suffix(".wcs")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if wcs_path.exists():
+                wcs = WCS(str(wcs_path))
+            else:
+                wcs = WCS(header)
+                
+        # Convert to pixels
+        x, y = wcs.all_world2pix(ra_f, dec_f, 1) # 1-based origin for FITS, but we might need 0-based for canvas?
+        # Astropy returns 0-based if origin=0. Let's use 0-based for canvas.
+        x, y = wcs.all_world2pix(ra_f, dec_f, 0)
+        
+        return JSONResponse({"x": float(x), "y": float(y)})
+        
+    except Exception as e:
+        logging.error(f"Projection error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/dashboard/analysis/resolve_click")
@@ -765,6 +878,49 @@ def review_modal_partial(request: Request, path: str) -> Any:
     preview = None
     error = None
     meta = {"path": path}
+    
+    # Navigation logic
+    prev_capture = None
+    next_capture = None
+    current_index = 0
+    total_count = 0
+    existing_association = None
+    
+    with get_session() as session:
+        # Find current capture
+        current = session.exec(select(CaptureLog).where(CaptureLog.path == path)).first()
+        if current:
+            if current.target:
+                meta["target"] = current.target
+                # Find siblings
+                siblings = session.exec(
+                    select(CaptureLog)
+                    .where(CaptureLog.target == current.target)
+                    .order_by(CaptureLog.started_at)
+                ).all()
+                
+                total_count = len(siblings)
+                try:
+                    # Find index of current capture
+                    # Use ID if available, else path
+                    if current.id:
+                        current_index = next(i for i, c in enumerate(siblings) if c.id == current.id)
+                    else:
+                        current_index = next(i for i, c in enumerate(siblings) if c.path == path)
+                        
+                    if current_index > 0:
+                        prev_capture = siblings[current_index - 1]
+                    if current_index < total_count - 1:
+                        next_capture = siblings[current_index + 1]
+                except StopIteration:
+                    pass
+            
+            # Check for existing association
+            if current.id:
+                existing_association = session.exec(
+                    select(CandidateAssociation).where(CandidateAssociation.capture_id == current.id)
+                ).first()
+
     try:
         preview = _generate_fits_preview(path)
     except Exception as exc:
@@ -777,6 +933,13 @@ def review_modal_partial(request: Request, path: str) -> Any:
             "preview": preview,
             "error": error,
             "meta": meta,
+            "navigation": {
+                "prev": prev_capture.path if prev_capture else None,
+                "next": next_capture.path if next_capture else None,
+                "current": current_index + 1,
+                "total": total_count
+            },
+            "association": existing_association,
         },
     )
 
@@ -958,10 +1121,32 @@ async def equipment_save(request: Request) -> Any:
         )
     spec = EquipmentProfileSpec(camera=camera, focuser=focuser, mount=mount, presets=presets)
     record = save_profile(name=name, payload=spec, activate=form.get("activate") == "on")
+    
+    # Also update SiteConfig telescope details
+    with get_session() as session:
+        site_config = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
+        if site_config:
+            site_config.telescope_design = form.get("telescope_design") or "Reflector"
+            site_config.telescope_aperture = float(form.get("telescope_aperture") or 0.0)
+            site_config.telescope_detector = form.get("telescope_detector") or "CCD"
+            session.add(site_config)
+            session.commit()
+            session.refresh(site_config)
+    
     profiles = list_profiles()
+    # Re-fetch site config for template
+    with get_session() as session:
+        site_config = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
+        
     return templates.TemplateResponse(
         "dashboard/partials/equipment.html",
-        {"request": request, "profile": get_active_equipment_profile(), "profiles": profiles, "saved": True},
+        {
+            "request": request, 
+            "profile": get_active_equipment_profile(), 
+            "profiles": profiles, 
+            "saved": True,
+            "site_config": site_config
+        },
     )
 
 
@@ -976,6 +1161,134 @@ async def equipment_activate(request: Request) -> Any:
         "dashboard/partials/equipment.html",
         {"request": request, "profile": get_active_equipment_profile(), "profiles": profiles, "saved": True},
     )
+
+
+@router.get("/dashboard/partials/reports_tab", response_class=HTMLResponse)
+async def reports_tab(request: Request) -> Any:
+    """Render the reports tab content."""
+    with get_session() as session:
+        # Fetch pending measurements (reviewed=True)
+        measurements = session.exec(
+            select(Measurement).where(Measurement.reviewed == True).order_by(Measurement.target, Measurement.obs_time)
+        ).all()
+        
+        # Group by target
+        grouped = {}
+        for m in measurements:
+            if m.target not in grouped:
+                grouped[m.target] = []
+            grouped[m.target].append(m)
+            
+        pending_targets = []
+        for target, ms in grouped.items():
+            if not ms:
+                continue
+            # Calculate span
+            times = [m.obs_time for m in ms]
+            span_str = f"{min(times).strftime('%H:%M')} - {max(times).strftime('%H:%M')}"
+            pending_targets.append({
+                "name": target,
+                "count": len(ms),
+                "span": span_str
+            })
+            
+        # Fetch submission history
+        submissions = session.exec(
+            select(SubmissionLog).order_by(SubmissionLog.created_at.desc()).limit(10)
+        ).all()
+        
+    return templates.TemplateResponse(
+        "dashboard/partials/reports_tab.html",
+        {
+            "request": request,
+            "pending_targets": pending_targets,
+            "submissions": submissions
+        }
+    )
+
+
+@router.get("/dashboard/reports/preview", response_class=HTMLResponse)
+async def reports_preview(request: Request, target: str) -> Any:
+    """Render report preview modal for a specific target."""
+    with get_session() as session:
+        # Fetch measurements for this target
+        measurements = session.exec(
+            select(Measurement)
+            .where(Measurement.target == target)
+            .where(Measurement.reviewed == True)
+            .order_by(Measurement.obs_time)
+        ).all()
+        
+        if not measurements:
+            return "<div>No measurements found for target.</div>"
+            
+        from app.services.reporting import ReportService
+        svc = ReportService(session)
+        
+        # Generate both formats for preview
+        ades_content = svc.generate_ades(measurements)
+        mpc_content = svc.generate_mpc80(measurements)
+        
+        # Get IDs for submission
+        ids = [m.id for m in measurements if m.id]
+        ids_json = json.dumps(ids)
+        
+    return templates.TemplateResponse(
+        "dashboard/partials/report_preview.html",
+        {
+            "request": request,
+            "target": target,
+            "ades_content": ades_content,
+            "mpc_content": mpc_content,
+            "ids_json": ids_json,
+            "count": len(measurements)
+        }
+    )
+
+
+@router.post("/dashboard/reports/submit", response_class=HTMLResponse)
+async def reports_submit(request: Request) -> Any:
+    """Handle report submission."""
+    form = await request.form()
+    ids_json = form.get("ids_json")
+    format_type = form.get("format") or "ades"
+    
+    if not ids_json:
+        return "<div>Error: No measurements selected.</div>"
+        
+    try:
+        ids = json.loads(ids_json)
+    except json.JSONDecodeError:
+        return "<div>Error: Invalid measurement IDs.</div>"
+        
+    with get_session() as session:
+        measurements = session.exec(
+            select(Measurement).where(Measurement.id.in_(ids))
+        ).all()
+        
+        if not measurements:
+            return "<div>Error: Measurements not found.</div>"
+            
+        from app.services.reporting import ReportService
+        svc = ReportService(session)
+        
+        # Generate payload based on selected format
+        if format_type == "ades":
+            payload = svc.generate_ades(measurements)
+        else:
+            payload = svc.generate_mpc80(measurements)
+            
+        # Submit
+        # TODO: Real submission logic (email/API)
+        # For now, just log it
+        svc.submit_report(payload, channel="mock", measurement_ids=ids)
+        
+        # Mark as submitted? 
+        # We don't have a 'submitted' flag on Measurement yet, but we have the log.
+        # Ideally we'd update Measurement status here.
+        
+    # Return success message or refresh reports tab
+    return reports_tab(request)
 
 
 __all__ = ["router"]

@@ -1,26 +1,24 @@
 <div class="panel-title small">Recent Captures</div>
 {% if captures %}
-  <ul class="list">
-    {% for cap in captures[-8:] %}
-      <li>
-        <button class="capture-row"
-                hx-get="/dashboard/partials/capture_viewer"
-                hx-target="#capture-viewer-panel"
-                hx-swap="innerHTML"
-                hx-vals='{"path":"{{ cap.path }}","target":"{{ cap.target }}","index":"{{ cap.index }}","started_at":"{{ cap.started_at }}"}'>
-          <span class="pill">{{ cap.kind }}</span>
-          <strong>{{ cap.target }}</strong>
-          {% if cap.sequence %}<span class="muted">seq={{ cap.sequence }} #{{ cap.index }}</span>{% endif %}
-          <div class="muted tiny">{{ cap.started_at }}</div>
-          <div class="muted tiny">{{ cap.path }}</div>
-        </button>
-        <form hx-post="/dashboard/capture/delete" hx-target="closest .subpanel" hx-swap="innerHTML" style="display:inline;">
-          <input type="hidden" name="path" value="{{ cap.path }}">
-          <button type="submit" class="ghost-small">Delete</button>
-        </form>
-      </li>
-    {% endfor %}
-  </ul>
+<ul class="list">
+  {% for cap in captures[-8:] %}
+  <li>
+    <button class="capture-row" hx-get="/dashboard/partials/capture_viewer" hx-target="#capture-viewer-panel"
+      hx-swap="innerHTML" hx-indicator="#capture-viewer-loading"
+      hx-vals='{"path":"{{ cap.path }}","target":"{{ cap.target }}","index":"{{ cap.index }}","started_at":"{{ cap.started_at }}"}'>
+      <span class="pill">{{ cap.kind }}</span>
+      <strong>{{ cap.target }}</strong>
+      {% if cap.sequence %}<span class="muted">seq={{ cap.sequence }} #{{ cap.index }}</span>{% endif %}
+      <div class="muted tiny">{{ cap.started_at }}</div>
+      <div class="muted tiny">{{ cap.path }}</div>
+    </button>
+    <form hx-post="/dashboard/capture/delete" hx-target="closest .subpanel" hx-swap="innerHTML" style="display:inline;">
+      <input type="hidden" name="path" value="{{ cap.path }}">
+      <button type="submit" class="ghost-small">Delete</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
 {% else %}
-  <div class="muted">No captures recorded.</div>
+<div class="muted">No captures recorded.</div>
 {% endif %}

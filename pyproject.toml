@@ -26,6 +26,7 @@ dependencies = [
     "photutils~=1.12",
     "Pillow~=10.4",
     "scipy~=1.11",
+    "lxml~=5.1",
 ]
 
 [project.optional-dependencies]
