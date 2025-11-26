@@ -23,3 +23,7 @@ class SiteConfig(SQLModel, table=True):
         default=None,
         description="JSON blob describing active equipment capabilities (camera, focuser, mount).",
     )
+    # ADES required fields
+    telescope_design: str = Field(default="Reflector", description="Telescope design (e.g. Reflector, Refractor)")
+    telescope_aperture: float = Field(default=0.0, description="Aperture in meters")
+    telescope_detector: str = Field(default="CCD", description="Detector type (e.g. CCD, CMOS)")

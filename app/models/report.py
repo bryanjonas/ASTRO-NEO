@@ -26,6 +26,7 @@ class Measurement(SQLModel, table=True):
     observer: Optional[str] = Field(default=None, max_length=64)
     software: Optional[str] = Field(default=None, max_length=64)
     flags: Optional[str] = Field(default=None, description="JSON list of validation flags")
+    ast_cat: Optional[str] = Field(default="Gaia2", max_length=32, description="Astrometric catalog used")
     reviewed: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 

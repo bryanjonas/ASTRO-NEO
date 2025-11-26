@@ -189,41 +189,30 @@ class AnalysisService:
             
             if polygon:
                 # Polygon mode
-                from photutils.aperture import PolygonAperture
+                from PIL import Image, ImageDraw
                 
                 # Convert list of dicts to list of tuples
                 vertices = [(p["x"], p["y"]) for p in polygon]
                 logging.info(f"Polygon vertices: {vertices}")
-                aperture = PolygonAperture(vertices)
                 
-                # Create a mask from the aperture
-                mask_obj = aperture.to_mask(method='center')
-                if mask_obj is None:
-                     logging.error("Failed to create mask from polygon")
-                     return None
-                     
-                # Better: use the weighted data
-                weighted_data = mask_obj.multiply(data)
-                if weighted_data is None:
-                    logging.error("Failed to apply mask to data")
-                    return None
-                    
-                # Find max index in the cutout
-                # Check if weighted_data has any non-zero values
+                # Create mask using PIL
+                # Note: PIL uses (x, y) which matches our vertices
+                mask_img = Image.new('L', (w, h), 0)
+                ImageDraw.Draw(mask_img).polygon(vertices, outline=1, fill=1)
+                mask = np.array(mask_img)
+                
+                # Apply mask to data
+                weighted_data = data * mask
+                
                 if np.all(weighted_data == 0):
-                    logging.warning("Polygon mask resulted in all zeros (empty intersection?)")
-                    # Try 'exact' or 'subpixel' method if center fails?
-                    # Or just return None
+                    logging.warning("Polygon mask resulted in all zeros")
                     return None
                     
-                y_local, x_local = np.unravel_index(np.argmax(weighted_data), weighted_data.shape)
+                # Find max index in the whole image
+                y_max, x_max = np.unravel_index(np.argmax(weighted_data), weighted_data.shape)
                 
-                # Convert to global coordinates
-                # mask_obj.bbox gives (ymin, xmin, ymax, xmax)
-                ymin, xmin, ymax, xmax = mask_obj.bbox.ymin, mask_obj.bbox.xmin, mask_obj.bbox.ymax, mask_obj.bbox.xmax
-                
-                global_x = xmin + x_local
-                global_y = ymin + y_local
+                global_x = float(x_max)
+                global_y = float(y_max)
                 
                 logging.info(f"Polygon max at global: {global_x}, {global_y}")
                 
@@ -296,7 +285,13 @@ class AnalysisService:
             # Get WCS
             wcs_path = path.with_suffix(".wcs")
             if wcs_path.exists():
-                wcs = WCS(str(wcs_path))
+                import warnings
+                from astropy.wcs import FITSFixedWarning
+                
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", FITSFixedWarning)
+                    wcs = WCS(str(wcs_path))
+                    
                 sky = wcs.pixel_to_world(global_x, global_y)
                 ra_deg = float(sky.ra.deg)
                 dec_deg = float(sky.dec.deg)
