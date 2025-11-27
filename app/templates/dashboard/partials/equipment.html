@@ -35,33 +35,7 @@
   </div>
 
   <div class="profile-stat-grid">
-    <div class="stat-card">
-      <div class="stat-label">Filter Wheel</div>
-      <div class="stat-value">
-        {% if profile.camera.filters %}
-        {{ profile.camera.filters | join(', ') }}
-        {% else %}
-        No filters configured
-        {% endif %}
-      </div>
-      <div class="stat-meta">Reorder to match physical wheel slots.</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Focuser Travel</div>
-      <div class="stat-value">
-        {% if profile.focuser %}
-        {{ profile.focuser.position_min }} – {{ profile.focuser.position_max }}
-        {% else %}
-        Not specified
-        {% endif %}
-      </div>
-      <div class="stat-meta">Bridge clamps autofocus within this range.</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Preset Count</div>
-      <div class="stat-value">{{ profile.presets | length }}</div>
-      <div class="stat-meta">Mapped to scheduler urgency buckets.</div>
-    </div>
+    <!-- Stats removed as per user request -->
   </div>
 
   {% if profile.presets %}
@@ -110,6 +84,13 @@
         hx-swap="innerHTML" class="ghost-small">
         Edit
       </button>
+      {% if not p.is_active %}
+      <button hx-post="/dashboard/equipment/delete" hx-vals='{"profile_id": {{ p.id }}}'
+        hx-confirm="Are you sure you want to delete this profile?" hx-target="closest section" hx-swap="innerHTML"
+        class="ghost-small danger">
+        Delete
+      </button>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -220,20 +201,23 @@
         <div class="form-grid">
           <label>
             <span class="label-text">Design</span>
-            <input type="text" name="telescope_design" value="{{ site_config.telescope_design }}"
+            <input type="text" name="telescope_design"
+              value="{{ form_profile.telescope.design if form_profile and form_profile.telescope else 'Reflector' }}"
               placeholder="Reflector">
             <span class="hint">e.g. Reflector, Refractor</span>
           </label>
           <label>
             <span class="label-text">Aperture (mm)</span>
             <input type="number" step="1" name="telescope_aperture"
-              value="{{ (site_config.telescope_aperture * 1000) | int if site_config.telescope_aperture else '' }}"
+              value="{{ (form_profile.telescope.aperture * 1000) | int if form_profile and form_profile.telescope else '' }}"
               placeholder="280">
             <span class="hint">Primary mirror diameter in millimeters</span>
           </label>
           <label>
             <span class="label-text">Detector Type</span>
-            <input type="text" name="telescope_detector" value="{{ site_config.telescope_detector }}" placeholder="CCD">
+            <input type="text" name="telescope_detector"
+              value="{{ form_profile.telescope.detector if form_profile and form_profile.telescope else 'CCD' }}"
+              placeholder="CCD">
             <span class="hint">e.g. CCD, CMOS</span>
           </label>
         </div>

@@ -31,10 +31,17 @@ class MountCapabilities(BaseModel):
     supports_parking: bool = True
 
 
+class TelescopeCapabilities(BaseModel):
+    design: str = "Reflector"
+    aperture: float = 0.28
+    detector: str = "CCD"
+
+
 class EquipmentProfileSpec(BaseModel):
     camera: CameraCapabilities
     focuser: FocuserCapabilities | None = None
     mount: MountCapabilities | None = None
+    telescope: TelescopeCapabilities | None = None
     presets: list[dict] = Field(default_factory=list, description="Optional exposure presets")
 
 # Backward-compatible alias for legacy imports
@@ -140,14 +147,26 @@ def activate_profile(profile_id: int, session: Session | None = None) -> Equipme
         return _activate(db)
 
 
+def delete_profile(session: Session, profile_id: int) -> bool:
+    """Delete an equipment profile if it's not active."""
+    record = session.get(EquipmentProfileRecord, profile_id)
+    if record and not record.is_active:
+        session.delete(record)
+        session.commit()
+        return True
+    return False
+
+
 __all__ = [
     "EquipmentProfileSpec",
     "EquipmentProfile",
     "CameraCapabilities",
     "FocuserCapabilities",
     "MountCapabilities",
+    "TelescopeCapabilities",
     "get_active_equipment_profile",
     "list_profiles",
     "save_profile",
     "activate_profile",
+    "delete_profile",
 ]

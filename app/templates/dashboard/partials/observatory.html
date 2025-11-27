@@ -1,88 +1,177 @@
-<div class="panel-title">Observatory Configuration</div>
-<p class="panel-description">
-  Site configuration is managed via environment variables.
-</p>
+<div class="panel-title">Observatory Profiles</div>
+<p class="panel-description">Manage site locations. The active profile determines weather data and horizon limits.</p>
 
-{% if site %}
-<div class="snapshot-grid">
-  <!-- Site Location Card -->
-  <div class="snapshot-card">
-    <div class="snapshot-label">Site Location</div>
-    <div class="snapshot-value">
-      {{ "%.4f"|format(site.latitude) if site.latitude is not none else "—" }}° N /
-      {{ "%.4f"|format(site.longitude) if site.longitude is not none else "—" }}° E
+{% if active_site %}
+<div class="active-profile-card">
+  <div class="profile-card-header">
+    <div>
+      <div class="profile-badge">
+        <span class="badge-icon">✓</span>
+        <span>Active Site</span>
+      </div>
+      <h3 class="profile-name">{{ active_site.name }}</h3>
+      <p class="muted tiny">
+        {{ active_site.latitude | round(4) }}, {{ active_site.longitude | round(4) }} · {{ active_site.altitude_m }}m
+      </p>
     </div>
-    <div class="snapshot-meta">
-      Altitude {{ "%.0f"|format(site.altitude_m) if site.altitude_m is not none else "—" }} m
+    <div class="profile-chip-row">
+      <span class="stat-chip">
+        <span class="stat-label">Bortle</span>
+        <span class="stat-value">{{ active_site.bortle or 'N/A' }}</span>
+      </span>
     </div>
   </div>
 
-  <!-- Sky Quality Card -->
-  <div class="snapshot-card">
-    <div class="snapshot-label">Sky Quality</div>
-    <div class="snapshot-value">Bortle {{ site.bortle if site.bortle is not none else "—" }}</div>
-    <div class="snapshot-meta">
-      {{ "Dark suburban skies" if site and site.bortle and site.bortle <= 5 else "Light polluted skies" }} </div>
-    </div>
-
-    <!-- Weather & Horizon Card -->
-    <div class="snapshot-card">
-      <div class="snapshot-label">Weather & Horizon</div>
-      {% if weather_summary %}
-      <div class="weather-metrics">
-        <span>{{ weather_summary.temperature_c if weather_summary.temperature_c is not none else "—" }}°C</span>
-        <span>{{ weather_summary.wind_speed_mps if weather_summary.wind_speed_mps is not none else "—" }} m/s
-          wind</span>
-        <span>{{ weather_summary.cloud_cover_pct if weather_summary.cloud_cover_pct is not none else "—" }}%
-          clouds</span>
-        <span>{{ weather_summary.precipitation_probability_pct if weather_summary.precipitation_probability_pct is not
-          none else "—" }}% rain</span>
-      </div>
-      <div class="snapshot-meta">
-        <span class="weather-pill {{ 'good' if weather_summary.is_safe else 'warn' }}">
-          {{ "Clear" if weather_summary.is_safe else "Blocked" }}
-        </span>
-        {% if weather_summary.reasons %}
-        {{ weather_summary.reasons | join(', ') }}
+  <!-- Weather & Horizon Status -->
+  <div class="profile-stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Weather Status</div>
+      <div class="stat-value">
+        {% if ignore_weather %}
+        <span class="status-indicator warning">Ignored</span>
+        {% elif weather_summary.is_safe %}
+        <span class="status-indicator good">Safe</span>
         {% else %}
-        Conditions within limits
-        {% endif %}
-        <div class="muted tiny">
-          Updated {{ weather_summary.fetched_at.strftime("%H:%M UTC") }}
-        </div>
-      </div>
-      <div class="snapshot-meta" style="margin-top: 8px;">
-        <button class="btn-toggle {{ 'active' if ignore_weather else '' }}"
-          hx-post="/dashboard/observatory/ignore_weather"
-          hx-vals='{"ignore": {{ "false" if ignore_weather else "true" }}}' hx-target="closest section"
-          hx-swap="innerHTML">
-          {{ "⚠️ Weather Check Ignored" if ignore_weather else "🛡️ Weather Check Active" }}
-        </button>
-      </div>
-      {% else %}
-      <div class="snapshot-value">Weather feed unavailable</div>
-      {% endif %}
-
-      <div class="snapshot-meta" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;">
-        Horizon {{ "loaded" if site.horizon_mask_json else "missing" }}
-        {% if site.horizon_mask_json %}
-        <div class="muted tiny">
-          {{ site.horizon_mask_json|length }} points from PVGIS
-        </div>
+        <span class="status-indicator bad">Unsafe</span>
         {% endif %}
       </div>
-
-      <div class="snapshot-meta" style="margin-top: 8px;">
-        <button type="button" class="btn-secondary small" hx-post="/dashboard/observatory/refresh_horizon"
-          hx-target="closest section" hx-swap="outerHTML">
-          🔄 Refresh Horizon
-        </button>
+      <div class="stat-meta">
+        {% if weather_sources %}
+        {{ weather_sources | length }} sensor(s) active
+        {% else %}
+        No sensors
+        {% endif %}
       </div>
-
     </div>
+    <div class="stat-card">
+      <div class="stat-label">Horizon Mask</div>
+      <div class="stat-value">
+        {% if active_site.horizon_mask_json %}
+        <span class="status-indicator good">Loaded</span>
+        {% else %}
+        <span class="status-indicator warning">Missing</span>
+        {% endif %}
+      </div>
+      <div class="stat-meta">
+        <button type="button" class="ghost-small"
+          hx-post="/dashboard/observatory/{{ active_site.name }}/refresh_horizon" hx-target="closest section"
+          hx-swap="outerHTML">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🌍</div>
+  <div class="muted">No active site configured</div>
+</div>
+{% endif %}
+
+<div class="subpanel">
+  <div class="panel-title small">Saved Sites</div>
+  {% if sites %}
+  <div class="profile-list">
+    {% for s in sites %}
+    <div class="profile-item">
+      <div>
+        <div class="profile-item-info">
+          <strong>{{ s.name }}</strong>
+          {% if s.is_active %}<span class="pill good">active</span>{% endif %}
+        </div>
+        <div class="muted tiny">{{ s.latitude | round(2) }}, {{ s.longitude | round(2) }}</div>
+      </div>
+      <form hx-post="/dashboard/observatory/activate" hx-target="closest section" hx-swap="outerHTML"
+        style="display:inline;">
+        <input type="hidden" name="site_id" value="{{ s.id }}">
+        <button type="submit" class="ghost-small" {% if s.is_active %}disabled{% endif %}>
+          {% if s.is_active %}Active{% else %}Activate{% endif %}
+        </button>
+      </form>
+      <button hx-get="/dashboard/partials/observatory?edit_site_id={{ s.id }}" hx-target="closest section"
+        hx-swap="outerHTML" class="ghost-small">
+        Edit
+      </button>
+      {% if not s.is_active %}
+      <button hx-post="/dashboard/observatory/delete" hx-vals='{"site_id": {{ s.id }}}'
+        hx-confirm="Are you sure you want to delete this site?" hx-target="closest section" hx-swap="outerHTML"
+        class="ghost-small danger">
+        Delete
+      </button>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
   {% else %}
   <div class="empty-state-small">
-    <div class="muted">No site details configured. Check your .env file.</div>
+    <span class="muted">No saved sites</span>
   </div>
   {% endif %}
+</div>
+
+<div class="subpanel">
+  <div class="panel-title small">
+    {% if edit_site %}Edit Site: {{ edit_site.name }}{% else %}Add New Site{% endif %}
+  </div>
+
+  <form hx-post="/dashboard/observatory/save" hx-target="closest section" hx-swap="outerHTML">
+    {% if edit_site %}
+    <input type="hidden" name="site_id" value="{{ edit_site.id }}">
+    {% endif %}
+
+    <!-- Location -->
+    <div class="form-section compact with-aside">
+      <div>
+        <div class="section-header">
+          <span class="section-icon">📍</span>
+          <span class="section-title">Location</span>
+        </div>
+        <div class="form-grid">
+          <label class="full-width">
+            <span class="label-text">Site Name</span>
+            <input type="text" name="name" required value="{{ edit_site.name if edit_site else '' }}"
+              placeholder="e.g., Home Observatory">
+          </label>
+          <label>
+            <span class="label-text">Latitude</span>
+            <input type="number" step="any" name="latitude" required
+              value="{{ edit_site.latitude if edit_site else '' }}">
+          </label>
+          <label>
+            <span class="label-text">Longitude</span>
+            <input type="number" step="any" name="longitude" required
+              value="{{ edit_site.longitude if edit_site else '' }}">
+          </label>
+          <label>
+            <span class="label-text">Altitude (m)</span>
+            <input type="number" step="any" name="altitude_m" required
+              value="{{ edit_site.altitude_m if edit_site else '' }}">
+          </label>
+        </div>
+      </div>
+      <div class="section-aside helper-card">
+        <div class="helper-title">Coordinates</div>
+        <p>Use decimal degrees. Positive latitude is North, positive longitude is East.</p>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="form-section compact">
+      <div class="form-grid">
+        <label class="checkbox-label">
+          <input type="checkbox" name="activate" {% if not edit_site or edit_site.is_active %}checked{% endif %}>
+          <span class="label-text">Set as active site</span>
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn-primary">💾 Save Site</button>
+        {% if edit_site %}
+        <button hx-get="/dashboard/partials/observatory" hx-target="closest section" hx-swap="outerHTML"
+          class="btn-secondary">Cancel</button>
+        {% endif %}
+      </div>
+    </div>
+
+  </form>
+</div>

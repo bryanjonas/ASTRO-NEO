@@ -340,6 +340,16 @@ body.page {
   background: rgba(93, 212, 255, 0.12);
 }
 
+.ghost-tiny.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: rgba(210, 153, 34, 0.1);
+}
+
+.ghost-tiny.warn:hover {
+  background: rgba(210, 153, 34, 0.2);
+}
+
 .actions {
   display: flex;
   gap: 10px;

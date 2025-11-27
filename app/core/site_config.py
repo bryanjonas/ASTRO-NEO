@@ -73,6 +73,7 @@ class SiteFileConfig(BaseModel):
     altitude_m: float
     bortle: int | None = None
     horizon_mask: HorizonMaskConfig | None = None
+    is_active: bool = False
     weather_sensors: list[WeatherSensorConfig] = Field(default_factory=list)
     equipment_profile: EquipmentProfileConfig | None = None
 
@@ -116,6 +117,47 @@ def _site_config_to_model(site_config: SiteFileConfig) -> dict[str, Any]:
     return payload
 
 
+def db_site_to_file_config(db_site: SiteConfigModel) -> SiteFileConfig:
+    """Convert a database SiteConfig model to a SiteFileConfig object."""
+    weather_sensors = []
+    if db_site.weather_sensors:
+        try:
+            sensors_data = json.loads(db_site.weather_sensors)
+            # Handle both list of dicts and list of strings (legacy/simple format)
+            if isinstance(sensors_data, list):
+                for s in sensors_data:
+                    if isinstance(s, dict):
+                        weather_sensors.append(WeatherSensorConfig(**s))
+                    elif isinstance(s, str):
+                        weather_sensors.append(WeatherSensorConfig(name=s, type="remote"))
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("Failed to parse weather_sensors from DB: %s", db_site.weather_sensors)
+
+    equipment_profile = None
+    if db_site.equipment_profile:
+        try:
+            eq_data = json.loads(db_site.equipment_profile)
+            equipment_profile = EquipmentProfileConfig(**eq_data)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    horizon_mask = None
+    if db_site.horizon_mask_path:
+        horizon_mask = HorizonMaskConfig(source=db_site.horizon_mask_path)
+
+    return SiteFileConfig(
+        name=db_site.name,
+        latitude=db_site.latitude,
+        longitude=db_site.longitude,
+        altitude_m=db_site.altitude_m,
+        bortle=db_site.bortle,
+        is_active=db_site.is_active,
+        horizon_mask=horizon_mask,
+        weather_sensors=weather_sensors,
+        equipment_profile=equipment_profile,
+    )
+
+
 def sync_site_config_to_db(
     site_config: SiteFileConfig, session: Session | None = None
 ) -> SiteConfigModel:
@@ -152,15 +194,37 @@ def bootstrap_site_config() -> None:
     """Ensure the configured site exists in the database."""
 
     try:
-        site_config = load_site_config()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("Failed to load site configuration: %s", exc)
-        return
+        with get_session() as session:
+            # Check if any sites exist
+            existing_count = session.exec(select(SiteConfigModel)).all()
+            
+            if not existing_count:
+                logger.info("No sites found in DB. Seeding from environment/config.")
+                try:
+                    site_config = load_site_config()
+                    # Create default site as active
+                    db_site = sync_site_config_to_db(site_config, session=session)
+                    db_site.is_active = True
+                    session.add(db_site)
+                    session.commit()
+                    logger.info("Seeded default site '%s' as active.", db_site.name)
+                except Exception as exc:
+                    logger.error("Failed to load/seed site configuration: %s", exc)
+                    return
+            else:
+                # Ensure at least one site is active
+                active = session.exec(select(SiteConfigModel).where(SiteConfigModel.is_active == True)).first()
+                if not active:
+                    logger.warning("No active site found. Activating the first available site.")
+                    first_site = session.exec(select(SiteConfigModel)).first()
+                    if first_site:
+                        first_site.is_active = True
+                        session.add(first_site)
+                        session.commit()
+                        logger.info("Activated site '%s'.", first_site.name)
 
-    try:
-        sync_site_config_to_db(site_config)
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("Failed to persist site configuration: %s", exc)
+        logger.error("Failed to bootstrap site configuration: %s", exc)
 
 
 __all__ = [
@@ -171,4 +235,5 @@ __all__ = [
     "HorizonMaskConfig",
     "EquipmentProfileConfig",
     "sync_site_config_to_db",
+    "db_site_to_file_config",
 ]

@@ -11,11 +11,11 @@ from typing import Any
 import numpy as np
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from PIL import Image
-from sqlmodel import select
+from sqlmodel import Session, select, update
 from sqlalchemy import func
 
 from app.api.session import dashboard_status as session_dashboard_status
@@ -93,6 +93,15 @@ def _render_status_panel(
 @router.get("/dashboard/partials/status", response_class=HTMLResponse)
 def dashboard_status_partial(request: Request) -> Any:
     """HTMX-friendly status bundle."""
+    return _render_status_panel(request)
+
+
+@router.post("/dashboard/weather/override", response_class=HTMLResponse)
+def weather_override(request: Request, ignore: bool = Form(...)) -> Any:
+    """Toggle weather override."""
+    from app.services.nina_bridge import NinaBridgeService
+    bridge = NinaBridgeService()
+    bridge.set_ignore_weather(ignore)
     return _render_status_panel(request)
 
 
@@ -176,13 +185,37 @@ def kpis_partial(request: Request) -> Any:
 
 
 @router.get("/dashboard/partials/observatory", response_class=HTMLResponse)
-def observatory_partial(request: Request) -> Any:
+def observatory_partial(request: Request, edit_site_id: int | None = None) -> Any:
     """Render site config snapshot."""
+    from app.core.site_config import db_site_to_file_config
+    
     with get_session() as session:
-        site = (
-            session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
-        )
-        weather_service = WeatherService(session)
+        sites = session.exec(select(SiteConfig).order_by(SiteConfig.name)).all()
+        active_site = next((s for s in sites if s.is_active), None)
+        
+        # If no active site, fallback to first or None
+        if not active_site and sites:
+            active_site = sites[0]
+            
+        # Determine which site to edit (if any)
+        edit_site = None
+        if edit_site_id:
+            edit_site = session.get(SiteConfig, edit_site_id)
+        elif not sites:
+            # If no sites, show empty form to create one
+            pass
+        elif active_site:
+            # Default to showing active site details if not editing another
+            # But for the "Edit" form, we might want to be explicit.
+            # Let's say if no edit_site_id is passed, we just show the list and active details.
+            pass
+
+        # Use active site for weather/horizon context
+        context_site = active_site
+        
+        # Convert DB site to file config for WeatherService
+        site_file_config = db_site_to_file_config(context_site) if context_site else None
+        weather_service = WeatherService(session, site_config=site_file_config)
         weather_summary = weather_service.get_status()
     
     # Fetch bridge status to get ignore_weather flag
@@ -195,9 +228,9 @@ def observatory_partial(request: Request) -> Any:
         ignore_weather = False
 
     weather_sources: list[dict[str, Any]] = []
-    if site and site.weather_sensors:
+    if context_site and context_site.weather_sensors:
         try:
-            payload = json.loads(site.weather_sensors)
+            payload = json.loads(context_site.weather_sensors)
         except json.JSONDecodeError:
             payload = None
         if isinstance(payload, list):
@@ -209,11 +242,14 @@ def observatory_partial(request: Request) -> Any:
         elif isinstance(payload, dict):
             weather_sources.append(payload)
     formatted_weather = _format_weather_summary(weather_summary)
+    
     return templates.TemplateResponse(
         "dashboard/partials/observatory.html",
         {
             "request": request,
-            "site": site,
+            "sites": sites,
+            "active_site": active_site,
+            "edit_site": edit_site,
             "weather_sources": weather_sources,
             "weather_summary": formatted_weather,
             "ignore_weather": ignore_weather,
@@ -221,42 +257,107 @@ def observatory_partial(request: Request) -> Any:
     )
 
 
-@router.post("/dashboard/observatory/ignore_weather", response_class=HTMLResponse)
-async def observatory_ignore_weather(request: Request) -> Any:
-    """Toggle the ignore_weather flag."""
-    from app.services.nina_bridge import NinaBridgeService
-    
-    form = await request.form()
-    ignore_val = form.get("ignore")
-    # hx-vals sends string "true" or "false"
-    ignore = ignore_val == "true"
-    
-    bridge = NinaBridgeService()
-    try:
-        bridge.set_ignore_weather(ignore)
-    except Exception:
-        # Log error but return partial anyway
-        pass
-        
+@router.post("/dashboard/observatory/activate", response_class=HTMLResponse)
+def observatory_activate(request: Request, site_id: int = Form(...)) -> Any:
+    """Activate a site profile."""
+    from app.api.site import activate_site
+    with get_session() as session:
+        activate_site(site_id, session)
     return observatory_partial(request)
 
 
-@router.post("/dashboard/observatory/refresh_horizon", response_class=HTMLResponse)
-async def observatory_refresh_horizon(request: Request) -> Any:
-    """Trigger horizon refresh and return updated partial."""
-    from app.services.horizon import fetch_horizon_profile
+@router.post("/dashboard/observatory/delete", response_class=HTMLResponse)
+def observatory_delete(request: Request, site_id: int = Form(...)) -> Any:
+    """Delete a site profile."""
+    from app.models import SiteConfig
+    with get_session() as session:
+        site = session.get(SiteConfig, site_id)
+        if site and not site.is_active:
+            session.delete(site)
+            session.commit()
+    return observatory_partial(request)
+
+
+@router.post("/dashboard/observatory/save", response_class=HTMLResponse)
+def observatory_save(
+    request: Request,
+    name: str = Form(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    altitude_m: float = Form(...),
+    activate: bool = Form(False),
+    site_id: int | None = Form(None),
+) -> Any:
+    """Save or update a site profile."""
+    from app.api.site import upsert_site
+    from app.models import SiteConfig
+    
+    # We no longer take telescope details from this form
+    # Defaulting to generic values if creating new, or keeping existing if updating
     
     with get_session() as session:
-        site = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
+        if site_id:
+            # Update existing
+            existing = session.get(SiteConfig, site_id)
+            if existing:
+                existing.name = name
+                existing.latitude = latitude
+                existing.longitude = longitude
+                existing.altitude_m = altitude_m
+                
+                if activate:
+                     session.exec(update(SiteConfig).where(SiteConfig.id != site_id).values(is_active=False))
+                     existing.is_active = True
+                
+                session.add(existing)
+                session.commit()
+                
+                # Trigger horizon fetch
+                from app.services.horizon import fetch_horizon_profile
+                import asyncio
+                asyncio.create_task(fetch_horizon_profile(existing.latitude, existing.longitude))
+        else:
+            # Create new
+            payload = SiteConfig(
+                name=name,
+                latitude=latitude,
+                longitude=longitude,
+                altitude_m=altitude_m,
+                telescope_design="Reflector", # Default
+                telescope_aperture=0.0,
+                telescope_detector="CCD",
+                is_active=activate
+            )
+            
+            # Use upsert logic
+            import asyncio
+            asyncio.run(upsert_site(payload, session))
+
+    return observatory_partial(request)
+
+
+@router.post("/dashboard/observatory/{name}/refresh_horizon", response_class=HTMLResponse)
+async def observatory_refresh_horizon(request: Request, name: str) -> Any:
+    """Trigger horizon refresh and return updated partial."""
+    from app.services.horizon import fetch_horizon_profile
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    with get_session() as session:
+        site = session.exec(select(SiteConfig).where(SiteConfig.name == name)).first()
         if site:
+            logger.info("Refreshing horizon for site: %s", name)
             try:
                 profile = await fetch_horizon_profile(site.latitude, site.longitude)
                 site.horizon_mask_json = json.dumps(profile)
                 session.add(site)
                 session.commit()
-            except Exception:
-                # Log error but return partial anyway
+            except Exception as exc:
+                logger.error("Failed to refresh horizon: %s", exc, exc_info=True)
                 pass
+        else:
+            logger.warning("Site not found for horizon refresh: %s", name)
                 
     return observatory_partial(request)
 
@@ -1170,66 +1271,63 @@ def _parse_list_csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+@router.post("/dashboard/equipment/delete", response_class=HTMLResponse)
+def equipment_delete(request: Request, profile_id: int = Form(...)) -> Any:
+    """Delete an equipment profile."""
+    from app.services.equipment import delete_profile
+    with get_session() as session:
+        delete_profile(session, profile_id)
+    return equipment_partial(request)
+
+
 @router.post("/dashboard/equipment/save", response_class=HTMLResponse)
 async def equipment_save(request: Request) -> Any:
     """Create/update an equipment profile from the dashboard form."""
+    # Parse form data
     form = await request.form()
-    name = form.get("name") or "default"
-    camera = {
-        "type": form.get("camera_type") or "mono",
-        "filters": _parse_list_csv(form.get("camera_filters")),
-        "max_binning": int(form.get("camera_max_binning") or 1),
-        "gain_presets": {},
-        "offset_presets": {},
-    }
-    focuser = None
-    if form.get("focuser_min") or form.get("focuser_max"):
-        focuser = {
-            "position_min": int(form.get("focuser_min") or 0),
-            "position_max": int(form.get("focuser_max") or 0),
-        }
-    mount = {"supports_parking": form.get("mount_supports_parking") == "on"}
-    presets = []
-    if form.get("preset_name"):
-        presets.append(
-            {
-                "name": form.get("preset_name"),
-                "exposure": float(form.get("preset_exposure") or 0),
-                "binning": int(form.get("preset_binning") or 1),
-                "filter": form.get("preset_filter") or None,
-            }
-        )
-    spec = EquipmentProfileSpec(camera=camera, focuser=focuser, mount=mount, presets=presets)
-    record = save_profile(name=name, payload=spec, activate=form.get("activate") == "on")
+    name = form.get("name")
     
-    # Also update SiteConfig telescope details
-    with get_session() as session:
-        site_config = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
-        if site_config:
-            site_config.telescope_design = form.get("telescope_design") or "Reflector"
-            # Convert mm to meters
-            aperture_mm = float(form.get("telescope_aperture") or 0.0)
-            site_config.telescope_aperture = aperture_mm / 1000.0
-            site_config.telescope_detector = form.get("telescope_detector") or "CCD"
-            session.add(site_config)
-            session.commit()
-            session.refresh(site_config)
+    # Camera
+    camera_type = form.get("camera_type", "mono")
+    camera_filters_str = form.get("camera_filters", "")
+    camera_filters = [f.strip() for f in camera_filters_str.split(",") if f.strip()]
     
-    profiles = list_profiles()
-    # Re-fetch site config for template
-    with get_session() as session:
-        site_config = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
-        
-    return templates.TemplateResponse(
-        "dashboard/partials/equipment.html",
-        {
-            "request": request, 
-            "profile": get_active_equipment_profile(), 
-            "profiles": profiles, 
-            "saved": True,
-            "site_config": site_config
-        },
+    # Mount
+    mount_parking = form.get("mount_supports_parking") == "on"
+    
+    # Telescope
+    telescope_design = form.get("telescope_design", "Reflector")
+    telescope_aperture = float(form.get("telescope_aperture", 0.0)) / 1000.0 # mm to m
+    telescope_detector = form.get("telescope_detector", "CCD")
+    
+    from app.services.equipment import (
+        EquipmentProfileSpec, 
+        CameraCapabilities, 
+        MountCapabilities,
+        TelescopeCapabilities,
+        save_profile
     )
+    
+    payload = EquipmentProfileSpec(
+        camera=CameraCapabilities(
+            type=camera_type,
+            filters=camera_filters,
+            max_binning=2 # Default
+        ),
+        mount=MountCapabilities(supports_parking=mount_parking),
+        telescope=TelescopeCapabilities(
+            design=telescope_design,
+            aperture=telescope_aperture,
+            detector=telescope_detector
+        )
+    )
+    
+    # Save
+    activate = form.get("activate") == "on"
+    save_profile(name, payload, activate=activate)
+    
+    return equipment_partial(request)
+
 
 
 @router.post("/dashboard/equipment/activate", response_class=HTMLResponse)

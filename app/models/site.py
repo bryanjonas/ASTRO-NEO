@@ -10,6 +10,7 @@ from sqlmodel import Field, SQLModel
 class SiteConfig(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(default="default", index=True, unique=True)
+    is_active: bool = Field(default=False, index=True)
     latitude: float
     longitude: float
     altitude_m: float
