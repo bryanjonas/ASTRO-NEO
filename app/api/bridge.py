@@ -86,7 +86,7 @@ class AutomationPayload(BaseModel):
 
 @router.get("/status")
 def bridge_status(bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
-    return bridge.status()
+    return bridge.get_status()
 
 
 @router.get("/equipment")
@@ -98,18 +98,33 @@ def equipment_profile(bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
 def set_override(
     payload: OverridePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
+    SESSION_STATE.log_event(f"Manual override {'enabled' if payload.manual_override else 'disabled'}", "warn" if payload.manual_override else "info")
     return bridge.set_override(payload.manual_override)
 
 
 @router.post("/dome")
 def set_dome(payload: DomePayload, bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
+    SESSION_STATE.log_event(f"Dome {'closed' if payload.closed else 'opened'} (manual)", "info")
     return bridge.set_dome(payload.closed)
+
+
+class IgnoreWeatherPayload(BaseModel):
+    ignore_weather: bool
+
+
+@router.post("/ignore_weather")
+def set_ignore_weather(
+    payload: IgnoreWeatherPayload, bridge: NinaBridgeService = Depends(get_bridge)
+) -> Any:
+    SESSION_STATE.log_event(f"Weather check {'ignored' if payload.ignore_weather else 'active'}", "warn" if payload.ignore_weather else "good")
+    return bridge.set_ignore_weather(payload.ignore_weather)
 
 
 @router.post("/telescope/connect")
 def telescope_connect(
     payload: ConnectPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
+    SESSION_STATE.log_event(f"Telescope {'connecting' if payload.connect else 'disconnecting'}", "info")
     return bridge.connect_telescope(payload.connect)
 
 
@@ -117,6 +132,7 @@ def telescope_connect(
 def telescope_park(
     payload: ParkPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
+    SESSION_STATE.log_event(f"Telescope {'parking' if payload.park else 'unparking'}", "info")
     return bridge.park_telescope(payload.park)
 
 
@@ -124,6 +140,7 @@ def telescope_park(
 def telescope_slew(
     payload: SlewPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
+    SESSION_STATE.log_event(f"Slewing to RA={payload.ra_deg:.4f} Dec={payload.dec_deg:.4f}", "info")
     return bridge.slew(payload.ra_deg, payload.dec_deg)
 
 
@@ -131,6 +148,7 @@ def telescope_slew(
 def focuser_move(
     payload: FocuserMovePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
+    SESSION_STATE.log_event(f"Moving focuser to {payload.position}", "info")
     return bridge.focuser_move(payload.position, payload.speed)
 
 
@@ -154,6 +172,7 @@ def start_exposure(
             "path": str(expected_path),
         }
     )
+    SESSION_STATE.log_event(f"Starting exposure: {payload.exposure_seconds}s {payload.filter} bin={payload.binning}", "info")
     return {"expected_path": str(expected_path), "result": result}
 
 
@@ -161,6 +180,7 @@ def start_exposure(
 def plan_sequence(
     payload: SequencePlanPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
+    SESSION_STATE.log_event("Planning sequence", "info")
     return bridge.plan_sequence(payload.model_dump(exclude_none=True))
 
 
@@ -188,6 +208,7 @@ def start_sequence(
             }
         )
 
+    SESSION_STATE.log_event(f"Starting sequence '{payload.name}': {payload.count} frames", "info")
     result = bridge.start_sequence(payload.model_dump(exclude_none=True))
     SESSION_STATE.add_captures(captures)
     return {"expected_paths": captures, "result": result}

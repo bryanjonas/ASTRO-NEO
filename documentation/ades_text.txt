@@ -1,0 +1,1636 @@
+A Concise Description of the
+
+Astrometry Data Exchange Standard
+
+
+
+Version 02-May-2024
+                                  Change Log
+
+13-Jul-2018
+   • Added optional field rmsTime for optical, offset and occultation observations.
+       This change is treated as a bug fix, and so the version is not incremented,
+       though the previous schema will not validate files containing the new optional
+       field.
+   • Minor revisions to documentation for uncTime and ctr, as well as
+       specification that blank or empty strings are disallowed.
+03-Feb-2022
+   • Added shapeOcc, obsSubID and trkMPC elements.
+   • obsID can be up to 25 alphanumeric characters
+   • Minor typographical and layout corrections
+25-Apr-2022
+   • Incremented ADES version from v2017 to v2022
+07-Sep-2022
+   • Applied maximum field widths (i.e., string lengths) to most elements not
+       already having such restrictions.
+   • Incremented version to 2022a.
+25-Oct-2023
+   • mode is required for occultations
+   • raStar/decStar (and therefore also ra/dec) now allow for 9 digits after
+       the decimal for Gaia support
+   • rmsRA/rmsDec now allow for up to 7 characters
+   • A few minor clarifications in documentation
+26-Oct-2023
+   • sigRA/sigDec now allow for up to 7 characters
+17-Jan-2024
+   • Restrict mag to be in range -5 to +35 mag
+   • Change type for obsSubID to be StringW25, allowing greater flexibility, e.g.,
+       hyphens, etc. (but still no pipes!)
+18-Jan-2024
+   • observers is now an optional element of obsContext
+12-Mar-2024
+   • Added optional filter element
+   • Added vel1, vel2, vel3 optional elements for spacecraft velocity
+   • Restrict rmsCorr to disallow values of ±1.
+   • Emphasize that the XML preamble is required for properly constructed ADES
+   • Document that artSat identifiers should use the international standard
+       designations, e.g., 1998-067A.
+
+
+
+
+2
+02-May-2024
+   • Revised documentation for ctr. Only body centers can be used, not
+      barycenters as they are more subject to model dependencies. Moreover, the
+      geocenter (399) is the only permitted value for ctr. The use of any other value
+      must be coordinated with the MPC and will require a minor ADES revision.
+   • Revised the description of uncTime to clarify that it can be used for reporting
+      of uncertainty in clock calibrations.
+
+
+
+
+3
+                                                            Table of Contents
+
+
+1       Introduction ..................................................................................................................... 5
+2       Overview............................................................................................................................ 6
+3       Revising ADES .................................................................................................................. 7
+4       ADES in XML ..................................................................................................................... 8
+    4.1     High-level ADES Structure ............................................................................................... 8
+    4.2     Structure of ADES Observation Elements................................................................. 10
+       4.2.1 Identification Group .................................................................................................................... 11
+       4.2.2 Location Group .............................................................................................................................. 12
+       4.2.3 Observation Group ...................................................................................................................... 13
+       4.2.4 Photometry Group ....................................................................................................................... 14
+       4.2.5 Precision Group............................................................................................................................. 15
+       4.2.6 Residuals Groups .......................................................................................................................... 15
+    4.3     Observation Context ........................................................................................................ 16
+    4.4     Residual Elements ............................................................................................................ 18
+    4.5     ADES Low-level Elements .............................................................................................. 19
+    4.6     An ADES example in XML ............................................................................................... 34
+5       ADES in PSV .................................................................................................................... 35
+    5.1          Default PSV Formatting .................................................................................................. 37
+6       Implementation Plan .................................................................................................. 38
+    6.1          ADES Software ................................................................................................................... 38
+
+
+
+
+4
+1 Introduction
+This document describes the IAU Astrometry Data Exchange Standard (ADES) for
+small solar system objects, i.e., asteroids, comets, and natural satellites. ADES
+provides exchange formats and an associated data description that will facilitate
+transmission and storage of astrometric data, as generated by the observers, stored
+by the MPC, and processed by the orbit computers. Subsequent extensions to the
+standard may provide data structures to handle other data products, e.g., orbits and
+ephemerides.
+
+ADES was formally adopted by IAU Commission 20 (Positions and Motions of Minor
+Planets, Comets and Satellites) at the IAU General Assembly held in Hawaii, USA in
+August 2015. The background, motivation, objectives and rationale of ADES are
+outlined in a preliminary description of the standard (published on MPEC 2015-O06
+and available for download from the MPC†) and will not be repeated here. The ADES
+description here benefits from fine-tuning during the code development process and
+supersedes the preliminary description from 2015.
+
+The ADES standard defines certain data types, which are detailed lists of information
+that either can or must be included in data submission, storage and exchange. These
+lists can be thought of either as records, such as the ones in a database, or as object
+classes, user defined data types, and so on. However, the standard defines the
+information content, not how these structures are implemented in computer codes
+handling the data.
+
+
+
+
+† http://minorplanetcenter.net/iau/info/IAU2015_ADES.pdf
+2 Overview
+The MPC already has a longstanding standard format, referred to as MPC1992, and a
+message protocol for receiving astrometry, and it uses the same format to
+redistribute the data to users. After adoption of ADES, the MPC will continue to accept
+data in the MPC1992 format for the foreseeable future, although at some point the
+MPC1992 format will be judged obsolescent.
+
+ADES includes two interchangeable file formats intended to meet the needs of the
+diverse small body astrometry community, including both producers and users of the
+data. The two formats are
+
+    •   XML (eXtensible Markup Language) — This tag-based format allows for
+        automated, schema-based validation of data and is in several ways more
+        suited for large-scale data production and processing. However, XML is not a
+        convenient form for manual editing and viewing of data files in conventional
+        text editors.
+
+    •   PSV (Pipe-Separated Values) — This format is a plain-text, pipe-delimited file
+        (the pipe symbol is "|"), with one data record per line. The files can be
+        produced so that the individual data fields are aligned from record to record,
+        making it a convenient format for manual editing or inspection of data
+        through a text editor.
+
+In terms of content, the XML and PSV formats are fully equivalent and (with one
+exception) there are no losses of information in the process of transforming back and
+forth between the formats. (The exception to lossless translation being XML
+information stored in the localUse element described below, which is lost in
+translation to PSV.) MPC1992 data can readily be translated into ADES, but many
+ADES data fields cannot be represented in MPC1992, and so there may be information
+loss in translating from ADES to MPC1992.
+3 Revising ADES
+The formal process for revising ADES is not very formal. The MPC manages ADES
+revisions based on internal needs and in response to requests from the observing and
+orbit-fitting communities. Minor changes that do not necessarily impact existing
+ADES-compliant software can be implemented by the MPC after providing notice to
+the community, e.g., through an MPEC Editorial Notice. Major changes that have a
+substantive impact on existing software and work flows should be proposed to the
+community at large and to the Organizing Committee of IAU Commission X.2 (Solar
+System Ephemerides). The IAU may provide a suitable forum for discussion and
+feedback to the MPC on the proposed ADES revisions.
+
+The versioning system for ADES identifies a version by the year in which it was
+adopted. While frequent version updates are not anticipated, if more than one version
+update is adopted in a given year the new version will have a lower-case letter
+appended, e.g., the second and third versions in 2017 would be 2017a and 2017b,
+respectively.
+4 ADES in XML
+This section describes the XML version of ADES. We first describe the overall, high-
+level structure of the ADES elements, and then turn to a detailed element-by-element
+description of the low-level ADES components. The PSV version of ADES will be
+described in Sec. 5, below.
+
+Notes:
+   • In the following descriptions of the ADES XML structure, the ordering of the
+       elements is explicit and must be maintained. This is an essential element for
+       schema-based validation of the various data types in the ADES design.
+   • The capitalization scheme for ADES element names uses the so-called
+       lowerCamelCase, i.e., lowercase except that wordbreaks are marked by an
+       uppercase letter, e.g., 'radarResidual'. Initialisms and acronyms (e.g., ID,
+       RA, SNR) are not written in mixed case, e.g., rmsRA.
+   • Leading and trailing blanks in an element are ignored.
+   • The character encoding is specified by the XML preamble, but UTF-8 encoding
+       is recommended as best practice for ADES files. The preamble is required.
+
+4.1 High-level ADES Structure
+
+A valid ADES XML file uses XML version 1.0 and starts with an XML preamble, which
+must be present. An ADES file must always include the ADES root element ades with
+a version attribute:
+       <?xml version='1.0' encoding='utf-8'?>
+       <ades version='2017'>
+             ---ADES data here---
+       </ades>
+
+At a high level, ADES allows for exchange of observations, observation context and
+observation residuals. There are four fundamental observation types, identified by
+the self-explanatory tags, optical, offset, occultation and radar. These
+observations can be packaged in different ways, depending upon the use case. The
+ades element itself can contain any of seven distinct elements, and these can appear
+in any number and in any order. Table 1 lists the elements that can appear in an ades
+element, and identifies where in this document additional information for these
+elements can be found.
+Table 1. Description of the ades root element. It can contain an unbounded list of any of the optional
+elements in any order. The obsBlock element is optional but at least one such element must be present
+in a valid MPC submission. The elements marked "N/S" are optional but must not be present in an MPC
+submission.
+
+                                        ades Root Element
+       Element                    Use     Notes
+       obsBlock                   OPT     See Table 2. Mandatory for MPC submissions.
+       optical                    N/S     See Table 3 for description.
+       offset                     N/S     See Table 3 for description.
+       occultation                N/S     See Table 3 for description.
+       radar                      N/S     See Table 3 for description.
+       opticalResidual            N/S     See Table 13 for description.
+       radarResidual              N/S     See Table 14 for description.
+
+Of particular importance is the obsBlock element, which is the only ades element
+that is permitted in a submission to the MPC. As indicated in Table 2, an obsBlock
+contains one obsContext and one obsData element, in that order. The
+obsContext (Table 12) conveys what was once called the header information for
+MPC1992 submissions, and the obsData element can contain only a single type of
+observational data, either optical, offset, occultation or radar.
+
+Table 2. Description of the obsBlock subelements and their required order. The designation "REQ"
+indicates a required subelement.
+
+                                      obsBlock Element
+             Subelements           Use     Description
+             obsContext            REQ     See Table 12 for description.
+             obsData               REQ     An unbounded list of a single
+                                           observation type, either optical,
+                                           offset, occultation or radar.
+
+Thus, an ADES document could include all of the observations for a given object, with
+all of the optical, offset, occultation and radar elements appearing as
+immediate children of ades. Alternatively, for an MPC submission, ades could hold
+one or more obsBlock elements. Or, as another example, ades could hold a mix of
+opticalResidual or radarResidual elements.
+
+We turn now to a description of the other elements that can appear in ades. In the
+next section (Sec. 4.2) we cover the observation elements (optical, offset,
+occultation and radar) and in Sec. 4.3 we describe obsContext and in Sec. 4.4
+the residual elements (opticalResidual and radarResidual). Finally, in Sec.
+4.5 we give the meaning and restrictions on the low-level elements.
+
+
+
+
+9
+4.2 Structure of ADES Observation Elements
+
+With that explanation of the high-level structure of ADES, we can turn now to the
+structure and definition of the four observation elements. Table 3 displays the
+allowed subelements of the four observation elements. Here as elsewhere, the
+ordering of the elements must be as specified in the table. There are some sets of
+elements that, for convenience of description and presentation, are collected into
+groups in Table 3 and described in separate tables. It is emphasized that these groups
+are not hierarchical elements with child elements, but are simply groupings of related
+elements at the same hierarchical level as other elements in Table 3.
+
+Table 3. Observation element and their required order. The designation "REQ" indicates a required
+element, "OPT" denotes optional elements, "N/S" indicates elements that are generally optional but not
+permitted in MPC submissions. Forbidden elements are marked with "-". Groups of elements described
+separately are indicated by italic font in the first column, and their elements are tabulated and described
+below.
+
+Element or Group                  optical            offset           occultation            radar
+Identification Group                REQ                REQ                REQ                 REQ
+obsID                               N/S                N/S                N/S                 N/S
+obsSubID                            OPT                OPT                OPT                  -
+trkID                               N/S                N/S                N/S                  -
+trkMPC                              N/S                N/S                N/S                  -
+mode                                REQ                REQ                REQ                  -
+stn                                 REQ                REQ                REQ                  -
+trx                                  -                  -                  -                  REQ
+rcv                                  -                  -                  -                  REQ
+Location Group                      OPT                OPT                OPT                  -
+prog                                N/S                N/S                N/S                 N/S
+obsTime                             REQ                REQ                REQ                 REQ
+rmsTime                             OPT                OPT                OPT                  -
+Observation Group                   REQ                REQ                REQ                 REQ
+astCat                              REQ                 -                 REQ                  -
+Photometry Group                    OPT                OPT                OPT                  -
+logSNR                              OPT                OPT                OPT                 OPT
+shapeOcc                             -                  -                 OPT                  -
+seeing                              OPT                OPT                OPT                  -
+exp                                 OPT                OPT                 -                   -
+rmsFit                              OPT                OPT                 -                   -
+nStars                              OPT                OPT                 -                   -
+com                                  -                  -                  -                  OPT
+frq                                  -                  -                  -                  REQ
+ref                                 N/S                N/S                N/S                 N/S
+disc                                OPT                OPT                OPT                  -
+subFrm                              N/S                N/S                N/S                  -
+subFmt                              N/S                N/S                N/S                  -
+Precision Group                     N/S                N/S                N/S                  -
+uncTime                             OPT                OPT                OPT                  -
+notes                               OPT                OPT                OPT                  -
+remarks                             OPT                OPT                OPT                 OPT
+Optical Residuals Group             N/S                N/S                N/S                  -
+Radar Residuals Group                -                  -                  -                  N/S
+deprecated                          N/S                N/S                N/S                  -
+localUse                            N/S                N/S                N/S                 N/S
+
+
+
+
+10
+     4.2.1 Identification Group
+
+The Identification Group (Table 4) includes four elements that are used to identify the
+object associated with the observation. As shown in Table 4, there are four alternate
+presentations (labeled A-D) for these elements. At least one of the elements is always
+required to be present, and, unless it is the only element present, trkSub is always
+optional. However, radar observations must always include at least one of permID,
+provID or artSat, and so Alternative D is not permitted for radar. If artSat is
+present then neither permID nor provID can be present, otherwise either or both
+permID and provID can be present.
+
+Table 4 Identification Group has four available fields that can be present in four alternate combinations
+as tabulated here and described in the text. Any alternative A-D can be used for optical, occultation
+or offset observations. Only alternatives A-C can be used for radar observations. The designation "REQ"
+indicates a required element, "OPT" denotes optional elements and "-" indicates that the field is
+forbidden.
+
+                                      Identification Group
+                                                  Alternatives
+               Element                A           B          C                    D*
+               permID                REQ          -          -                    -
+               provID                OPT         REQ         -                    -
+               artSat                 -           -         REQ                   -
+               trkSub                OPT         OPT        OPT                  REQ
+               * Alternative D not permitted for radar observations
+
+The use of the Identification Group elements depends on the designation status of the
+target and the purpose behind the exchange of data. For unlinked submissions to the
+MPC, Alternative D in Table 4 applies, and trkSub must provide a user-assigned
+temporary designation, unique within the submission, for each tracklet in the
+submission. For targeted follow-up or recovery observations the user is encouraged
+to report the current designation of the target in either the permID or provID field,
+as the case may be. For a numbered object, provID should not be filled and may be
+ignored by the MPC. For targeted follow up with more than one tracklet of the same
+object in the submission, the trkSub field should be used to distinguish the
+individual tracklets. If the detection refers to a known artificial satellite then
+Alternative C must be used to convey the presumed identity of the target. The MPC
+has special processes and policies for submission and distribution of artificial satellite
+astrometry.
+
+The permID and provID elements indicate the permanent or provisional
+designation of the object, respectively. (The past use of an MPC “packed” designation
+has been dropped, primarily because it is generally less readable, and the sorting
+advantages of the packed format require preservation of leading blanks and zeros,
+which is not in accord with the ADES formatting guidelines.) The MPC maintains the
+defining descriptions of the formal IAU designations, which are generally but not
+
+11
+always represented verbatim in ADES. For minor planets and comets, the permID
+and provID format follows the associated formal IAU designation very closely, with
+the exception of removing parentheses around the permanent designation of
+numbered minor planets and eschewing subscripting in provisional designations of
+minor planets or former minor planets. For natural satellites, the IAU designation is
+preserved except that in permanent designations arabic numerals are used instead of
+roman numerals and for permanent designations of satellites of minor planets the
+name of the central body is neglected. The representation of the IAU designation in
+the permID and provID elements is given by examples in Table 5.
+
+Table 5. Example usage for provID and permID for various types of designations. This table does not
+provide an exhaustive list of all possible variations. The MPC defines the form of designations in
+cooperation with the IAU.
+
+Object Type         IAU Designation              permID             provID
+Minor Planet        (1)                          1
+Minor Planet        (134340)                     134340
+Minor Planet        (1234567)                    1234567
+Minor Planet        2014 AA                                         2014 AA
+Minor Planet        2014 AA1                                        2014 AA1
+Minor Planet        2014 AA360                                      2014 AA360
+Minor Planet        2014 AA12345                                    2014 AA12345
+Minor Planet        4007 P-L                                        4007 P-L
+Minor Planet        4658 T-3                                        4568 T-3
+Comet               3D                           3D
+Comet               1234P                        1234P
+Comet               C/1999 K7                                       C/1999 K7
+Comet               P/1886 S1                                       P/1886 S1
+Comet               P/1998 QP54                                     P/1998 QP54
+Comet               C/1997 BA6                                      C/1997 BA6
+Comet               C/1931 AN                                       C/1931 AN
+Comet Fragment      73P-C                        73P-C
+Comet Fragment      73P-AC                       73P-AC
+Comet Fragment      P/1994 P1-B                                     P/1994 P1-B
+Comet Fragment      C/1996 J1-A                                     C/1996 J1-A
+Satellite           Jupiter XIII                 Jupiter 13
+Satellite           (45) Eugenia I               (45) 1
+Satellite           S/2001 U 9                                      S/2001 U 9
+Satellite           S/2001 S 31                                     S/2001 S 31
+Satellite           S/2008 (41) 1                                   S/2008 (41) 1
+Satellite           S/2000 (1998 WW31) 1                            S/2000 (1998 WW31) 1
+
+
+     4.2.2 Location Group
+
+The Location Group (Table 6) includes the elements that are used only for
+observatories that are not at a fixed position on the surface of the Earth, or do not
+have a specific MPC-assigned observatory code (stn). These are primarily the so-
+
+12
+called "roving" observers (MPC observatory code 247) and space-based
+observatories. The Location Group must be present for such cases, but must not be
+present if stn is associated with a stationary MPC observatory code. The Location
+Group is not permitted for radar observations. Velocity information is optional for
+space-based observations and not permitted for terrestrial observers.
+
+Table 6 Location Group description. The designation "REQ" indicates a required element and "OPT"
+denotes optional elements. The Location Group is not permitted for radar observations.
+
+                                      Location Group
+                  Element            optical/offset/occultation
+                  sys                            REQ
+                  ctr                            REQ
+                  pos1                           REQ
+                  pos2                           REQ
+                  pos3                           REQ
+                  vel1                           OPT
+                  vel2                           OPT
+                  vel3                           OPT
+                  posCov11                       OPT
+                  posCov12                       OPT
+                  posCov13                       OPT
+                  posCov22                       OPT
+                  posCov23                       OPT
+                  posCov33                       OPT
+
+
+     4.2.3 Observation Group
+
+The Observation Group encapsulates the astrometry and its associated uncertainty.
+The elements are presented in Table 7. For optical observations, the elements are
+straightforward, with ra, dec both being required and the associated uncertainties,
+rmsRA and rmsDec, being optional. The correlation of uncertainty between RA and
+DEC is provide by the optional field rmsCorr. The offset and occultation
+observations are both measured through a displacement from a reference point,
+obsCenter for offset and raStar and decStar for occultation. For both of
+these observation types, the displacement can be measured either as a ∆RA and ∆DEC
+(deltaRA and deltaDec) or as a distance and direction in position angle (dist
+and pa). These are the cartesian and polar coordinate forms of the displacement from
+the reference, and either approach is permitted. Finally, for radar observations, the
+allowed value is either delay or doppler, and not both, and the associated
+uncertainty is required. Thus, except for radar, the observational uncertainties are
+optional fields, including rmsCorr.
+
+A broader discussion of astrometric reduction techniques is beyond the scope of this
+document, but it should be noted that submitted astrometry should include any
+
+13
+corrections for differential color refraction that the observer is in a position to
+compute. On the other hand, observers should not make any corrections for
+relativistic path curvature of photons (“lensing” or “light bending”) as this is position
+dependent and therefore must be applied when fitting an orbit to the astrometry.
+
+Table 7 Observation Group description. The allowed elements for each observation type are tabulated in
+the order required. All element names that appear in parentheses are optional. Others are mandatory,
+except that a vertical bar indicates a choice, e.g., the offset and occultation observations could be reported
+in deltaRA and deltaDec, or alternatively in dist and pa. Similarly, radar observations can report
+either doppler or delay. The RMS element must, of course, align with that of the reported observable.
+
+                                         Observation Group
+  optical                    offset      occultation            radar
+                                            raStar
+                        obsCenter          decStar
+     ra             deltaRA    dist   deltaRA    dist     doppler     delay
+    dec            deltaDec     pa   deltaDec      pa   rmsDoppler rmsDelay
+  (rmsRA)           (rmsRA) (rmsDist) (rmsRA) (rmsDist)
+ (rmsDec)          (rmsDec) (rmsPA) (rmsDec) (rmsPA)
+(rmsCorr)               (rmsCorr)         (rmsCorr)
+
+
+     4.2.4 Photometry Group
+
+Photometric observations are a part of the optional Photometry Group, as depicted in
+Table 8. While the entire group is optional, if photometry is to be included with an
+observation then the required elements in the group must be present.
+
+Observers should note that the photometric band to report is the same as that of the
+reference star magnitudes used to calibrate the exposure. It is not necessarily the
+same as the filter through which the exposure was taken. In particular, unfiltered
+exposures should never be reported with a band of 'none' or 'clear'. If the color of the
+target is known, then it may be possible to apply a color term correction to a chosen
+bandpass, if the proper transformation is known, in which case the band to report
+should correspond to the result of the transformation.
+
+Table 8 Photometry Group description. The designation "REQ" indicates a required element and "OPT"
+denotes optional elements. The Photometry Group is not permitted for radar observations.
+
+                                         Photometry Group
+                       Element           optical/offset/occultation
+                       mag                           REQ
+                       rmsMag                        OPT
+                       band                          REQ
+                       fltr                          OPT
+                       photCat                       OPT
+                       photAp                        OPT
+                       nucMag                        N/S
+
+14
+     4.2.5 Precision Group
+
+For observations that were translated from MPC1992 or earlier formats, the
+Precision Group preserves the precision of the original reported observation and
+allows the content of the original sexagesimal submission to be derived. The
+elements in the Precision Group are tabulated in
+Table 9, where one can see that, though the entire group is optional (but not allowed
+in MPC submissions), if any precision information is present then all three elements
+in the group must be present.
+Table 9 Precision Group description. The designation "REQ" indicates a required element. While the
+precision group is optional (and not for submission), if any of the group's elements are present then all
+must be present. The Precision Group is not permitted for radar observations.
+
+                                         Precision Group
+                      Element           optical/offset/occultation
+                      precTime                      REQ
+                      precRA                        REQ
+                      precDec                       REQ
+
+     4.2.6 Residuals Groups
+
+Table 3 indicates that there are two groups related to the exchange of observational
+residuals, the Optical Residuals Group (Table 10) and the Radar Residuals Group
+(Table 11). These groups are optional for the observations to which they apply, but
+are not permitted in MPC submissions. Thus, a radar observation may contain radar
+residuals (and the other observation types may include optical residuals) but not for
+MPC submission. Each of these two residual groups start with an identification
+element for the orbit producer (orbProd) and then the orbital solution, (orbID),
+both required.
+
+For the Radar Residuals Group, the next elements are the residual value, selection flag
+and measurement uncertainty, with the element names conforming to the type of
+measurement used in the observations, either delay or Doppler.
+
+The Optical Residuals Group has the extra feature that, following the required ID block,
+it may include either an Astrometry Subgroup or a Photometry Subgroup, or both, in
+that order. Within one of these blocks there are some required items (residuals,
+selection flags, and sigmas) and the rest are optional. Thus, at a minimum, the Optical
+Residuals Group must contain the elements [orbProd, orbID], and either [resRA,
+resDec, selAst, sigRA, sigDec] or [photProd, resMag, selPhot, sigMag]
+(or both).
+
+
+
+
+15
+Table 10 Optical Residuals Group description. The designation "REQ" indicates a required element, "OPT"
+denotes optional elements. Either the Astrometry or Photometry subgroup, or both, must be present. The
+Optical Residuals Group is not permitted for radar observations.
+
+                                     Optical Residuals Group
+                Element                     optical/offset/occultation
+                orbProd                                 REQ
+
+
+
+
+                                 ID
+                orbID                                   REQ
+                resRA                                   REQ
+                resDec                                  REQ
+                selAst                                  REQ
+                sigRA                                   REQ
+                               Astrometry
+                sigDec          Subgroup                REQ
+                sigCorr                                 OPT
+                sigTime                                 OPT
+                biasRA                                  OPT
+                biasDec                                 OPT
+                biasTime                                OPT
+                photProd                                OPT
+                resMag                                  REQ
+                               Photometry
+                                Subgroup
+
+
+
+
+                selPhot                                 REQ
+                sigMag                                  REQ
+                biasMag                                 OPT
+                photMod                                 OPT
+
+
+
+Table 11 Radar Residuals Group description. The designation "REQ" indicates a required element, "OPT"
+denotes optional elements. The vertical bar indicates a choice, e.g., the residual information can be
+reported either in doppler or delay, depending on the type of radar observation reported. The Radar
+Residuals Group is not permitted for optical, offset or occultation observations.
+
+                                      Radar Residuals Group
+                                Element                          radar
+                                orbProd                           REQ
+                                 orbID                            REQ
+                         resDelay resDoppler                      REQ
+                         selDelay selDoppler                      REQ
+                         sigDelay sigDoppler                      REQ
+
+
+4.3 Observation Context
+
+Following the discussion of the ADES observation elements, we now turn to describe
+the other high-level ADES elements, starting with obsContext, which is a required
+subelement of obsBlock. The obsContext serves the purpose of what was called
+the header information in MPC1992 submissions. It is metadata that provides useful
+
+16
+context for the associated observations in obsData. As shown in Table 12, most of
+the components of obsContext have child subelements that contain the actual
+information, the exception being fundingSource, which has no children. In several
+cases, as marked with an asterisk in Table 12, the name or line subelement can
+appear repeatedly, with a minimum of one occurrence. An example of the obsContext
+element is presented in Sec. 4.6.
+
+Table 12. Elements of obsContext and their required order. In every case except one (fundingSource),
+the tabulated subelements of obsContext have child elements that convey the relevant information. The
+designation "REQ" indicates a required element or subelement, and "OPT" denotes optional. For
+subelements marked with an asterisk "REQ(*)", an unbounded list of the subelement must be present,
+with a minimum of one occurrence.
+
+                                    obsContext Element
+           Element                        Use      Subelements                   Use
+           observatory                    REQ
+                                                   mpcCode                       REQ
+                                                   name                          OPT
+           submitter                      REQ
+                                                   name                          REQ
+                                                   institution                   OPT
+           observers                      OPT
+                                                   name                        REQ(*)
+           measurers                      REQ
+                                                   name                        REQ(*)
+           telescope                      REQ
+                                                   name                          OPT
+                                                   design                        REQ
+                                                   aperture                      REQ
+                                                   detector                      REQ
+                                                   fRatio                        OPT
+                                                   filter                        OPT
+                                                   arraySize                     OPT
+                                                   pixelScale                    OPT
+           software                       OPT
+                                                   astrometry                    OPT
+                                                   fitOrder                      OPT
+                                                   photometry                    OPT
+                                                   objectDetection               OPT
+           coinvestigators                OPT
+                                                   name                        REQ(*)
+           collaborators                  OPT
+                                                   name                        REQ(*)
+           fundingSource                  OPT                    —None—
+           comment                        OPT
+                                                   line                        REQ(*)
+
+
+
+
+17
+4.4 Residual Elements
+
+The last high-level ADES elements to be discussed are the opticalResidual
+(Table 13) and radarResidual (Table 14) elements, which allow exchange of
+residual information without including the associated observational information. As
+described above, residuals may be included within an observation as detailed in the
+discussion of the Residuals Groups in Sec. 4.2.6. However, residuals information can
+also appear as an immediate child of an ades element by including information that
+allows each of the residuals to be referred to its associated observations. Thus, the
+opticalResidual and radarResidual elements start with the Identification
+Group (Sec. 4.2.1) as well as the obsID and trkID (if available) and obsTime from
+the associated observation. These elements allow the subsequent Optical Residuals
+Group (Table 10) or Radar Residuals Group (Table 11) to be unambiguously linked to
+the associated observation element, which is presumably stored separately.
+
+Table 13. The subelements of the opticalResiduals element in their required order. The designation
+"REQ" indicates a required element, and "OPT" denotes optional elements.
+
+                               opticalResidual Element
+ Element or Group           Use      Notes
+ Identification Group       REQ      See Table 4. Must agree with associated observation.
+ obsID                      OPT      Should be included if available.
+ trkID                      OPT      Should be included if available.
+ obsTime                    REQ      Must agree with associated observation.
+ Optical Residuals Group    REQ      See Table 10 for description.
+
+Table 14. The subelements of the radarResiduals element in their required order. The designation
+"REQ" indicates a required element, and "OPT" denotes optional elements.
+
+                                radarResidual Element
+ Element or Group           Use      Notes
+ Identification Group       REQ      See Table 4. Must agree with associated observation.
+ obsID                      OPT      Should be included if available.
+ obsTime                    REQ      Must agree with associated observation.
+ Radar Residuals Group      REQ      See Table 11 for description.
+
+
+
+
+18
+4.5 ADES Low-level Elements
+
+This section tabulates the low-level elements that are a part of the various modes of
+observation (Table 16), part of the residuals information (
+
+
+
+
+19
+Table 17) or part of the observation context (Table 18).
+
+The number of digits in the provided measurements should be consistent with the
+stated or assumed uncertainty. Reported uncertainties should be reported with two
+significant figures if the leading significant digit is '1', otherwise either one or two
+significant figures is appropriate when reporting uncertainty. Submissions with more
+than two significant figures in reported uncertainties may be rejected by the MPC.
+
+The observations themselves should be reported with at least one but never more
+than two significant figures (i.e., a factor ~10-100) beyond the measurement
+accuracy.‡ Thus, observations reported in degrees that have accuracies in the range
+0.036-0.36 arcsec would reasonably be reported with six significant figures past the
+decimal point. Similarly, photometry with magnitude uncertainties in the range 0.1-
+1.0 may be reasonably reported to the nearest 0.01 mag. Figure 1 provides guidance
+on how many digits should be reported after the decimal point for ADES angular and
+photometric observations. The plots are generated with the formula
+
+                     DP = CEILING(1 - LOG10(SIGMA)),
+
+where DP is the number of digits after the decimal point, SIGMA is the reported
+uncertainty and CEILING is a function that rounds up to the next greater integer
+value. The MPC may reject observations reported with a gratuitous number of digits.
+
+For other fields, besides measurements and uncertainties, the reported precision will
+depend on the circumstances. Table 15 provides recommended printing formats in
+both FORTRAN and printf styles as an aid to standardization.
+
+In the following tables, the term "String" allows any printable character in the XML
+character encoding, except for the pipe character "|", which is forbidden in any ADES
+element value to ensure compatibility with PSV. "Alphanumeric" describes the subset
+of String characters including the 52 upper and lower case ASCII letters, the ten ASCII
+numerals, blank, and the underscore character "_". Empty or blank elements in XML
+are disallowed.
+
+
+
+
+‡ When rmsCorr is reported, the relevant measurement accuracy is the semiminor
+
+axis of the associated two-dimensional error ellipse.
+20
+Figure 1. Suggested numerical precision in ADES observations for RA-DEC astrometry (left) and
+photometry (right) as a function of the measurement uncertainty.
+
+
+Table 15. Recommended output print specifications for selected ADES fields. These values are intended
+as an aid to standardization and it is understood that exceptional cases may require different
+specifications.
+
+                       Element                FORTRAN            printf
+                       rmsCorr                  F6.3              %6.3f
+                       photAp                   F4.1              %4.1f
+                       logSNR                   F4.2              %4.2f
+                       seeing                   F3.1              %3.1f
+                       rmsFit                   F4.2              %4.2f
+
+Several of the elements described below must match an approved list of values that
+is provided and maintained by the MPC. These include the following:
+    • Instrumentation type: mode
+    • Observatory designations, with location where appropriate: stn, trx, rcv
+    • Star catalogs: astCat, photCat
+    • Photometric passband: band
+    • Observing notes and meaning: notes
+    • Photometric model used for photometry residuals: photMod
+In the case of photMod, the MPC list is not restrictive, but is intended to aid
+standardization.
+
+In the following, the decimal point is optional for decimal numbers (e.g., ‘1’ is valid),
+but if the decimal point is present the integer portion of the number must be explicit
+(e.g., ‘-0.1’ is valid, but ‘-.1’ is invalid). Also, leading zeros in the integer portion are
+invalid.
+
+
+
+
+21
+Table 16. Observation elements and their descriptions. Elements associated with a grouping as discussed
+in Sec. 4.2 and Table 3 are highlighted by gray shading.
+
+Element          Description                               Restrictions
+Identification Group Elements:
+permID           IAU permanent designation, e.g., the      See Table 5 for examples.
+                 IAU number for a numbered minor           Maximum width of 25 characters.
+                 planet. See discussion at Sec. 4.2.1.
+provID           MPC provisional designation (in           See Table 5 for examples.
+                 unpacked form) for unnumbered             Maximum width of 25 characters.
+                 objects. See discussion at Sec. 4.2.1.
+artSat           Artificial satellite identifier, using    String. Maximum width of 25
+                 international-style designation, e.g.,    characters.
+                 1998-067A. The general form is YYYY-
+                 NNNAAA.
+trkSub           Observer-assigned tracklet identifier, Up to 8 alphanumeric characters.
+                 unique within a submission batch. Not
+                 altered by the MPC. This will typically
+                 be the same as the observer-assigned
+                 temporary designation previously
+                 employed for the MPC1992 format.
+                 This element can be used to distinguish
+                 individual tracklets among
+                 observations of the same object within
+                 a submission. This element can also be
+                 used by an observatory to facilitate
+                 tracebacks from MPC distributions to
+                 observer submissions. See discussion
+                 at Sec. 4.2.1.
+obsID            Globally unique observation identifier Up to 25 alphanumeric characters.
+                 assigned by the MPC. For observers,
+                 this field can be used to communicate a
+                 correction to a previously published
+                 observation.
+obsSubID         Observation identifier, optionally        String. Maximum width of 25
+                 included with the submission, that is     characters.
+                 unique to a given observing program.
+                 This element is intended to support
+                 extended analyses associated with
+                 major observing programs.
+trkID            Globally unique tracklet identifier       Up to 12 alphanumeric characters.
+                 assigned by the MPC.
+trkMPC           MPC-internal tracklet identifier, used in Up to 12 alphanumeric characters.
+                 cases where the value of the trkSub
+                 element should be considered
+                 deprecated.
+
+
+
+
+22
+mode            Mode of instrumentation.                 Up to 3 alphanumeric characters.
+                                                         Full list of acceptable values to be
+                                                         provided and maintained by the
+                                                         MPC. Key examples follow:
+                                                         mode       Description
+                                                         PHO        Photographic
+                                                         ENC        Encoder
+                                                         CCD        CCD
+                                                         MER        Meridian or transit circle
+                                                         MIC        Micrometer
+                                                         NOR        Normal place
+                                                         VID        Mini-normal place from
+                                                                    video frames
+                                                         PMT        Photo-multiplier tube
+stn             Observatory code assigned by the MPC. Either 3 or 4 alphanumeric
+                This could be a ground-based station characters, typically one code per
+                with published coordinates or a roving observatory. The old three-
+                or space-based station with              character codes will be preserved
+                coordinates given by the Location        where practical, or a fourth
+                Group elements listed below.             character will be added, e.g., 568a,
+                                                         568b, etc. The list of stn codes
+                                                         and associated locations to be
+                                                         provided and maintained by the
+                                                         MPC.
+trx             Station codes of transmitting and        Either 3 or 4 alphanumeric
+rcv             receiving antenna.                       characters. The list of trx and
+                                                         rcv codes and associated
+                                                         locations to be provided and
+                                                         maintained by the MPC.
+Location Group Elements:
+sys             Coordinate frame for roving or space- A string with five possible values
+                based station coordinates. The five      listed at left.
+                possible values and their interpretation
+                are as follows:
+                For ground-based roving observers
+                • ‘WGS84’ (geodetic reference
+                    ellipsoid, GPS coordinates are
+                    normally obtained in this frame)
+                • ‘ITRF’ (cylindrical)
+                • ‘IAU’ (IAU planetary cartographic
+                    model for bodies other than Earth)
+                For space-based observatories
+                • ‘ICRF_AU’ (cartesian)
+                • ‘ICRF_KM’ (cartesian)
+
+
+
+
+23
+ctr        Origin of the reference system given     An integer in the range -109 to
+           by sys using SPICE IDs. (See             +109, exclusive of the endpoints.
+           http://naif.jpl.nasa.gov/pub/naif/to     Thus maximum width of 9
+           olkit_docs/C/req/naif_ids.html.) To      characters, plus optional sign.
+           avoid model dependencies,                Acceptable values are enumerated.
+           barycentric positions for ctr are        Presently only ctr=399 is
+           disallowed. The use of values other      allowed.
+           than ctr=399 require advance
+           consultation with the MPC.
+pos1       Position of observer. Interpretation     Decimal number. Maximum width
+pos2       depends on the value of sys as follows: of 13 characters plus optional sign.
+pos3       • WGS84: East longitude (deg),           The number of digits provided
+               latitude (deg), altitude(m)          should be consistent with the
+           • ITRF: East longitude (deg), Rxy        uncertainty in the coordinates.
+               (km), Rz(km)
+           • IAU: longitude (deg), latitude
+               (deg), altitude (m) as defined by
+               corresponding IAU cartography
+               standard
+               (http://astrogeology.usgs.gov/grou
+               ps/IAU-WGCCRE)
+           • ICRF_AU or ICRF_KM: Equatorial
+               rectangular coordinates (au or km)
+               in the IAU International Celestial
+               Reference Frame.
+vel1       ICRF velocity of space-based observer Decimal number. Maximum width
+vel2       in order to compute predicted plane- of 13 characters plus optional sign.
+vel3       of-sky velocity of target. Not permitted The number of digits provided
+           for sys values of WGS84, ITRF or IAU. should be consistent with the
+           Units are au/day for ICRF_AU and         uncertainty in the coordinates.
+           km/s for ICRF_KM.
+
+
+
+
+posCov11   Upper triangular part of (pos1, pos2, Number in decimal or exponential
+posCov12   pos3) covariance matrix in same units form. Maximum width of 20
+posCov13   of position coordinates (e.g., km2 if sys characters plus optional sign. The
+posCov22   = ‘ICRF_KM’). Missing fields are          number of digits provided should
+posCov23                                             be consistent with the uncertainty
+           presumed zero.
+posCov33                                             in the coordinates.
+
+
+
+
+24
+prog           Program code assigned by the MPC.        Up to 2 alphanumeric characters.
+               Used to identify different observing
+               programs/observers at the same
+               telescope. For surveys and other large
+               producers, the MPC will increment
+               prog for a given observatory code to
+               document a significant operational
+               change reported by the observing
+               team.
+obsTime        UTC date and time of the observation.    ISO 8601 extended format, i.e.,
+               For observations derived from optical    yyyy-mm-ddThh:mm:ss.sssZ.
+               telescope images this is typically the   The reported time precision
+               mid-exposure time of the image.          should be appropriate for the
+               Observations for which obsTime falls     astrometric accuracy, but no more
+               during a leap second are technically     than 6 digits are permitted after
+               compliant with the ADES standard but     the decimal. The trailing Z
+               are strongly discouraged.                indicates UTC and is required.
+rmsTime        Random uncertainty in obsTime in         Positive decimal number.
+               seconds as estimated by the observer.    Maximum width of 8 characters.
+                                                        Known systematic errors should
+                                                        be applied to obsTime before
+                                                        submission. Systematic clock error
+                                                        should be reported in uncTime.
+
+Observation Group Elements:
+ra             For optical observations, the right      Decimal number in the following
+dec            ascension (RA) and declination (DEC)     ranges: 0 £ ra < 360, -90 £ dec £
+               in decimal degrees in the J2000.0        +90. Positive dec values may
+               reference frame.                         optionally include a '+'-sign. No
+                                                        more than 9 digits after the
+                                                        decimal, which implies a
+                                                        maximum field with of 13
+                                                        characters.
+raStar         For occultation observations, the        Same restrictions as ra and dec,
+decStar        RA and DEC in the J2000.0 reference      respectively.
+               frame in decimal degrees of the
+               occulted star.
+obsCenter      Origin of offset observation.            The full name of a planet or
+                                                        Earth's Moon (e.g., 'Jupiter' or
+                                                        'Moon'), or a permID, or a
+                                                        provID. Maximum width of 25
+                                                        characters.
+
+
+
+
+25
+deltaRA    Measured ΔRA*cos(DEC) and ΔDEC in        Decimal number. Maximum width
+deltaDec   arcsec in the J2000.0 reference frame    of 9 characters plus optional sign.
+           for offset measurements of a satellite
+           with respect to obsCenter, or for
+           occultation observations with respect
+           to the star specified by raStar and
+           decStar.
+dist       Measured distance in arcsec and          Decimal number in the following
+pa         position angle (PA) in degrees in the    ranges: dist > 0, 0 £ pa < 360.
+           J2000.0 reference frame for offset       Maximum width of 10 characters
+           measurements of a satellite with         for dist, and pa has the same
+           respect to obsCenter, or for             restrictions as ra.
+           occultation observations with respect
+           to the star specified by raStar and
+           decStar.
+rmsRA      For ra-dec and deltaRA-                Positive decimal number.
+rmsDec     deltaDec observations, the random      Maximum width of 7 characters.
+           component of the RA*COS(DEC) and       Presumed systematic errors, e.g.,
+           DEC uncertainty (1σ) in arcsec as      those arising from star catalog
+           estimated by the observer as part of   biases, should not be included in
+           the image processing and astrometric   the uncertainties reported in this
+           reduction.                             field. rmsRA2 and rmsDec2 are
+                                                  the diagonal elements of the RA-
+                                                  DEC covariance matrix, which
+                                                  convolves errors from target PSF
+                                                  fitting, telescope tracking,
+                                                  reference star fit, etc.
+rmsDist    For dist-pa observations, the          Positive decimal number.
+rmsPA      random component of the distance and Maximum width of 6 characters.
+           PA uncertainty (1σ) in arcsec and      Presumed systematic errors, e.g.,
+           degrees, respectively, as estimated by those arising from star catalog
+           the observer as part of the image      biases, should not be folded into
+           processing and astrometric reduction. the uncertainties reported in this
+                                                  field. rmsDist2 and rmsPA2 are
+                                                  the diagonal elements of the
+                                                  distance-PA covariance matrix,
+                                                  which convolves errors from
+                                                  target PSF fitting, telescope
+                                                  tracking, reference star fit, etc.
+
+
+
+
+26
+rmsCorr        Correlation between RA and DEC or           Decimal number in the range
+               between distance and PA that may            -1 < rmsCorr < +1. No more than
+               result from the astrometric reduction.      11 characters after the decimal
+               It can be especially relevant for trailed   point. Thus no more than 14
+               images or cases with a poor                 characters, including optional sign.
+               distribution of reference stars. This is    Note that values of ±1 are
+               derived from the RA-DEC covariance          disallowed as they imply zero
+               matrix, where the off-diagonal term is      uncertainty in one direction.
+               rmsCorr ´ rmsRA ´ rmsDec. A
+               similar prescription holds for dist-
+               pa observations.
+delay          Observed radar time delay in s.             Positive decimal number.
+                                                           Maximum width of 14 characters.
+rmsDelay   Delay uncertainty in μs.                        Positive decimal number.
+           NOTE: This uncertainty is not a strict          Maximum width of 6 characters.
+           one standard                                    Note that the units of delay and
+           deviation error in a normal                     rmsDelay are different.
+           distribution, but is the "standard error
+           of measurement", a discrete bound
+           related to both systematic and random
+           errors.
+doppler    Observed radar Doppler shift in Hz.      Decimal number. Maximum width
+                                                    of 13 characters plus optional sign.
+rmsDoppler Doppler shift uncertainty in Hz.         Positive decimal number.
+                                                    Maximum width of 6 characters.
+astCat     Star catalog used for the astrometric    Alphanumeric string up to 8
+           reduction or, in the case of             characters (extended to allow the
+           occultation observations, for the        decimal point). Full list of
+           occulted star.                           acceptable values to be provided
+                                                    and maintained by the MPC. This
+                                                    field must be present, and so a
+                                                    specified value, e.g., ‘UNK’, will be
+                                                    used for some archival
+                                                    observations to indicate that the
+                                                    astrometric catalog is unknown.
+
+Photometry Group Elements:
+mag            Apparent magnitude in specified band. Decimal number in the range -5.0
+                                                     ≤ mag ≤ 35.0. Maximum width of 7
+                                                     characters plus optional sign.
+rmsMag         Apparent magnitude uncertainty (1σ) Positive decimal number.
+               in magnitudes.                        Maximum width of 6 characters.
+band           Passband designation for photometry. Alphanumeric string up to 3
+               Normally the passband of the          characters. Full list of acceptable
+               photometric reference catalog         values to be provided and
+               (photCat).                            maintained by the MPC.
+
+
+
+
+27
+fltr       Filter used during imaging. This          Alphanumeric string up to 3
+           element is primarily used to              characters. Whenever possible,
+           distinguish simultaneous, multi-filter    should follow the list of acceptable
+           astrometric observations.                 band values maintained by the
+                                                     MPC.
+photCat    Star catalog used for the photometric Alphanumeric string (extended to
+           reduction.                                allow the decimal point) up to 8
+                                                     characters. Full list of acceptable
+                                                     values to be provided and
+                                                     maintained by the MPC.
+photAp     Photometric aperture radius in arcsec. Positive decimal number.
+                                                     Maximum width of 6 characters.
+nucMag     Nuclear magnitude flag for comets.        Logical (Integer: 0=False and
+           Primarily used for archival data as       1=True). True for archival
+           photAp should be used to                  cometary nuclear magnitude
+           communicate this information in the       measurements. False otherwise, in
+           new standard.                             which case the nucMag element
+                                                     should be neglected.
+logSNR     The log10 of the signal-to-noise ratio of Decimal number. Maximum width
+           the source in the image integrated on of 5 characters plus optional sign.
+           the entire aperture used for the
+           astrometric centroid.
+shapeOcc   For occultation observations, a flag Logical (Integer 0=False and
+           to indicate that the observation          1=True). Assumed True if not
+           reduction assumes a shape-based (non- present.
+           circular) plane-of-sky cross-section.
+           False implies that a circular cross
+           section was assumed.
+seeing     Size of seeing disc in arcsec, measured Positive decimal number.
+           at Full-Width, Half-Max (FWHM) of         Maximum width of 6 characters.
+           target point spread function (PSF).
+exp        Exposure time in seconds. Total           Positive decimal number. Except
+           exposure time in the case of stacked      for very short exposures, this field
+           image detections.                         should generally be printed as an
+                                                     integer with no decimal point.
+                                                     Maximum width of 6 characters.
+rmsFit     RMS of fit of astrometric comparison Positive decimal number.
+           stars in arcsec.                          Maximum width of 6 characters.
+nStars     Number of reference stars in              Positive integer. Maximum width
+           astrometric fit.                          of 6 characters.
+com        Flag to indicate that the observation is Logical (Integer 0=False and
+           reduced to the center of mass. False      1=True). Assumed True if not
+           implies a measurement to the peak         present.
+           power position, which is usually
+           interpreted as the leading edge of the
+           target, with the reflection point being
+           modeled one object radius prior to the
+           center of mass.
+
+
+28
+frq             Carrier reference frequency in MHz.      Positive decimal number.
+                                                         Maximum width of 16 characters.
+ref             Standard reference field used for        String up to 16 characters.
+                citations.
+disc            Discovery flag. A ‘*’ marks a new       Two allowed values: ‘*’ and ‘+’.
+                discovery record and a ‘+’ marks the
+                first measurement of a previously
+                observed object. Normally filled only
+                by the MPC.
+subFrm          Originally reported reference frame for String with allowed values of the
+                angular measurements. This element form ‘APP.’ For apparent or
+                defines the frame used in the reduction ‘B<four-digit year>.0’, e.g.,
+                of the measurements and is intended B1950.0 will be a common value
+                primarily for archival observations.    for archival data. The subFrm
+                The subFrm element does not reflect element is not permitted for new
+                the frame of the associated ADES        submissions, which must be
+                observations, which are always          reduced with respect to the
+                J2000.0.                                J2000.0 frame.
+subFmt          Format in which the observation was Up to four alphanumeric
+                originally submitted to the MPC. Filled characters. Example values are
+                by the MPC.                             listed in following table:
+
+                                                             subFmt      Format
+                                                             PRE         Pre-MPC
+                                                             M47         MPC1947
+                                                             M92         MPC1992
+                                                             A17         ADES v2017
+                                                             A18a        ADES 2018a
+
+Precision Group Elements:
+precTime        Precision in millionths of a day of the Integer, with no decimal. Allowed
+                reported observation time for archival values: 1, 10, 100, 1000, 10000,
+                MPC1992 and earlier data.               100000. Historic data may also
+                                                        have been reported to integer
+                                                        hours (41667), tenths of hours
+                                                        (4167), integer minutes (694) or
+                                                        tenths of minutes (69).
+precRA          Reported precision for archival         Positive decimal number. Allowed
+precDec         MPC1992 or earlier data, in seconds for values: 0.001, 0.01, 0.1, 1, 0.6, 6,
+                precRA and in arcsec for precDec.       60. Integer values are printed as
+                                                        an integer, with no decimal point.
+                                                        Non-integer values printed with a
+                                                        leading zero and no trailing zeros,
+                                                        e.g., '0.1' and not '.10'.
+
+
+
+
+29
+uncTime          Estimated systematic time error in       Positive decimal number.
+                 seconds. Unlike the preceding RMS        Maximum width of 8 characters.
+                 fields, which indicate random errors, The value of uncTime is not to be
+                 this field indicates a presumed level of applied to correct the reported
+                 systematic clock error. This element     value of obsTime.
+                 can be used to communicate the quality
+                 of a clock calibration if one was
+                 conducted, in which case it would
+                 represent the RMS of the systematic
+                 error in obsTime. If no calibration has
+                 been conducted then the element
+                 should be neglected. In unusual cases,
+                 it can also be used to communicate the
+                 size of a large and unknown clock error
+                 that is markedly different from an
+                 observatory’s usual performance.
+notes            A set of one-character note flags to     Alphanumeric string up to 6
+                 communicate observing circumstances. characters in length. List of
+                                                          acceptable flags and their
+                                                          interpretation to be provided and
+                                                          maintained by the MPC.
+remarks          A comment provided by the observer. String, up to 300 characters in
+                 This field can be used to report         length.
+                 additional information that is not
+                 reportable in the notes field, but that
+                 may be of relevance for interpretation
+                 of the observations. Should be used
+                 sparingly by major producers.
+See
+Table 17 for a description of elements related to the Optical and Radar Residuals Group,
+which might otherwise fall here in the order of description.
+deprecated This field, if present, indicates a             'X' is the only permitted value.
+               deprecated observation that is
+               preserved for historical purposes, but
+               is not to be used for orbit fitting.
+localUse       This element is intended as a container There are no restrictions on what
+               to hold subelements carrying ancillary can be included under localUse,
+               information not envisioned by the           but this element may not be
+               standard. This element is not present present in a submission to the
+               in the ADES PSV format and so any           MPC. For instance, localUse
+               localUse information will be lost in may contain the CCD number of
+               translation to PSV.                         the detection in a mosaic, or the x-
+                                                           y location of the detection in the
+                                                           CCD, or polynomial coefficients
+                                                           used in the plate solution, etc.
+
+
+
+
+30
+Table 17. Residual subelements and their descriptions.
+
+Element           Description                     Restrictions
+orbProd           Orbit producer.                 String, with no standard format. Maximum
+                                                  width of 100 characters. Can be an
+                                                  institution, individual, or even email address.
+orbID             Local reference for orbit.      String, with no standard format, e.g., ‘JPL 7’
+                                                  or ‘MPO 12345’. Maximum width of 25
+                                                  characters.
+resRA             Residuals in RA*COS(DEC)        Number in decimal or exponential form.
+resDec            and DEC in arcsec.              Maximum width 6 characters plus optional
+                                                  sign.
+selAst            Selection (i.e., inclusion or   Valid values:
+                  rejection) flag for astrometry. • ‘A’ or ‘D’ for automatic accept/delete
+                                                  • ‘a’ or ‘d’ for forced accept/delete
+sigRA             Adopted RA*COS(DEC) and Positive decimal number. Maximum width of
+sigDec            DEC uncertainties (1σ) in       7 characters. May be different from the
+                  arcsec.                         observer provided uncertainties. [NOTE: The
+                                                  RA-Dec covariance reported here and in the
+                                                  related sigCorr element must not include
+                                                  uncertainty associated with time uncertainty
+                                                  as reported in the sigTime element.]
+sigCorr           Adopted correlation between Decimal number in the range
+                  RA*COS(DEC) and DEC.            -1 to +1, inclusive. No more than 11
+                                                  characters after the decimal point. Thus no
+                                                  more than 14 characters, including optional
+                                                  sign. May be different from the observer
+                                                  provided correlation. Assumed zero if not
+                                                  present.
+sigTime           Adopted time uncertainty (1σ)Positive decimal number. Maximum width of
+                  in seconds.                     8 characters. Assumed zero if not present,
+                                                  i.e., timing error not considered in orbital
+                                                  solution.
+biasRA            Adopted RA*COS(DEC) and Decimal number. Maximum width of 7
+biasDec           DEC biases in arcsec.           characters plus optional sign. Assumed zero
+                                                  if not present. A bias is subtracted from the
+                                                  reported value to obtain the corrected value.
+biasTime          Adopted time bias in seconds. Decimal number. Maximum width of 9
+                                                  characters plus optional sign. Assumed zero
+                                                  if not present.
+photProd          Producer of photometric         String, with no standard format. Maximum
+                  residuals.                      width of 100 characters. Can be institution,
+                                                  individual's name, email address, etc. If not
+                                                  present then the value given for orbProd is
+                                                  presumed.
+resMag            Photometric residual in         Number in decimal or exponential form.
+                  magnitudes.                     Maximum width 6 characters plus optional
+                                                  sign.
+
+
+31
+selPhot    Selection flag for photometry. Valid values:
+                                          • ‘A’ or ‘D’ for automatic accept/delete
+                                          • ‘a’ or ‘d’ for forced accept/delete
+sigMag     Adopted magnitude              Positive decimal number. Maximum width of
+           uncertainty (1σ) in            6 characters. Could be different from the
+           magnitudes.                    observer provided uncertainty.
+biasMag    Adopted photometric bias in Decimal number. Maximum width of 5
+           magnitudes.                    characters plus optional sign. Assumed zero
+                                          if not present. A bias is subtracted from the
+                                          reported value to obtain the corrected value.
+photMod    Description of the             Up to 8 alphanumeric characters without a
+           photometric model used in      required standard format. Some standard
+           obtaining the photometric      values are given in the following table.
+           residuals.                      photMod        Description
+                                           H              H-G system with G=0.15
+                                           HG             H-G with different value of G
+                                           HG1G2          H-G1-G2 system
+                                           HG12           H-G12 system
+                                           NEATM          NEA Thermal Model
+                                           FRM            Fast Rotator Model
+                                          Additional standard values for this element
+                                          will be established by the MPC in
+                                          consultation with the small body research
+                                          community.
+resDelay   Residual of the radar          Number in decimal or exponential form.
+resDoppler measurement in μs for delay, Maximum width 6 characters plus optional
+           Hz for Doppler.                sign.
+selDelay   Selection flag for radar       Valid values:
+selDoppler astrometry.                    • ‘A’ or ‘D’ for automatic accept/delete
+                                          • ‘a’ or ‘d’ for manual accept/delete
+sigDelay   Adopted uncertainty for the Positive decimal number. Maximum width of
+sigDoppler radar measurement in μs for 6 characters.
+           delay, Hz for Doppler.
+
+
+
+
+32
+Table 18. Observation context elements and their children.
+
+Element         Child Elements Description                            Restrictions
+observatory     mpcCode         MPC assigned observatory code (of 3 or 4 char.
+                                receiver for radar)                   alphanumeric
+                name            Observatory name                      String100
+submitter       name            Name of individual submitting data String100
+                                to MPC
+                institution     Affiliation of submitter              String100
+observers       name            Names of observers (initials then String100
+                                surname), one individual per name
+                                element.
+measurers       name            Names of measurers (initials then String100
+                                surname), one individual per name
+                                element.
+telescope       name            Name of observatory or telescope String100
+                design          Telescope design, e.g., reflector,    String25
+                                Schmidt, Schmidt-Cassegrain
+                aperture        Telescope aperture in meters          PD6
+                detector        Type of detector, e.g., 'CCD'         String25
+                fRatio          Telescope f-number, the ratio of      PD6
+                                telescope focal length to aperture
+                filter          Description of telescope filter(s)    String25
+                arraySize       Array size (X´Y), after binning, of String25
+                                the individual detector chip.
+                pixelScale      Angular extent of pixel in            PD6
+                                arcseconds (geometric mean of x &
+                                y extents for non-square pixels).
+software        astrometry      Description of software used for      String100
+                                astrometry
+                fitOrder        Order of fit for astrometric solution String25
+                photometry      Description of photometry             String100
+                                software, if different from
+                                astrometry software.
+                objectDetection Description of software for object String100
+                                detection, if different from
+                                astrometry or photometry
+                                software.
+coinvestigators name            Names of coinvestigators (initials String100
+                                then surname), one individual per
+                                name element.
+collaborators   name            Names of collaborators (initials      String100
+                                then surname), one individual per
+                                name element.
+fundingSource                   Description of source of funding. String100
+comment         line            Explanatory remarks. Multiple         String100
+                                line elements can be included
+                                and order is to be preserved.
+Notes: “PD6” indicates a positive decimal number with no more than 6 characters.
+“String<X>” indicates a String with up to X characters.
+
+
+33
+4.6 An ADES example in XML
+
+The following example demonstrates a correct ADES file that includes a single
+obsBlock with a single optical observation.
+ <?xml version='1.0' encoding='UTF-8'?>
+ <ades version="2017">
+   <obsBlock>
+     <obsContext>
+       <observatory>
+         <mpcCode>568</mpcCode>
+         <name>Univ. Hawaii</name>
+       </observatory>
+       <submitter>
+         <name>I. M. Submit</name>
+       </submitter>
+       <observers>
+         <name>I. M. Observit</name>
+         <name>A. N. Astronomer</name>
+       </observers>
+       <measurers>
+         <name>I. M. Measurit</name>
+         <name>A. N. Skywatcher</name>
+       </measurers>
+       <telescope>
+         <design>reflector</design>
+         <aperture>2.2</aperture>
+         <detector>CCD</detector>
+       </telescope>
+       <fundingSource>Name of Funding Agency</fundingSource>
+       <comment>
+         <line>This is the first comment.</line>
+         <line>This is the second comment.</line>
+       </comment>
+     </obsContext>
+     <obsData>
+       <optical>
+         <permID>1234567</permID>
+         <provID>2018 AA1234</provID>
+         <trkSub>a1b2c3d4</trkSub>
+         <mode>CCD</mode>
+         <stn>568a</stn>
+         <prog>31</prog>
+         <obsTime>2016-08-29T12:32:34.12Z</obsTime>
+         <ra>215.6560501</ra>
+         <dec>-13.5478723</dec>
+         <rmsRA>0.015</rmsRA>
+         <rmsDec>0.013</rmsDec>
+         <rmsCorr>-0.215</rmsCorr>
+         <astCat>2MASS</astCat>
+         <mag>21.91</mag>
+         <rmsMag>0.25</rmsMag>
+         <band>w</band>
+         <photCat>PPMXL</photCat>
+         <photAp>13.3</photAp>
+         <logSNR>0.78</logSNR>
+         <seeing>0.8</seeing>
+         <exp>1200</exp>
+         <notes>klmnp</notes>
+         <remarks>High winds affected tracking</remarks>
+       </optical>
+     </obsData>
+
+
+34
+      </obsBlock>
+    </ades>
+
+
+
+5 ADES in PSV
+The PSV form of an ADES document preserves the structure of the XML document.
+While there is a different approach to formatting the ADES context and observational
+information, the translation between the two presentations preserves all
+information. To guide the description of the PSV format, the following example
+depicts the PSV translation of the XML example file given in Sec. 4.6, above.
+
+    # version=2017
+    # observatory
+    ! mpcCode 568
+    ! name Univ. Hawaii
+    # submitter
+    ! name I. M. Submit
+    # observers
+    ! name I. M. Observit
+    ! name A. N. Astronomer
+    # measurers
+    ! name I. M. Measurit
+    ! name A. N. Skywatcher
+    # telescope
+    ! design reflector
+    ! aperture 2.2
+    ! detector CCD
+    # fundingSource Name of Funding Agency
+    # comment
+    ! line This is the first comment.
+    ! line This is the second comment.
+    permID |provID     |trkSub |mode|stn |prog|obsTime                |...
+    1234567|2018 AA1234|a1b2c3d4| CCD|568a| 31|2016-08-29T12:32:34.12Z|...
+
+    (The following lines are broken only for display in this document. In the actual PSV file, the lines continue beyond the
+    ellipses.)
+
+    ra         |dec        |rmsRA|rmsDec|rmsCorr|astCat |mag |rmsMag|band|...
+    215.6560501|-13.5478723|0.015|0.013 |-0.215 |   2MASS|21.91|0.25 |  w|...
+
+    photCat |photAp|logSNR|seeing|exp |notes|remarks
+       PPMXL|13.3 |0.78 |0.8     |1200|klmnp|High winds affected tracking
+
+
+The following rules guide the interpretation of PSV and its translation to and from
+XML.
+
+•      To avoid character mangling, PSV files must always be exchanged in the UTF-8
+       character encoding.
+•      The PSV file always begins with a "# version=" record that documents the ADES
+       version used in generating the file.
+•      The XML obsBlock element always begins with an obsContext element that
+       is represented in PSV by a series of Context Records starting with either a '#'
+       character or a '!' character. A '#' followed by an element name (and possibly a
+
+35
+     value) indicates an item listed as an element of obsContext in Table 12.
+     Similarly, a '!' character followed by an element name and value denotes a child
+     element of the immediately preceding obsContext element.
+•    A new obsBlock is indicated by the first record from the associated
+     obsContext, which must be "# observatory".
+•    The end of the obsContext and start of the obsData element is signaled by a
+     Keyword Record, which is a pipe-separated listing of the names of the elements
+     that appear in subsequent Data Records. A Keyword Record is identified as any
+     record not starting with '#' or '!' for which all pipe-separated tokens (after
+     stripping leading and trailing blanks) start with a lower-case letter [a-z].
+•    Data Records follow a Keyword Record, with one Data Record per observation.
+     Like the Keyword Record, the element values on a DATA record are separated by
+     pipe characters. If the data type changes, for instance from optical to radar, then a
+     new Keyword Record can be written to describe the subsequent data. In the
+     extreme case (outside of an obsData element), every Data Record could be
+     preceded by its own specific Keyword Record.
+•    The end of an obsData element, and the enclosing obsBlock element is marked
+     either by a second Keyword Record or a new series of obsContext records,
+     which must always start with "# observatory". This immediately implies that
+     all Data Records in an obsData element must associate to a single Keyword
+     Record. Given that an obsBlock represents a homogeneous set of observations,
+     this is not an obstacle.
+•    The Identification Group elements (Table 4) must be the first elements appearing
+     on a Keyword Record. This assures that a Data Record is not mistaken as an
+     obsContext record. Other elements can appear in any order, although a default
+     template is described below.
+•    The type of observation in a Data Record can be unambiguously determined by
+     the non-empty fields present, and so the tags optical, radar, etc. do not appear
+     in PSV.
+•    Blanks will normally be used as padding to obtain column alignment of the data
+     fields, but this is not strictly necessary. Null fields are empty (i.e., consecutive
+     delimiters: ‘||’) or filled with blanks in the blank-padded format.
+•    Since the pipe character ‘|’ serves as delimiter it is not an allowed character in the
+     fields defined by this standard.
+•    The localUse element in XML is neglected in PSV.
+•    In the absence of an associated obsContext element, Data Records are
+     interpreted as immediate children of the ades root element. On the other hand,
+     Data Records that follow the first Keyword Record after any Context Records are
+     part of an obsBlock.
+
+
+
+
+36
+5.1 Default PSV Formatting
+
+As a convenience for some users, the ADES standard does define an optional default
+PSV template. The objective of the default mode is to ensure column-wise alignment
+of the most commonly reviewed fields. This will allow key fields to be found in
+"familiar" locations and will ensure that records can be cut and pasted from different
+files and still be aligned. While this mode of output is not required by the standard, it
+is specified by the standard so that users can have a means of ensuring that the key
+information from multiple files is column-aligned.
+
+The default formatting applies primarily to optical observations, which comprise
+the bulk of the available astrometric data set. Table 19 lists the element names, their
+order and the field width for the default optical template. In some cases, e.g., prog
+and rmsCorr, the field widths in Table 19 are wider than the data in order to
+accomodate the width of the field name. Any fields present in the record but not listed
+in Table 19 will be placed in Table 16 order between the notes and remarks fields.
+With this format, the record length is 166 characters (plus any additional fields after
+the notes and any remarks).
+
+Table 19. Field formatting for the default PSV template in ADES.
+
+                                        Default PSV Formatting
+                Element                             Width                  Justification
+                permID                                 7                         R
+                provID                                11                         L
+                trkSub                                 8                         R
+                mode                                   4                         R
+                stn                                    4                         L
+                prog                                   4                         R
+                obsTime                               23                         L
+                ra                                    11                        D4
+                dec                                   11                        D4
+                rmsRA                                  5                        D2
+                rmsDec                                 6                        D2
+                rmsCorr                                7                        D3
+                astCat                                 8                         R
+                mag                                    5                        D3
+                rmsMag                                 6                        D2
+                Band                                   4                         R
+                photCat                                8                         R
+                photAp                                 6                        D3
+                logSNR                                 6                        D2
+                seeing                                 6                        D2
+                exp                                    4                         R
+                notes                                  5                         L
+                remarks                            Variable                      L
+                NOTES: The tabulated column width is a minimum and may be expanded if
+                alignment with field names is requested. Justification is either right (R), left
+                (L) or by placing the decimal point in a given column within the field (e.g., D3
+                makes the decimal point the 3rd character within the field).
+
+
+
+
+37
+For offset and occultation observations, the default template follows Table 19,
+except that the Observation Group elements are to appear in the order specified by
+Table 7 in place of the corresponding elements (ra and dec) shown in Table 19. Thus,
+for example, obsCenter, deltaRA, and deltaDec, in that order, would replace ra
+and dec in Table 19 for an offset observation. Field widths and justification are not
+specified for the alternate Observation Group elements. For radar observations
+delay, rmsDelay, doppler and rmsDoppler appear, in that order, on every
+record in the default template, though two of these fields will always be blank. An
+additional radar exception is that the mode and stn elements in Table 19 are
+replaced by the trx and rcv elements, both with four-character width and left
+justification.
+
+Conversion utilities will include the option to produce files with the default template.
+However, use of the default template is not required: the only requirement for
+submission is the compliance with the general standards detailed in this document.
+
+
+
+6 Implementation Plan
+After adoption by the MPC, ADES will become the MPC’s primary means of data
+submission and dissemination, and observers are strongly encouraged to adopt the
+new format as soon as practicable. The 80-column MPC1992 format will be
+deprecated but will continue to be accepted for an indefinite but limited time period.
+
+The submission of ADES observations to the MPC will be possible in three ways: Web
+form, cURL script, or email. The only acceptable format for email submission is
+anticipated to be XML, either compressed or uncompressed. For the observers who
+prefer the PSV format, an MPC web interface to upload observation submissions will
+be provided. The backend engine of the web interface will convert the supplied data
+file to XML and validate it as a part of the ingestion pipeline at the MPC. The MPC will
+also disseminate the data in the XML form of ADES, eventually with the option of
+downloading the observation residual data and observation context information.
+Users may use local scripts or MPC web forms to convert from XML to PSV and back.
+
+6.1 ADES Software
+
+To support the transition to the new format, some key ADES software tools will be
+made publicly available. The objective of this effort is to facilitate the development of
+software and libraries in a number of widely used languages, e.g., Perl, Python, C and
+FORTRAN. The software package will include ADES XML schema, I/O libraries for
+extending custom software, and file utilities for error checking, conversion, merging
+and splitting. The ADES software package will be distributed through a community-
+accessible portal, e.g., https://github.com/IAU-ADES or by the MPC.
+
+
+38
+

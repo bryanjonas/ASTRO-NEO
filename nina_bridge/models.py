@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
+
+T = TypeVar("T")
+
+
+class NinaResponse(BaseModel, Generic[T]):
+    """Standard NINA API response envelope."""
+
+    Response: T
+    Error: str = ""
+    StatusCode: int = 200
+    Success: bool = True
+    Type: str = "API"
 
 
 class SlewCommand(BaseModel):
@@ -33,8 +45,13 @@ class OverrideUpdate(BaseModel):
     manual_override: bool
 
 
+class IgnoreWeatherUpdate(BaseModel):
+    ignore_weather: bool
+
+
 class BridgeStatus(BaseModel):
     manual_override: bool
+    ignore_weather: bool
     dome_closed: bool
     weather: dict | None = None
     nina_status: dict | None = None

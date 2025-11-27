@@ -140,11 +140,13 @@ def dashboard_status() -> Any:
     """Bundle bridge + session info for a lightweight dashboard poll."""
 
     bridge = NinaBridgeService()
-    bridge_status = bridge.status()
+    bridge_status = bridge.get_status()
     session_info = SESSION_STATE.current.to_dict() if SESSION_STATE.current else None
     return {
         "bridge_blockers": bridge_status.get("blockers"),
         "bridge_ready": bridge_status.get("ready"),
         "bridge_status": bridge_status.get("nina_status"),
+        "ignore_weather": bridge_status.get("ignore_weather"),
         "session": session_info,
+        "notifications": SESSION_STATE.log,
     }

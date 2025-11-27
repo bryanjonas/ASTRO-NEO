@@ -77,6 +77,19 @@ class SessionState:
         self.associations: dict[str, dict[str, Any]] = {}
         self.master_calibrations: dict[str, str] = {}
         self.predicted: dict[str, dict[str, Any]] = {}
+        self.log: list[dict[str, str]] = []
+
+    def log_event(self, message: str, level: str = "info") -> None:
+        """Add an event to the session log."""
+        entry = {
+            "created_at": datetime.utcnow().strftime("%H:%M:%S"),
+            "message": message,
+            "level": level,
+        }
+        self.log.insert(0, entry)
+        # Keep only last 50 events
+        if len(self.log) > 50:
+            self.log = self.log[:50]
 
     def start(
         self,
@@ -98,6 +111,7 @@ class SessionState:
             predicted=self.predicted,
         )
         self.current = session
+        self.log_event(f"Session started: {notes or 'No notes'}", "good")
         return session
 
     def end(self) -> ObservingSession | None:
@@ -106,6 +120,7 @@ class SessionState:
         session = self.current
         session.ended_at = datetime.utcnow()
         self.current = None
+        self.log_event("Session ended", "warn")
         return session
 
     def record_calibration(self, cal_type: str, count: int = 1) -> ObservingSession | None:
@@ -141,6 +156,7 @@ class SessionState:
         except Exception:
             # Persistence errors should not block capture logging.
             pass
+        self.log_event(f"Captured {entry.get('target', 'unknown')} ({entry.get('kind', 'frame')})", "info")
 
     def add_captures(self, entries: List[dict]) -> None:
         for entry in entries:
@@ -210,12 +226,14 @@ class SessionState:
         if not self.current:
             return None
         self.current.paused = True
+        self.log_event("Session paused", "warn")
         return self.current
 
     def resume(self) -> ObservingSession | None:
         if not self.current:
             return None
         self.current.paused = False
+        self.log_event("Session resumed", "good")
         return self.current
 
     def set_association(self, path: str, ra_deg: float, dec_deg: float) -> dict[str, Any]:

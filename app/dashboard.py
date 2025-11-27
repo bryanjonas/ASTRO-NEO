@@ -184,6 +184,16 @@ def observatory_partial(request: Request) -> Any:
         )
         weather_service = WeatherService(session)
         weather_summary = weather_service.get_status()
+    
+    # Fetch bridge status to get ignore_weather flag
+    from app.services.nina_bridge import NinaBridgeService
+    bridge = NinaBridgeService()
+    try:
+        bridge_status = bridge.get_status()
+        ignore_weather = bridge_status.get("ignore_weather", False)
+    except Exception:
+        ignore_weather = False
+
     weather_sources: list[dict[str, Any]] = []
     if site and site.weather_sensors:
         try:
@@ -198,15 +208,65 @@ def observatory_partial(request: Request) -> Any:
                     weather_sources.append({"name": entry, "type": "remote"})
         elif isinstance(payload, dict):
             weather_sources.append(payload)
+    formatted_weather = _format_weather_summary(weather_summary)
     return templates.TemplateResponse(
         "dashboard/partials/observatory.html",
         {
             "request": request,
             "site": site,
             "weather_sources": weather_sources,
-            "weather_summary": weather_summary,
+            "weather_summary": formatted_weather,
+            "ignore_weather": ignore_weather,
         },
     )
+
+
+@router.post("/dashboard/observatory/ignore_weather", response_class=HTMLResponse)
+async def observatory_ignore_weather(request: Request) -> Any:
+    """Toggle the ignore_weather flag."""
+    from app.services.nina_bridge import NinaBridgeService
+    
+    form = await request.form()
+    ignore_val = form.get("ignore")
+    # hx-vals sends string "true" or "false"
+    ignore = ignore_val == "true"
+    
+    bridge = NinaBridgeService()
+    try:
+        bridge.set_ignore_weather(ignore)
+    except Exception:
+        # Log error but return partial anyway
+        pass
+        
+    return observatory_partial(request)
+
+
+def _format_weather_summary(summary: Any) -> dict[str, Any] | None:
+    if not summary:
+        return None
+    
+    # Map raw reasons to human-readable text
+    reason_map = {
+        "weather_precip_chance": "High Rain Risk",
+        "weather_clouds": "Cloudy",
+        "weather_wind": "High Wind",
+        "weather_humidity": "High Humidity",
+        "weather_rain": "Raining",
+        "manual_override": "Manual Override",
+        "dome_closed": "Dome Closed",
+    }
+    
+    reasons = [reason_map.get(r, r) for r in summary.reasons]
+    
+    return {
+        "temperature_c": round(summary.temperature_c, 1) if summary.temperature_c is not None else None,
+        "wind_speed_mps": round(summary.wind_speed_mps, 1) if summary.wind_speed_mps is not None else None,
+        "cloud_cover_pct": round(summary.cloud_cover_pct, 0) if summary.cloud_cover_pct is not None else None,
+        "precipitation_probability_pct": round(summary.precipitation_probability_pct, 0) if summary.precipitation_probability_pct is not None else None,
+        "is_safe": summary.is_safe,
+        "reasons": reasons,
+        "fetched_at": summary.fetched_at,
+    }
 
 
 @router.get("/dashboard/partials/equipment", response_class=HTMLResponse)
@@ -1127,7 +1187,9 @@ async def equipment_save(request: Request) -> Any:
         site_config = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
         if site_config:
             site_config.telescope_design = form.get("telescope_design") or "Reflector"
-            site_config.telescope_aperture = float(form.get("telescope_aperture") or 0.0)
+            # Convert mm to meters
+            aperture_mm = float(form.get("telescope_aperture") or 0.0)
+            site_config.telescope_aperture = aperture_mm / 1000.0
             site_config.telescope_detector = form.get("telescope_detector") or "CCD"
             session.add(site_config)
             session.commit()

@@ -1,25 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title if title else "ASTRO-NEO" }}</title>
   <link rel="stylesheet" href="/static/dashboard.css" />
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/@alpinejs/persist@3.13.5/dist/cdn.min.js" defer></script>
   <script src="https://unpkg.com/alpinejs@3.13.5" defer></script>
 </head>
+
 <body class="page">
-  <header class="topbar">
-    <div class="brand">
-      <div class="dot"></div>
-      <span class="title">ASTRO-NEO</span>
-    </div>
-    <div class="top-actions">
-      <span class="pill">Dashboard</span>
-    </div>
-  </header>
-  <main class="content">
-    {% block content %}{% endblock %}
-  </main>
+  {% block content %}{% endblock %}
 </body>
+
 </html>

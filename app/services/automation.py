@@ -99,6 +99,7 @@ class AutomationService:
 
         self._ensure_weather_safe()
         started_at = datetime.utcnow()
+        SESSION_STATE.log_event(f"Automation: Starting run for {plan.target}", "info")
         logger.info("Automation: connecting telescope for %s", plan.target)
         self.bridge.connect_telescope(True)
         # Queue retryable tasks so failures raise dashboard alerts
@@ -108,7 +109,7 @@ class AutomationService:
         TASK_QUEUE.submit(
             Task(
                 name="telescope_slew",
-                func=lambda: self.bridge.slew(plan.ra_deg, plan.dec_deg),
+                func=lambda: (SESSION_STATE.log_event(f"Automation: Slewing to {plan.target}", "info"), self.bridge.slew(plan.ra_deg, plan.dec_deg)),
             )
         )
 
@@ -124,7 +125,7 @@ class AutomationService:
         TASK_QUEUE.submit(
             Task(
                 name="sequence_start",
-                func=lambda: self.bridge.start_sequence(sequence_payload),
+                func=lambda: (SESSION_STATE.log_event(f"Automation: Starting sequence for {plan.target}", "info"), self.bridge.start_sequence(sequence_payload)),
             )
         )
 
@@ -161,6 +162,7 @@ class AutomationService:
         logger.info("Automation: will park after %.1fs", delay_seconds)
         time.sleep(delay_seconds)
         try:
+            SESSION_STATE.log_event("Automation: Parking telescope", "info")
             self.bridge.park_telescope(True)
             logger.info("Automation: telescope parked")
         except Exception as exc:  # pragma: no cover - keep background thread silent

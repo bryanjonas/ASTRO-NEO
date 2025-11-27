@@ -296,3 +296,18 @@ Add new questions or clarifications inline as they surface during development se
 - Baseline implementation uses deterministic rules (visibility, limiting magnitude, urgency score) derived from site and equipment profiles.
 - Optionally integrate an ML/AI component later to learn prioritization from historical successes (e.g., gradient boosted ranking model fed with equipment stats + atmospheric readings). Keep the architecture modular so a future AI module can replace or augment the scoring engine.
 - Begin with explainable scoring (weights stored in config) to simplify testing; add AI only if deterministic logic proves insufficient.
+
+---
+
+## Phase 10 — Interactive Association & Refinements
+
+- [x] **Interactive Association Workflow**: Implemented a "Review" modal in the dashboard allowing operators to manually associate captures with NEOCP targets. This is critical for confirming faint or ambiguous candidates that automated solving might miss.
+- [x] **Polygon Selection Tool**: Added a polygon drawing tool to the review modal. Operators can draw a boundary around a target to isolate it from nearby stars or noise. The backend (`AnalysisService`) uses this polygon to mask the image and compute a precise centroid (RA/Dec) and SNR.
+- [x] **Image Blinking/Navigation**: Enhanced the review modal with "Previous" and "Next" buttons and keyboard shortcuts (Left/Right arrows) to navigate between sibling captures of the same target. This "blinking" capability helps operators spot moving objects against the static star field.
+- [x] **Automatic Association**: Integrated `AnalysisService` into the astrometry pipeline to automatically detect sources and match them against predicted ephemerides (using `NeoEphemeris` and `NeoCandidate` data).
+- [x] **Database Updates**: Introduced `CandidateAssociation` table to store manual and automatic associations, linking `CaptureLog` entries to specific RA/Dec coordinates.
+- [x] **Robustness Improvements**:
+    - Replaced `photutils` with `Pillow` for polygon masking to eliminate complex dependency issues.
+    - Suppressed harmless `FITSFixedWarning` logs from `astropy` when loading header-only WCS.
+    - Improved solver metric parsing to robustly capture RMS, SNR, and magnitude data from `solve-field` output.
+    - Fixed duplicate capture logging and foreign key constraint issues during cleanup.
