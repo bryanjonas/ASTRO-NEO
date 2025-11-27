@@ -11,7 +11,18 @@ from .dashboard import router as dashboard_router
 from .services.captures import prune_missing_captures
 
 
+
+import logging
+
 def create_app() -> FastAPI:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Initializing ASTRO-NEO API with DEBUG logging enabled")
+
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     app.include_router(api_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router)
