@@ -241,6 +241,26 @@ async def observatory_ignore_weather(request: Request) -> Any:
     return observatory_partial(request)
 
 
+@router.post("/dashboard/observatory/refresh_horizon", response_class=HTMLResponse)
+async def observatory_refresh_horizon(request: Request) -> Any:
+    """Trigger horizon refresh and return updated partial."""
+    from app.services.horizon import fetch_horizon_profile
+    
+    with get_session() as session:
+        site = session.exec(select(SiteConfig).where(SiteConfig.name == settings.site_name)).first()
+        if site:
+            try:
+                profile = await fetch_horizon_profile(site.latitude, site.longitude)
+                site.horizon_mask_json = json.dumps(profile)
+                session.add(site)
+                session.commit()
+            except Exception:
+                # Log error but return partial anyway
+                pass
+                
+    return observatory_partial(request)
+
+
 def _format_weather_summary(summary: Any) -> dict[str, Any] | None:
     if not summary:
         return None

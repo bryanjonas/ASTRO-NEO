@@ -1,5 +1,6 @@
 """Horizon retrieval service using PVGIS API."""
 
+import json
 import logging
 from typing import Any, List, Dict
 
@@ -50,6 +51,10 @@ async def fetch_horizon_profile(lat: float, lon: float) -> List[Dict[str, float]
                 alt = point.get("H")
                 if az is not None and alt is not None:
                     result.append({"az": float(az), "alt": float(alt)})
+            
+            if len(result) < 10:
+                logger.warning("Suspiciously low horizon point count: %d", len(result))
+                logger.debug("Raw PVGIS response: %s", json.dumps(data))
             
             logger.info("Successfully fetched %d horizon points", len(result))
             return result
