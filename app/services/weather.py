@@ -113,15 +113,19 @@ class WeatherService:
     ) -> tuple[dict[str, Any] | None, dict[str, float | str | None]]:
         url = sensor.endpoint or self._build_open_meteo_url()
         try:
+            logger.debug("Fetching Open-Meteo weather from: %s", url)
             response = httpx.get(url, timeout=self.timeout)
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.warning("Failed to fetch Open-Meteo weather (%s): %s", url, exc)
+            logger.warning("Failed to fetch Open-Meteo weather (%s): %s", url, exc, exc_info=True)
+            if hasattr(exc, "response") and exc.response:
+                logger.warning("Open-Meteo error response: %s %s", exc.response.status_code, exc.response.text[:500])
             return None, {}
 
         payload = response.json()
         metrics = self._parse_open_meteo(payload)
         metrics["endpoint"] = url
+        logger.debug("Successfully fetched Open-Meteo weather")
         return payload, metrics
 
     def _build_open_meteo_url(self) -> str:
