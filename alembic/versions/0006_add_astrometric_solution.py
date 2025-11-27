@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 revision = "0006_add_astrometric_solution"
-down_revision = "0005_add_ephemeris_table"
+down_revision = "0005a_add_capturelog_table"
 branch_labels = None
 depends_on = None
 
