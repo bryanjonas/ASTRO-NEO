@@ -311,6 +311,27 @@ async def unhandled_exception_handler(request: Request, exc: Exception):  # type
     )
 
 
+# --- Sequence ---
+
+@app.post(f"{API_PREFIX}/sequence/start")
+async def sequence_start(payload: dict[str, Any]) -> NinaResponse[str]:
+    async with state_lock:
+        STATE.sequence.is_running = True
+        STATE.sequence.name = payload.get("name")
+        STATE.sequence.total = payload.get("count", 0)
+        STATE.sequence.current_index = 0
+    logger.info("Sequence started: %s", payload)
+    return _success("Sequence started")
+
+
+@app.get(f"{API_PREFIX}/sequence/stop")
+async def sequence_stop() -> NinaResponse[str]:
+    async with state_lock:
+        STATE.sequence.is_running = False
+    logger.info("Sequence stopped")
+    return _success("Sequence stopped")
+
+
 if __name__ == "__main__":
     import uvicorn
 

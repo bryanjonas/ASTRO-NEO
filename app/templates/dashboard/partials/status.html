@@ -119,7 +119,7 @@
         <div class="telemetry-card">
           <div class="telemetry-label">Target</div>
           <div class="telemetry-value large">
-            {{ sequence.get("name") if sequence and sequence.get("name") else "—" }}
+            {{ sequence.get("name") or (session.get("target") if session else None) or "—" }}
           </div>
           <div class="telemetry-meta">
             {% if sequence and sequence.get("total") %}
