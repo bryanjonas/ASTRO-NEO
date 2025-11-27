@@ -8,12 +8,13 @@ services:
     pull_policy: build
     depends_on:
       - db
-      - mock-nina
+      # - mock-nina
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      MOCK_NINA_URL: http://mock-nina:1888/api
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      # MOCK_NINA_URL: http://mock-nina:1888/api
     ports:
       - "18080:8000"
     volumes:
@@ -73,12 +74,14 @@ services:
     pull_policy: build
     depends_on:
       - db
-      - mock-nina
+      # - mock-nina
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      NINA_BRIDGE_NINA_BASE_URL: http://mock-nina:1888/api
+      NINA_BRIDGE_NINA_BASE_URL: http://host.docker.internal:1888/v2/api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["uvicorn", "nina_bridge.main:app", "--host", "0.0.0.0", "--port", "8001"]
     restart: unless-stopped
     ports:
@@ -86,18 +89,18 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
-  mock-nina:
-    build:
-      context: .
-      dockerfile: mock_nina/Dockerfile
-    pull_policy: build
-    environment:
-      MOCK_NINA_DATA_DIR: /data
-      MOCK_NINA_EXPOSURE_SECONDS: 5
-    volumes:
-      - mock_nina_data:/data
-    ports:
-      - "1888:1888"
+#   mock-nina:
+#     build:
+#       context: .
+#       dockerfile: mock_nina/Dockerfile
+#     pull_policy: build
+#     environment:
+#       MOCK_NINA_DATA_DIR: /data
+#       MOCK_NINA_EXPOSURE_SECONDS: 5
+#     volumes:
+#       - mock_nina_data:/data
+#     ports:
+#       - "1888:1888"
 
   db:
     image: postgres:15

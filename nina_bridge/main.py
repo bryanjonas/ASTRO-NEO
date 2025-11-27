@@ -115,6 +115,8 @@ async def _forward_request(
     If unwrap=True, returns the inner Response object (for internal use).
     If unwrap=False, returns the full NINA envelope (for proxying).
     """
+    logger.info("NINA REQUEST: %s %s | params=%s | json=%s", method, path, params, json)
+    
     response: httpx.Response | None = None
     for attempt in range(1, bridge_settings.max_retries + 1):
         try:
@@ -126,9 +128,11 @@ async def _forward_request(
                 delay = 0.5 * attempt + random.uniform(0, 0.25)
                 await asyncio.sleep(delay)
                 continue
+            logger.error("NINA ERROR: %s %s | status=%s | body=%s", method, path, exc.response.status_code, exc.response.text)
             raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
         except httpx.HTTPError as exc:
             if attempt >= bridge_settings.max_retries:
+                logger.error("NINA UNREACHABLE: %s %s | error=%s", method, path, str(exc))
                 raise HTTPException(status_code=502, detail={"reason": "nina_unreachable"})
             delay = 0.5 * attempt + random.uniform(0, 0.25)
             await asyncio.sleep(delay)
@@ -136,6 +140,7 @@ async def _forward_request(
         raise HTTPException(status_code=502, detail={"reason": "nina_unreachable"})
     
     data = response.json()
+    logger.info("NINA RESPONSE: %s %s | status=%s | body=%s", method, path, response.status_code, data)
     
     if unwrap:
         # Unwrap NINA envelope if present
