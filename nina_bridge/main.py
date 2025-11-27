@@ -193,11 +193,11 @@ async def bridge_status(
         # Handle sequence_info being a list (SequenceBaseJson returns an array)
         is_sequence_running = False
         if isinstance(sequence_info, list):
-            # TODO: Determine running status from sequence list if possible.
-            # For now, we assume false or check if any item has status 'Running' if that's how it works.
-            # But without a clear 'IsRunning' field in the root, we'll default to False and log.
-            # logger.debug("Sequence info is list: %s", sequence_info)
-            pass
+            # Check if any container or item is running
+            for item in sequence_info:
+                if item.get("Status") == "RUNNING" or item.get("IsRunning"):
+                    is_sequence_running = True
+                    break
         elif isinstance(sequence_info, dict):
             is_sequence_running = sequence_info.get("IsRunning", False) or sequence_info.get("Running", False)
 
@@ -313,6 +313,23 @@ async def plan_sequence(payload: SequencePlanRequest) -> NinaResponse[SequencePl
         preset=template.name,
     )
     return _success(plan)
+
+
+@app.post(f"{API_PREFIX}/sequence/start")
+async def sequence_start(
+    payload: dict[str, Any],
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    # Forward to NINA
+    return await _forward_request(client, "POST", "/sequence/start", json=payload)
+
+
+@app.get(f"{API_PREFIX}/sequence/stop")
+async def sequence_stop(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    # Forward to NINA
+    return await _forward_request(client, "GET", "/sequence/stop")
 
 
 @app.get(f"{API_PREFIX}/weather")
