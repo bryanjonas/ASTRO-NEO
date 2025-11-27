@@ -134,31 +134,58 @@
 
     <!-- Advanced Configuration Section -->
     <!-- Advanced Configuration Section -->
+    <div class="form-section">
+      <div class="section-header">
+        <span class="section-icon">☁️</span>
+        <span class="section-title">Weather Configuration</span>
+      </div>
+      <p class="section-description">Weather data is automatically sourced from Open-Meteo based on your location.</p>
+      <div class="form-grid">
+        <div class="snapshot-meta">
+          <span class="sensor-pill">
+            Open-Meteo
+            <span class="sensor-meta">· Auto-configured</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Horizon Configuration Section -->
     <div class="form-section with-aside">
       <div>
         <div class="section-header">
-          <span class="section-icon">⚙️</span>
-          <span class="section-title">Advanced Configuration</span>
+          <span class="section-icon">🏔️</span>
+          <span class="section-title">Horizon Configuration</span>
         </div>
-        <p class="section-description">Horizon and weather blocks gate observability, automation, and safety interlocks.
-        </p>
+        <p class="section-description">Horizon profile is automatically fetched from PVGIS based on your location.</p>
+
         <div class="form-grid">
-          <label class="full-width">
-            <span class="label-text">Weather Sensors</span>
-            <textarea
-              name="weather_sensors">{{ site.weather_sensors if site and site.weather_sensors else '' }}</textarea>
-            <span class="hint">JSON array of weather data sources (remote APIs or local sensors)</span>
-          </label>
+          <div class="panel-actions" style="margin-bottom: 1rem;">
+            <button type="button" class="btn-secondary"
+              hx-post="/site/{{ site.name if site else 'default' }}/horizon/refresh" hx-target="closest section"
+              hx-swap="outerHTML" {% if not site or not site.latitude or not site.longitude %}disabled
+              title="Save coordinates first" {% endif %}>
+              🔄 Force Refresh Horizon
+            </button>
+          </div>
+
+          <div class="snapshot-meta">
+            Horizon Status: <strong>{{ "Loaded" if site and site.horizon_mask_json else "Pending" }}</strong>
+            {% if site and site.horizon_mask_json %}
+            <div class="muted tiny" style="margin-top: 4px;">
+              {{ site.horizon_mask_json|length }} points loaded
+            </div>
+            {% endif %}
+          </div>
         </div>
       </div>
+
       <div class="section-aside helper-card">
-        <div class="helper-title">Need a horizon mask?</div>
-        <p>Download obstruction data from PVGIS, or paste your manual azimuth/altitude samples. Aim for 1° resolution
-          near the horizon break.</p>
+        <div class="helper-title">Automatic Horizon Data</div>
+        <p>We use PVGIS data to automatically generate a horizon profile based on your coordinates.</p>
         <ul class="helper-list">
-          <li>Ensure azimuth degrees (0–360) and altitude (>−5 to +90)</li>
-          <li>Include at least four points; more yields smoother interpolation</li>
-          <li>Use comments like “Trees NE ridge” inside your JSON for clarity</li>
+          <li><strong>Source:</strong> EU JRC PVGIS service.</li>
+          <li><strong>Update:</strong> Automatically updates when location changes.</li>
         </ul>
         <a href="https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/pvgis-tools/horizon-profile_en"
           target="_blank" class="help-link">📊 Open PVGIS Horizon Tool</a>

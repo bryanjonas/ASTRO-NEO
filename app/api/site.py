@@ -35,7 +35,12 @@ def list_sites(session: Session = Depends(get_db)) -> List[SiteConfig]:
 
 
 @router.post("/", response_model=SiteConfig)
-def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) -> SiteConfig:
+async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) -> SiteConfig:
+    # Auto-configure Open-Meteo if not present
+    if not config.weather_sensors:
+        import json
+        config.weather_sensors = json.dumps([{"name": "Open-Meteo", "type": "open-meteo"}])
+
     existing = session.exec(select(SiteConfig).where(SiteConfig.name == config.name)).first()
     if existing:
         for field, value in config.model_dump(exclude_unset=True).items():
@@ -43,11 +48,38 @@ def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) -> SiteC
         session.add(existing)
         session.commit()
         session.refresh(existing)
+        
+        # Trigger async horizon fetch
+        try:
+            from app.services.horizon import fetch_horizon_profile
+            profile = await fetch_horizon_profile(existing.latitude, existing.longitude)
+            existing.horizon_mask_json = json.dumps(profile)
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+        except Exception as e:
+            # Log but don't fail the request
+            print(f"Failed to auto-fetch horizon: {e}")
+            
         return existing
 
+    # New site
     session.add(config)
     session.commit()
     session.refresh(config)
+    
+    # Trigger async horizon fetch for new site
+    try:
+        from app.services.horizon import fetch_horizon_profile
+        import json
+        profile = await fetch_horizon_profile(config.latitude, config.longitude)
+        config.horizon_mask_json = json.dumps(profile)
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+    except Exception as e:
+        print(f"Failed to auto-fetch horizon: {e}")
+
     return config
 
 
@@ -60,8 +92,14 @@ def get_site(name: str, session: Session = Depends(get_db)) -> SiteConfig:
 
 
 @router.put("/{name}", response_model=SiteConfig)
-def update_site(name: str, payload: SiteConfigPayload, session: Session = Depends(get_db)) -> SiteConfig:
+async def update_site(name: str, payload: SiteConfigPayload, session: Session = Depends(get_db)) -> SiteConfig:
     """Update or create the site config."""
+    import json
+    
+    # Auto-configure Open-Meteo if not present in payload or existing
+    if not payload.weather_sensors:
+         payload.weather_sensors = json.dumps([{"name": "Open-Meteo", "type": "open-meteo"}])
+
     record = session.exec(select(SiteConfig).where(SiteConfig.name == name)).first()
     if record:
         for field, value in payload.model_dump(exclude_unset=True).items():
@@ -69,12 +107,36 @@ def update_site(name: str, payload: SiteConfigPayload, session: Session = Depend
         session.add(record)
         session.commit()
         session.refresh(record)
+        
+        # Trigger async horizon fetch
+        try:
+            from app.services.horizon import fetch_horizon_profile
+            profile = await fetch_horizon_profile(record.latitude, record.longitude)
+            record.horizon_mask_json = json.dumps(profile)
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+        except Exception as e:
+            print(f"Failed to auto-fetch horizon: {e}")
+            
         return record
 
     model = SiteConfig(**payload.model_dump())
     session.add(model)
     session.commit()
     session.refresh(model)
+    
+    # Trigger async horizon fetch
+    try:
+        from app.services.horizon import fetch_horizon_profile
+        profile = await fetch_horizon_profile(model.latitude, model.longitude)
+        model.horizon_mask_json = json.dumps(profile)
+        session.add(model)
+        session.commit()
+        session.refresh(model)
+    except Exception as e:
+        print(f"Failed to auto-fetch horizon: {e}")
+        
     return model
 
 
