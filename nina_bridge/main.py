@@ -210,12 +210,18 @@ async def bridge_status(
             },
             "telescope": {
                 "is_connected": mount_info.get("Connected", False),
-                "is_parked": mount_info.get("AtPark", False), # Corrected from Parked
+                "is_parked": mount_info.get("AtPark", False),
                 "is_slewing": mount_info.get("Slewing", False),
                 "ra": mount_info.get("RightAscension", 0.0),
                 "dec": mount_info.get("Declination", 0.0),
                 "az": mount_info.get("Azimuth", 0.0),
                 "alt": mount_info.get("Altitude", 0.0),
+                # Frontend expects ra_deg and dec_deg
+                # NINA API returns RightAscension in hours usually, but MountInfo.Coordinates.RADegrees is explicit.
+                # Let's try to get it from Coordinates object if present, else fallback.
+                "ra_deg": mount_info.get("Coordinates", {}).get("RADegrees") if mount_info.get("Coordinates") else (mount_info.get("RightAscension", 0.0) * 15),
+                "dec_deg": mount_info.get("Coordinates", {}).get("Dec") if mount_info.get("Coordinates") else mount_info.get("Declination", 0.0),
+                "tracking_mode": mount_info.get("TrackingMode", "Stopped"),
             },
             "focuser": {
                 "is_connected": focuser_info.get("Connected", False),

@@ -1,0 +1,348 @@
+1 Basics
+1.1 Entry points
+All the PVGIS tools can be accessed non-interactively using our web APIs. The entry points are:
+
+PVGIS 5.3: https://re.jrc.ec.europa.eu/api/v5_3/tool_name?param1=value1&param2=value2&...
+
+PVGIS 5.2: https://re.jrc.ec.europa.eu/api/v5_2/tool_name?param1=value1&param2=value2&...
+
+NB From 25 September 2024 the old entrypoint https://re.jrc.ec.europa.eu/api/tool_name?param1=value1&param2=value2&...   will serve PVGIS 5.2 for a limited period. Access to PVGIS 5.1 has been removed
+
+The variables are:
+
+tool_name: PVcalc, SHScalc, MRcalc, DRcalc, seriescalc, tmy, printhorizon.
+param1=value1, param2=value2, ...: input parameters of the tool with their corresponding values concatenated in a query string format.
+ 
+
+PVGIS APIs can be called directly using different languages like Python, NodeJS, Perl, Java and many others. Such languages have libraries to ease API calls management. Please, for more information check the documentation of the specific language used.
+
+Warning: access to PVGIS APIs via AJAX is not allowed. Please, do not ask for changes in our CORS policy since these requests will be rejected by the system administrators.
+
+When you report an error, please always specify the exact URL, the parameters used, the exact error text and the exact version of software/libraries you are using and any other information that may help us find and fix the problem.
+
+1.2 HTTP methods allowed
+API functions accept GET method only. Other methods will return an HTTP status "405 - Method not allowed". HEAD method has been kept only to confirm the existence of the desired API function, but will return a "204 - No Content" HTTP status to avoid wasting CPU computation time.
+
+1.3 API calls rate limit
+API calls have a rate limit of 30 calls/second per IP address. If you exceed this threshold, the service will refuse your call and return a "429 - Too Many Requests" HTTP status.
+
+1.4 Simultaneous computations tasks limit
+To avoid server slowdowns due to too many simultaneous computations tasks, we introduced a new mechanism to handle excessive requests that affect the service availability.
+
+All the exceeding computation requests that are outside the optimal computation frame, will be suspended for 150/200 milliseconds before a new try, waiting for just released resource. The number of tries are limited to a cap of 4/5 seconds, and after that limit the service will return a "529 - Site is overloaded" HTTP status code.
+
+This status code is used to tell you that you should repeat the request after a while.
+
+1.5 Inputs
+If any of the inputs is out of the expected range, a json error message will be returned specifying the range of expected values for that input.
+The query string must include at least all the mandatory inputs of the app (see minimal usage examples). The default values will be used for undefined optional parameters.
+Inputs not required by the tool will be deprecated.
+1.6 Outputs
+The outputs obtained with the non-interactive service are exactly the same as those obtained with the PVGIS interface. The output type is controlled with the following two parameters:
+
+outputformat:
+outputformat=csv CSV output.
+outputformat=json JSON output.
+outputformat=basic Raw CSV output without metadata.
+outputformat=epw Energy Plus EPW file (only for the TMY tool).
+browser:
+browser=0 Output as a stream.
+browser=1 Output as a file.
+We encourage users to use the JSON output for integrating PVGIS results in other web services and scripts. This will reduce potential impacts of future PVGIS upgrades in their services.
+
+2 Inputs for specific PVGIS tools
+2.1 Grid-connected & tracking PV systems
+Inputs
+
+Name	Type*	Obligatory	Default	Comments
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.
+usehorizon	I	No	1	Calculate taking into account shadows from high horizon. Value of 1 for "yes".
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.
+raddatabase	T	No	default DB	Name of the radiation database. "PVGIS-SARAH3" for Europe, Africa and Asia or "PVGIS-NSRDB" for the Americas between 60°N and 20°S, "PVGIS-ERA5" . NB  "PVGIS-COSMO" and "PVGIS-CMSAF" have been deprecated), while PVGIS-NSRDB is only available with PVGIS 5.2
+peakpower	F	Yes	-	Nominal power of the PV system, in kW.
+pvtechchoice	T	No	"crystSi"	PV technology. Choices are: "crystSi", "crystSi2025", "CIS", "CdTe" and "Unknown".
+mountingplace	T	No	"free"	Type of mounting of the PV modules. Choices are: "free" for free-standing and "building" for building-integrated.
+loss	F	Yes	-	Sum of system losses, in percent.
+fixed	I	No	1	Calculate a fixed mounted system. Value of 0 for "no". All other values (or no value) mean "Yes". Note that this means the default is "yes".
+angle	F	No	0	Inclination angle from horizontal plane of the (fixed) PV system.
+aspect	F	No	0	Orientation (azimuth) angle of the (fixed) PV system, 0=south, 90=west, -90=east.
+optimalinclination	I	No	0	Calculate the optimum inclination angle. Value of 1 for "yes". All other values (or no value) mean "no".
+optimalangles	I	No	0	Calculate the optimum inclination AND orientation angles. Value of 1 for "yes". All other values (or no value) mean "no".
+inclined_axis	I	No	0	Calculate a single inclined axis system. Value of 1 for "yes". All other values (or no value) mean "no".
+inclined_optimum	I	No	0	Calculate optimum angle for a single inclined axis system. Value of 1 for "yes". All other values (or no value) mean "no".
+inclinedaxisangle	F	No	0	Inclination angle for a single inclined axis system. Ignored if the optimum angle should be calculated (parameter "inclined_optimum").
+vertical_axis	I	No	0	Calculate a single vertical axis system. Value of 1 for "yes". All other values (or no value) mean "no".
+vertical_optimum	I	No	0	Calculate optimum angle for a single vertical axis system. Value of 1 for "yes". All other values (or no value) mean "no".
+verticalaxisangle	F	No	0	Inclination angle for a single vertical axis system. Ignored if the optimum angle should be calculated (parameter "vertical_optimum" set to 1).
+twoaxis	I	No	0	Calculate a two axis tracking system. Value of 1 for "yes". All other values (or no value) mean "no".
+pvprice	I	No	0	Calculate the PV electricity price [kwh/year] in the currency introduced by the user for the system cost.
+systemcost	F	if pvprice	-	Total cost of installing the PV system [your currency].
+interest	F	if pvprice	-	Interest in %/year
+lifetime	I	No	25	Expected lifetime of the PV system in years.
+outputformat	T	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, and "json".
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.
+* F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+ 
+
+Example of the minimum usage:
+
+https://re.jrc.ec.europa.eu/api/PVcalc?lat=45&lon=8&peakpower=1&loss=14
+
+For the fixed PV system, if the parameter "optimalinclination" is selected (set to 1), the value defined for the "angle" parameter is ignored. Similarly, if "optimalangles" is set to 1, values defined for "angle" and "aspect" are ignored and therefore are not necessary. In this case, parameter "optimalinclination" would not be necessary either.
+For the inclined axis PV system analysis, the parameter "inclined_axis" must be selected, along with either "inclinedaxisangle" or "inclined_optimum". If parameter "inclined_optimum" is selected, the inclination angle defined in "inclinedaxisangle" is ignored, so this parameter would not be necessary.
+Parameters regarding the vertical axis ("vertical_axis", "vertical_optimum" and "verticalaxisangle") are related in the same way as the parameters used for the inclined axis PV system.
+2.2 Off-grid PV systems
+inputs
+
+Name	Type*	Obligatory	Default	Comments	 
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.	 
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.	 
+usehorizon	I	No	1	Calculate taking into account shadows from high horizon. Value of 1 for "yes".	 
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.	 
+raddatabase	T	No	default DB	Name of the radiation database. "PVGIS-SARAH" for Europe, Africa and Asia or "PVGIS-NSRDB" for the Americas between 60°N and 20°S, "PVGIS-ERA5" and "PVGIS-COSMO" for Europe (including high-latitudes), and "PVGIS-CMSAF" for Europe and Africa (will be deprecated)	 
+peakpower	F	Yes	-	Nominal power of the PV system, in W.	 
+angle	F	No	0	Inclination angle from horizontal plane of the (fixed) PV system.	 
+aspect	F	No	0	Orientation (azimuth) angle of the (fixed) PV system, 0=south, 90=west, -90=east.	 
+batterysize	F	Yes	-	This is the size, or energy capacity, of the battery used in the off-grid system, measured in watt-hours (Wh).	 
+cutoff	F	Yes	-	Batteries cutoff in %. The cutoff is imposed so that the battery charge cannot go below a certain percentage of full charge.	 
+consumptionday	F	Yes	-	Energy consumption of all the electrical equipment connected to the system during a 24 hour period (Wh)	 
+hourconsumption	L	No	-	List of 24 comma separated values with the hourly consumption. The values in the file should be the fraction of the daily consumption that takes place in each hour, with the sum of the numbers equal to 1. The daily consumption profile should be defined for the standard local time, without consideration of daylight saving offsets if relevant to the location. The format is the same as the default consumption file.	 
+outputformat	T	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, and "json".	 
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.	 
+* F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+ 
+
+Example of the minimum usage:
+
+https://re.jrc.ec.europa.eu/api/SHScalc?lat=45&lon=8&peakpower=10&batterysize=50&consumptionday=200&cutoff=40
+
+2.3 Monthly radiation
+Inputs
+
+Name	Type*	Obligatory	Default	Comments
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.
+usehorizon	I	No	1	Calculate taking into account shadows from high horizon. Value of 1 for "yes".
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.
+raddatabase	T	No	default DB	Name of the radiation database (DB): "PVGIS-SARAH" for Europe, Africa and Asia or "PVGIS-NSRDB" for the Americas between 60°N and 20°S, "PVGIS-ERA5" and "PVGIS-COSMO" for Europe (including high-latitudes), and "PVGIS-CMSAF" for Europe and Africa (will be deprecated). The default DBs are PVGIS-SARAH, PVGIS-NSRDB and PVGIS-ERA5 based on the chosen location (see Figure xx).
+startyear	I	No	year_min(DB)	First year of the output of monthly averages. Availability varies with the temporal coverage of the radiation DB chosen. The default value is the first year of the DB.
+endyear	I	No	year_max(DB)	Final year of the output of monthly averages. Availability varies with the temporal coverage of the radiation DB chosen. The default value is the last year of the DB.
+horirrad	I	No	0	Output horizontal plane irradiation. Value of 1 for "yes". All other values (or no value) mean "no".
+optrad	I	No	0	Output annual optimal angle plane irradiation. Value of 1 for "yes". All other values (or no value) mean "no".
+selectrad	I	No	0	Output irradiation on plane of selected inclination. Value of 1 for "yes". All other values (or no value) mean "no".
+angle	F	No	0	
+Inclinatio
+
+Example of the minimum usage:
+
+n angle for the selected inclination irradiation option.
+
+mr_dni	I	No	0	Output direct normal irradiation. Value of 1 for "yes". All other values (or no value) mean "no".
+d2g	I	No	0	Output monthly values of the ratio of diffuse to global radiation (horizontal plane). Value of 1 for "yes". All other values (or no value) mean "no".
+avtemp	I	No	0	Output monthly average values of daily (24h) temperature. Value of 1 for "yes". All other values (or no value) mean "no".
+outputformat	T	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, and "json".
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.
+* F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+[/collapsed title]
+
+Example of the minimum usage:
+
+https://re.jrc.ec.europa.eu/api/MRcalc?lat=45&lon=8&horirrad=1
+
+At least one output option should be chosen (horirrad, optrad, selectrad, etc). Otherwise the output table will not have any values.
+2.4 Daily radiation
+[collapsed title=inputs]
+
+Name	Type*	Obligatory	Default	Comments
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.
+usehorizon	I	No	1	Calculate taking into account shadows from high horizon. Value of 1 for "yes".
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.
+raddatabase	T	No	default DB	Name of the radiation database (DB): "PVGIS-SARAH" for Europe, Africa and Asia or "PVGIS-NSRDB" for the Americas between 60°N and 20°S, "PVGIS-ERA5" and "PVGIS-COSMO" for Europe (including high-latitudes), and "PVGIS-CMSAF" for Europe and Africa (will be deprecated). The default DBs are PVGIS-SARAH, PVGIS-NSRDB and PVGIS-ERA5 based on the chosen location (see Figure xx).
+month	T	Yes	-	The value of this parameter should be the number of the month, starting at 1 for January. If you give the value 0 (zero) you will instead get data for all the months.
+angle	F	No	0	Inclination angle from horizontal plane of the (fixed) PV system.
+aspect	F	No	0	Orientation (azimuth) angle of the (fixed) PV system, 0=south, 90=west, -90=east.
+global	I	No	0	Output the global, direct and diffuse in-plane irradiances. Value of 1 for "yes". All other values (or no value) mean "no".
+glob_2axis	I	No	0	Output the global, direct and diffuse two-axis tracking irradiances. Value of 1 for "yes". All other values (or no value) mean "no".
+clearsky	I	No	0	Output the global clear-sky irradiance. Value of 1 for "yes". All other values (or no value) mean "no".
+clearsky_2axis	I	No	0	Output the global clear-sky two-axis tracking irradiance. Value of 1 for "yes". All other values (or no value) mean "no".
+showtemperatures	I	No	0	Output the daily temperature profile. Value of 1 for "yes". All other values (or no value) mean "no".
+localtime	I	No	0	Output the time in the local time zone (not daylight saving time), instead of UTC. Value of 1 for "yes". All other values (or no value) mean "no".
+outputformat	T	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, and "json".
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.
+* F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+ 
+
+Example of the minimum usage:
+
+https://re.jrc.ec.europa.eu/api/DRcalc?lat=45&lon=8&month=3&global=1
+
+Unlike the PVGIS web interface, it is also possible here to get values for all 12 months with a single call. See below for more details.
+2.5 Hourly radiation
+Inputs
+
+Name	Type*	Obligatory	Default	Comments
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.
+usehorizon	I	No	1	Calculate taking into account shadows from high horizon. Value of 1 for "yes".
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.
+raddatabase	T	No	default DB	Name of the radiation database (DB): "PVGIS-SARAH" for Europe, Africa and Asia or "PVGIS-NSRDB" for the Americas between 60°N and 20°S, "PVGIS-ERA5" and "PVGIS-COSMO" for Europe (including high-latitudes), and "PVGIS-CMSAF" for Europe and Africa (will be deprecated). The default DBs are PVGIS-SARAH, PVGIS-NSRDB and PVGIS-ERA5 based on the chosen location.
+startyear	I	No	year_min(DB)	First year of the output of hourly averages. Availability varies with the temporal coverage of the radiation DB chosen. The default value is the first year of the DB.
+endyear	I	No	year_max(DB)	Final year of the output of hourly averages. Availability varies with the temporal coverage of the radiation DB chosen. The default value is the last year of the DB.
+pvcalculation	I	No	0	If "0" outputs only solar radiation calculations, if "1" outputs the estimation of hourly PV production as well.
+peakpower	F	if pvcalculation	-	Nominal power of the PV system, in kW.
+pvtechchoice	T	No	"crystSi"	PV technology. Choices are: "crystSi", "CIS", "CdTe" and "Unknown".
+mountingplace	T	No	"free"	Type of mounting of the PV modules. Choices are: "free" for free-standing and "building" for building-integrated.
+loss	F	if pvcalculation	-	Sum of system losses, in percent.
+trackingtype	I	No	0	Type of suntracking used, 0=fixed, 1=single horizontal axis aligned north-south, 2=two-axis tracking, 3=vertical axis tracking, 4=single horizontal axis aligned east-west, 5=single inclined axis aligned north-south.
+angle	F	No	0	Inclination angle from horizontal plane. Not relevant for 2-axis tracking.
+aspect	F	No	0	Orientation (azimuth) angle of the (fixed) plane, 0=south, 90=west, -90=east. Not relevant for tracking planes.
+optimalinclination	I	No	0	Calculate the optimum inclination angle. Value of 1 for "yes". All other values (or no value) mean "no". Not relevant for 2-axis tracking.
+optimalangles	I	No	0	Calculate the optimum inclination AND orientation angles. Value of 1 for "yes". All other values (or no value) mean "no". Not relevant for tracking planes.
+components	I	No	0	If "1" outputs beam, diffuse and reflected radiation components. Otherwise, it outputs only global values.
+outputformat	I	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, and "json".
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.
+*F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+ 
+
+Example of the minimum usage:
+
+https://re.jrc.ec.europa.eu/api/seriescalc?lat=45&lon=8
+
+ 
+
+2.6 TMY
+Inputs
+
+Name	Type*	Obligatory	Default	Comments
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.
+usehorizon	I	No	1	Calculate taking into account shadows from high horizon. Value of 1 for "yes".
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.
+startyear	I	No	year_min(DB)	First year of the TMY. Availability depends on the temporal coverage of the radiation DB chosen. The default value is the first year of the DB chosen.
+endyear	I	No	year_max(DB)	Final year of the TMY. Availability depends on the temporal coverage of the radiation DB chosen. The default value is the last year of the DB chosen. The period defined by startyear, endyear should be >= 10 years.
+outputformat	T	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, "epw" to get a format suitable for the EnergyPlus software, and "json".
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.
+* F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+ 
+
+Example of the minium usage:
+
+ https://re.jrc.ec.europa.eu/api/tmy?lat=45&lon=8
+
+ 
+3 Horizon profile
+Inputs
+
+Name	Type*	Obligatory	Default	Comments
+lat	F	Yes	-	Latitude, in decimal degrees, south is negative.
+lon	F	Yes	-	Longitude, in decimal degrees, west is negative.
+userhorizon	L	No	-	Height of the horizon at equidistant directions around the point of interest, in degrees. Starting at north and moving clockwise. The series '0,10,20,30,40,15,25,5' would mean the horizon height is 0° due north, 10° for north-east, 20° for east, 30° for south-east, etc.
+outputformat	T	No	"csv"	Type of output. Choices are: "csv" for the normal csv output with text explanations, "basic" to get only the data output with no text, and "json".
+browser	I	No	0	Use this with a value of "1" if you access the web service from a web browser and want to save the data to a file.
+* F = Floating point number; I = integer number; L = list of numbers; T= text string.
+
+ 
+
+Example of minimum usage:
+
+https://re.jrc.ec.europa.eu/api/printhorizon?lat=45&lon=8
+
+There is also the option to supply user-defined horizon information. This would not normally be useful since the web service will just send the horizon information back to you. However, it can be a way to check that PVGIS interprets the user-supplied horizon information correctly
+ 
+4 Python wrap for API calls 
+Below is an example of python code for to create and run calls to PVGIS. NB Not a complete working code!
+
+ 
+
+import os, csv, json, requests
+import glob
+import pandas as pd
+import numpy as np
+from datetime import date
+
+
+# -----------Set up array with lat - long values ------------------------------ 
+# -----------WGS84 format if not alreaady--------------------------------------
+def xy2latlon(x,y):
+    lon = float(point_WGS84.split(' ')[1][:-1])
+    lat = float(point_WGS84.split(' ')[0][:-1])
+    return (lat, lon)
+
+----------------------------------
+
+csv_list=[f for f in glob.glob(os.path.join(r'Q:\projects\csv_fpr pvgis', "*.csv"))] #list of csv to check
+
+#-----------------PVGIS create URLs----------------------------------                   
+url_base = f"https://re.jrc.ec.europa.eu/api/v5_2/PVcalc?"
+
+#----- set API call parameters (examples below) ------------------
+pvgis_params = dict(
+peakpower=1,
+loss=14,
+vertical_axis=1,
+angle = 90,
+azimuth = 0,
+outputformat = 'json',)
+
+params = "&".join([f'{key}={value}' for key, value in pvgis_params.items()])
+url_pvcalc = f'{url_base}&{params}'
+
+
+#----convert LAEA to WGS84 --------------    
+    df_csv['lat']=''
+    df_csv['lon']=''
+    for ii in range(0,len(df_csv)):
+        [lat,lon]=xy2latlon(df_csv.loc[ii,'POINT_X'],df_csv.loc[ii,'POINT_Y'])
+        df_csv.loc[ii,'lat']=lat
+        df_csv.loc[ii,'lon']=lon
+        
+                        
+# ___________ URLs
+    df_csv['url_cw'] = url_pvcalc + '&aspect=' + df_csv['azimuth_cw'].map(str) + '&lat=' + df_csv['lat'].map(str) + '&lon=' + df_csv['lon'].map(str) 
+    df_csv['url_aw'] = url_pvcalc + '&aspect=' + df_csv['azimuth_aw'].map(str) + '&lat=' + df_csv['lat'].map(str) + '&lon=' + df_csv['lon'].map(str) 
+# df.to_csv(csv_outfile, index = False)
+# print (df_select)
+
+#---------------
+    i = 0
+    for idx, row in df_csv.iterrows():
+        id = row['ORIG_FID']
+        lat = row['lat']
+        lon = row['lon']
+    
+        urls = dict(      
+            cw = row['url_cw'],
+    
+    # _____________ qeury pvgis data (clockwise)
+        for key, url in urls.items():    
+   
+            response = requests.get(url)
+            row_json = json.loads(response.text)     
+                       
+            try:    
+                # _____________ parse data from pvgis
+                e_y = row_json.get('outputs').get('totals').get('fixed').get('E_y')
+                print (f'i:{i}\tid: {id}\tside: {key}\tazimuth: {azimuth[key]}\t\tradiation: {e_y}')
+            except:
+                e_y = -9999
+                print (f'i:{i}\t\t\tERROR\nid: {id}\tside: {key}\tazimuth: {azimuth[key]}\t\tradiation: {e_y}\t\tlat: {lat}\tlon: {lon}')            
+        
+            # _____________ update df
+            df_csv.loc[df_csv["ORIG_FID"] == id, f"E_Y_{key}"] = e_y
+        
+            # _____________ save partial results
+            if i > 50:  
+                print ('_____________________________')
+                df_csv.to_csv(os.path.join(r'Q:\projects\\pv_gis_output', csv40:42]),index=False)
+                i = 0
+            
+            i +=1
+       
