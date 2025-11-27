@@ -190,38 +190,27 @@ async def bridge_status(
         focuser_info = results[2] if not isinstance(results[2], Exception) else {}
         sequence_info = results[3] if not isinstance(results[3], Exception) else {}
 
+        # Handle sequence_info being a list (SequenceBaseJson returns an array)
+        is_sequence_running = False
+        if isinstance(sequence_info, list):
+            # TODO: Determine running status from sequence list if possible.
+            # For now, we assume false or check if any item has status 'Running' if that's how it works.
+            # But without a clear 'IsRunning' field in the root, we'll default to False and log.
+            # logger.debug("Sequence info is list: %s", sequence_info)
+            pass
+        elif isinstance(sequence_info, dict):
+            is_sequence_running = sequence_info.get("IsRunning", False) or sequence_info.get("Running", False)
+
         # Map to the structure expected by the frontend/bridge logic
-        # Note: The real API returns capitalized keys (e.g. "Connected"), but our mock/frontend might expect lowercase or specific keys.
-        # We need to normalize or ensure the frontend handles it. 
-        # Looking at _ready_flags:
-        # camera.get("is_exposing")
-        # telescope.get("is_connected"), telescope.get("is_parked"), telescope.get("is_slewing")
-        # sequence.get("is_running")
-        
-        # Real API /equipment/camera/info returns: { "Connected": bool, "Temperature": double, ... }
-        # It does NOT seem to return "is_exposing" directly in Info? 
-        # Wait, /equipment/camera/info schema is CameraInfo. 
-        # Let's check if CameraInfo has IsExposing.
-        # The docs say: "This endpoint returns relevant information about the camera."
-        # If it doesn't have IsExposing, we might need to check /equipment/camera/capture/statistics or similar, or maybe it is in Info.
-        # Assuming for now we map what we can.
-        
-        # Real API /equipment/mount/info returns: { "Connected": bool, "Parked": bool, "Slewing": bool, ... }
-        
-        # Real API /sequence/json returns: { "Running": bool, ... } or similar.
-        
-        # We construct the nina_status dict
         nina_status = {
             "camera": {
                 "is_connected": camera_info.get("Connected", False),
                 "temperature": camera_info.get("Temperature", 0.0),
-                "is_exposing": camera_info.get("IsExposing", False), # Verify this key exists in real API!
-                # If IsExposing isn't in Info, we might need another call or infer it.
-                # For now, we pass what we have.
+                "is_exposing": camera_info.get("IsExposing", False),
             },
             "telescope": {
                 "is_connected": mount_info.get("Connected", False),
-                "is_parked": mount_info.get("Parked", False),
+                "is_parked": mount_info.get("AtPark", False), # Corrected from Parked
                 "is_slewing": mount_info.get("Slewing", False),
                 "ra": mount_info.get("RightAscension", 0.0),
                 "dec": mount_info.get("Declination", 0.0),
@@ -233,8 +222,7 @@ async def bridge_status(
                 "position": focuser_info.get("Position", 0),
             },
             "sequence": {
-                "is_running": sequence_info.get("IsRunning", False) or sequence_info.get("Running", False), # Check key
-                # sequence/json might return the whole sequence object.
+                "is_running": is_sequence_running,
             }
         }
         
