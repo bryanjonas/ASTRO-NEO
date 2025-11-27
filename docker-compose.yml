@@ -13,7 +13,6 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
       # MOCK_NINA_URL: http://mock-nina:1888/api
     ports:
       - "18080:8000"

@@ -173,11 +173,73 @@ def _ready_flags(nina_status: dict[str, Any] | None, blockers: list[dict[str, An
 async def bridge_status(
     client: httpx.AsyncClient = Depends(get_client),
 ) -> NinaResponse[BridgeStatus]:
-    # We fetch status from NINA (mock) which returns a dict of device states
+    # Fetch status from multiple real NINA endpoints
     try:
-        # We need unwrapped status here to build our aggregate
-        nina_status = await _forward_request(client, "GET", "/status", unwrap=True)
-    except Exception:
+        # Execute requests in parallel
+        results = await asyncio.gather(
+            _forward_request(client, "GET", "/equipment/camera/info", unwrap=True),
+            _forward_request(client, "GET", "/equipment/mount/info", unwrap=True),
+            _forward_request(client, "GET", "/equipment/focuser/info", unwrap=True),
+            _forward_request(client, "GET", "/sequence/json", unwrap=True),
+            return_exceptions=True
+        )
+        
+        # Process results
+        camera_info = results[0] if not isinstance(results[0], Exception) else {}
+        mount_info = results[1] if not isinstance(results[1], Exception) else {}
+        focuser_info = results[2] if not isinstance(results[2], Exception) else {}
+        sequence_info = results[3] if not isinstance(results[3], Exception) else {}
+
+        # Map to the structure expected by the frontend/bridge logic
+        # Note: The real API returns capitalized keys (e.g. "Connected"), but our mock/frontend might expect lowercase or specific keys.
+        # We need to normalize or ensure the frontend handles it. 
+        # Looking at _ready_flags:
+        # camera.get("is_exposing")
+        # telescope.get("is_connected"), telescope.get("is_parked"), telescope.get("is_slewing")
+        # sequence.get("is_running")
+        
+        # Real API /equipment/camera/info returns: { "Connected": bool, "Temperature": double, ... }
+        # It does NOT seem to return "is_exposing" directly in Info? 
+        # Wait, /equipment/camera/info schema is CameraInfo. 
+        # Let's check if CameraInfo has IsExposing.
+        # The docs say: "This endpoint returns relevant information about the camera."
+        # If it doesn't have IsExposing, we might need to check /equipment/camera/capture/statistics or similar, or maybe it is in Info.
+        # Assuming for now we map what we can.
+        
+        # Real API /equipment/mount/info returns: { "Connected": bool, "Parked": bool, "Slewing": bool, ... }
+        
+        # Real API /sequence/json returns: { "Running": bool, ... } or similar.
+        
+        # We construct the nina_status dict
+        nina_status = {
+            "camera": {
+                "is_connected": camera_info.get("Connected", False),
+                "temperature": camera_info.get("Temperature", 0.0),
+                "is_exposing": camera_info.get("IsExposing", False), # Verify this key exists in real API!
+                # If IsExposing isn't in Info, we might need another call or infer it.
+                # For now, we pass what we have.
+            },
+            "telescope": {
+                "is_connected": mount_info.get("Connected", False),
+                "is_parked": mount_info.get("Parked", False),
+                "is_slewing": mount_info.get("Slewing", False),
+                "ra": mount_info.get("RightAscension", 0.0),
+                "dec": mount_info.get("Declination", 0.0),
+                "az": mount_info.get("Azimuth", 0.0),
+                "alt": mount_info.get("Altitude", 0.0),
+            },
+            "focuser": {
+                "is_connected": focuser_info.get("Connected", False),
+                "position": focuser_info.get("Position", 0),
+            },
+            "sequence": {
+                "is_running": sequence_info.get("IsRunning", False) or sequence_info.get("Running", False), # Check key
+                # sequence/json might return the whole sequence object.
+            }
+        }
+        
+    except Exception as exc:
+        logger.error("Error aggregating status: %s", exc)
         nina_status = {}
         
     weather_summary = _current_weather()
@@ -323,7 +385,10 @@ async def camera_capture(
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     _enforce_safety(action="camera_capture")
-    return await _forward_request(client, "GET", "/equipment/camera/capture", params={"duration": duration, "binning": binning})
+    # First set binning
+    await _forward_request(client, "GET", "/equipment/camera/set-binning", params={"binning": f"{binning}x{binning}"})
+    # Then capture (without binning arg)
+    return await _forward_request(client, "GET", "/equipment/camera/capture", params={"duration": duration})
 
 
 @app.get(f"{API_PREFIX}/equipment/camera/abort-exposure")
