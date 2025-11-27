@@ -55,8 +55,10 @@ async def fetch_horizon_profile(lat: float, lon: float) -> List[Dict[str, float]
             return result
             
         except httpx.HTTPError as exc:
-            logger.error("PVGIS API error: %s", exc)
+            logger.error("PVGIS API error: %s", exc, exc_info=True)
+            if hasattr(exc, "response") and exc.response:
+                logger.error("PVGIS error response: %s %s", exc.response.status_code, exc.response.text[:500])
             raise
         except Exception as exc:
-            logger.error("Error parsing PVGIS response: %s", exc)
+            logger.error("Error parsing PVGIS response: %s", exc, exc_info=True)
             raise

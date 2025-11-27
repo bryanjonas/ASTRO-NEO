@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,8 @@ from sqlmodel import Session, select
 
 from app.api.deps import get_db
 from app.models import SiteConfig
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/site", tags=["site"])
 
@@ -59,7 +62,7 @@ async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) ->
             session.refresh(existing)
         except Exception as e:
             # Log but don't fail the request
-            print(f"Failed to auto-fetch horizon: {e}")
+            logger.error("Failed to auto-fetch horizon", exc_info=True)
             
         return existing
 
@@ -78,7 +81,7 @@ async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) ->
         session.commit()
         session.refresh(config)
     except Exception as e:
-        print(f"Failed to auto-fetch horizon: {e}")
+        logger.error("Failed to auto-fetch horizon", exc_info=True)
 
     return config
 
@@ -117,7 +120,7 @@ async def update_site(name: str, payload: SiteConfigPayload, session: Session = 
             session.commit()
             session.refresh(record)
         except Exception as e:
-            print(f"Failed to auto-fetch horizon: {e}")
+            logger.error("Failed to auto-fetch horizon", exc_info=True)
             
         return record
 
@@ -135,7 +138,7 @@ async def update_site(name: str, payload: SiteConfigPayload, session: Session = 
         session.commit()
         session.refresh(model)
     except Exception as e:
-        print(f"Failed to auto-fetch horizon: {e}")
+        logger.error("Failed to auto-fetch horizon", exc_info=True)
         
     return model
 
@@ -162,4 +165,5 @@ async def refresh_horizon(name: str, session: Session = Depends(get_db)) -> Site
         session.refresh(site)
         return site
     except Exception as exc:
+        logger.error("Failed to fetch horizon", exc_info=True)
         raise HTTPException(status_code=502, detail=f"Failed to fetch horizon: {str(exc)}")
