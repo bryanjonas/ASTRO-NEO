@@ -16,11 +16,11 @@ class NinaBridgeService:
         self.base_url = base_url or settings.nina_bridge_url.rstrip("/")
         self.timeout = timeout or settings.nina_bridge_timeout
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    def _request(self, method: str, path: str, params: dict[str, Any] | None = None, json: dict[str, Any] | None = None) -> Any:
         url = f"{self.base_url}{path}"
         try:
-            logger.debug("NINA Request: %s %s payload=%s", method, url, payload)
-            response = httpx.request(method, url, params=payload, timeout=self.timeout)
+            logger.debug("NINA Request: %s %s params=%s json=%s", method, url, params, json)
+            response = httpx.request(method, url, params=params, json=json, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as exc:
@@ -130,6 +130,14 @@ class NinaBridgeService:
             raise Exception(f"NINA API Error: {data.get('Error')}")
             
         return data.get("Response")
+
+    def start_sequence(self, payload: dict[str, Any]) -> str:
+        """Start a sequence (or notify NINA about one)."""
+        return self._request("POST", "/sequence/start", json=payload)
+
+    def stop_sequence(self) -> str:
+        """Stop the current sequence."""
+        return self._request("GET", "/sequence/stop")
 
 
 __all__ = ["NinaBridgeService"]

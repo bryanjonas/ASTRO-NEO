@@ -104,7 +104,12 @@ class AutomationService:
         self.bridge.connect_telescope(True)
         # Queue retryable tasks so failures raise dashboard alerts
         if plan.focus_position is not None:
-            TASK_QUEUE.submit(Task(name="focus_move", func=lambda: self.bridge.focuser_move(plan.focus_position)))
+            TASK_QUEUE.submit(
+                Task(
+                    name="focus_move",
+                    func=lambda: (SESSION_STATE.log_event(f"Automation: Focusing to {plan.focus_position}", "info"), self.bridge.focuser_move(plan.focus_position))
+                )
+            )
 
         TASK_QUEUE.submit(
             Task(
