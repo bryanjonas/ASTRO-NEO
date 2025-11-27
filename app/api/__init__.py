@@ -14,7 +14,7 @@ from .site import router as site_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
-api_router.include_router(site_router)
+api_router.include_router(site_router, prefix="/site")
 api_router.include_router(observability_router)
 api_router.include_router(bridge_router)
 api_router.include_router(equipment_router)

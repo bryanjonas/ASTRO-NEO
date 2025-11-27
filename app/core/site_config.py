@@ -90,6 +90,8 @@ def load_site_config(path: str | Path | None = None) -> SiteFileConfig:
     site_payload.setdefault("latitude", settings.site_latitude)
     site_payload.setdefault("longitude", settings.site_longitude)
     site_payload.setdefault("altitude_m", settings.site_altitude_m)
+    if settings.site_bortle is not None:
+        site_payload.setdefault("bortle", settings.site_bortle)
 
     return SiteFileConfig.model_validate(site_payload)
 
