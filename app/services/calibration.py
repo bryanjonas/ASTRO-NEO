@@ -49,7 +49,7 @@ def _wait_ready(bridge: NinaBridgeService, timeout: float = 60.0, interval: floa
     """Poll bridge status until ready_to_expose is true or timeout."""
     deadline = datetime.utcnow().timestamp() + timeout
     while datetime.utcnow().timestamp() < deadline:
-        status = bridge.status()
+        status = bridge.get_status()
         blockers = status.get("blockers") or []
         ready = (status.get("ready") or {}).get("ready_to_expose")
 

@@ -153,15 +153,15 @@
         <div class="form-grid">
           <label>
             <span class="label-text">Camera Type</span>
-            <input type="text" name="camera_type" value="{{ form_profile.camera.type if form_profile else 'mono' }}"
-              placeholder="mono, color, OSC">
-            <span class="hint">mono, color, OSC, etc.</span>
-          </label>
-          <label>
-            <span class="label-text">Max Binning</span>
-            <input type="number" name="camera_max_binning"
-              value="{{ form_profile.camera.max_binning if form_profile else 1 }}" min="1">
-            <span class="hint">1×1, 2×2, 3×3, 4×4</span>
+            <select name="camera_type" class="input">
+              <option value="mono" {% if not form_profile or form_profile.camera.type=='mono' %}selected{% endif %}>Mono
+              </option>
+              <option value="color" {% if form_profile and form_profile.camera.type=='color' %}selected{% endif %}>Color
+              </option>
+              <option value="osc" {% if form_profile and form_profile.camera.type=='osc' %}selected{% endif %}>OSC
+              </option>
+            </select>
+            <span class="hint">Sensor architecture</span>
           </label>
           <label class="full-width">
             <span class="label-text">Available Filters</span>
@@ -191,20 +191,11 @@
         </div>
         <p class="section-description">Define mechanical travel so autofocus and parking automation stay safe.</p>
         <div class="form-grid">
-          <label>
-            <span class="label-text">Focuser Min Position</span>
-            <input type="number" name="focuser_min"
-              value="{{ form_profile.focuser.position_min if form_profile and form_profile.focuser else '' }}"
-              placeholder="0">
-            <span class="hint">Minimum focuser position</span>
-          </label>
-          <label>
-            <span class="label-text">Focuser Max Position</span>
-            <input type="number" name="focuser_max"
-              value="{{ form_profile.focuser.position_max if form_profile and form_profile.focuser else '' }}"
-              placeholder="65535">
-            <span class="hint">Maximum focuser position</span>
-          </label>
+          <div class="full-width">
+            <div class="muted small" style="margin-bottom: 10px;">
+              ℹ️ Focuser limits are automatically detected from the ASCOM/ALPACA driver.
+            </div>
+          </div>
           <label class="checkbox-label">
             <input type="checkbox" name="mount_supports_parking" {% if form_profile and form_profile.mount and
               form_profile.mount.supports_parking %}checked{% endif %}>
@@ -234,10 +225,11 @@
             <span class="hint">e.g. Reflector, Refractor</span>
           </label>
           <label>
-            <span class="label-text">Aperture (m)</span>
-            <input type="number" step="0.01" name="telescope_aperture" value="{{ site_config.telescope_aperture }}"
-              placeholder="0.28">
-            <span class="hint">Primary mirror diameter in meters</span>
+            <span class="label-text">Aperture (mm)</span>
+            <input type="number" step="1" name="telescope_aperture"
+              value="{{ (site_config.telescope_aperture * 1000) | int if site_config.telescope_aperture else '' }}"
+              placeholder="280">
+            <span class="hint">Primary mirror diameter in millimeters</span>
           </label>
           <label>
             <span class="label-text">Detector Type</span>
