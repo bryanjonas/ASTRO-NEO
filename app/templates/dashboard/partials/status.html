@@ -79,6 +79,28 @@
             {% endif %}
           </span>
         </div>
+        <div class="health-item">
+          <span class="health-label">Weather</span>
+          <div class="health-value-row">
+            <span class="health-value">
+              {% if bundle.ignore_weather %}
+              <span class="dot warn"></span> Ignored
+              {% elif bundle.weather_summary and not bundle.weather_summary.is_safe %}
+              <span class="dot error"></span> Unsafe
+              {% else %}
+              <span class="dot good"></span> Safe
+              {% endif %}
+            </span>
+            <form hx-post="/dashboard/weather/override" hx-target="closest section" hx-swap="outerHTML"
+              style="display:inline-flex;">
+              <input type="hidden" name="ignore" value="{{ 'false' if bundle.ignore_weather else 'true' }}">
+              <button type="submit" class="ghost-tiny {{ 'warn' if bundle.ignore_weather }}"
+                title="{{ 'Disable Override' if bundle.ignore_weather else 'Enable Override' }}">
+                {{ 'WX Override: ON' if bundle.ignore_weather else 'WX Override' }}
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
 
       {% set blockers = bundle.bridge_blockers_filtered if bundle.bridge_blockers_filtered is defined else

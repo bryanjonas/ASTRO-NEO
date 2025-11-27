@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 
 from app.api.deps import get_db
 from app.models import SiteConfig
@@ -37,8 +37,35 @@ def list_sites(session: Session = Depends(get_db)) -> List[SiteConfig]:
     return session.exec(select(SiteConfig)).all()
 
 
+@router.post("/{site_id}/activate", response_model=SiteConfig)
+def activate_site(site_id: int, session: Session = Depends(get_db)) -> SiteConfig:
+    """Set a site as active, deactivating others."""
+    site = session.get(SiteConfig, site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    
+    # Deactivate all others
+    session.exec(update(SiteConfig).values(is_active=False))
+    
+    site.is_active = True
+    session.add(site)
+    session.commit()
+    session.refresh(site)
+    
+    # Trigger async horizon fetch for the newly active site
+    try:
+        from app.services.horizon import fetch_horizon_profile
+        import asyncio
+        asyncio.create_task(fetch_horizon_profile(site.latitude, site.longitude))
+    except Exception:
+        logger.error("Failed to trigger horizon fetch on activation", exc_info=True)
+        
+    return site
+
+
 @router.post("/", response_model=SiteConfig)
 async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) -> SiteConfig:
+    """Create or update a site configuration."""
     # Auto-configure Open-Meteo if not present
     if not config.weather_sensors:
         import json
@@ -46,8 +73,19 @@ async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) ->
 
     existing = session.exec(select(SiteConfig).where(SiteConfig.name == config.name)).first()
     if existing:
-        for field, value in config.model_dump(exclude_unset=True).items():
-            setattr(existing, field, value)
+        existing.latitude = config.latitude
+        existing.longitude = config.longitude
+        existing.altitude_m = config.altitude_m
+        existing.bortle = config.bortle
+        if config.weather_sensors:
+            existing.weather_sensors = config.weather_sensors
+        if config.equipment_profile:
+            existing.equipment_profile = config.equipment_profile
+            
+        # If setting as active, deactivate others
+        if config.is_active:
+             session.exec(update(SiteConfig).where(SiteConfig.id != existing.id).values(is_active=False))
+             
         session.add(existing)
         session.commit()
         session.refresh(existing)
@@ -59,28 +97,28 @@ async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) ->
             existing.horizon_mask_json = json.dumps(profile)
             session.add(existing)
             session.commit()
-            session.refresh(existing)
-        except Exception as e:
-            # Log but don't fail the request
+        except Exception:
             logger.error("Failed to auto-fetch horizon", exc_info=True)
-            
         return existing
 
-    # New site
+    # Create new
+    # If this is the first site or requested active, ensure others are inactive
+    if config.is_active or not session.exec(select(SiteConfig)).first():
+        config.is_active = True
+        session.exec(update(SiteConfig).values(is_active=False))
+        
     session.add(config)
     session.commit()
     session.refresh(config)
-    
-    # Trigger async horizon fetch for new site
+
+    # Trigger async horizon fetch
     try:
         from app.services.horizon import fetch_horizon_profile
-        import json
         profile = await fetch_horizon_profile(config.latitude, config.longitude)
         config.horizon_mask_json = json.dumps(profile)
         session.add(config)
         session.commit()
-        session.refresh(config)
-    except Exception as e:
+    except Exception:
         logger.error("Failed to auto-fetch horizon", exc_info=True)
 
     return config
@@ -96,7 +134,7 @@ def get_site(name: str, session: Session = Depends(get_db)) -> SiteConfig:
 
 @router.put("/{name}", response_model=SiteConfig)
 async def update_site(name: str, payload: SiteConfigPayload, session: Session = Depends(get_db)) -> SiteConfig:
-    """Update or create the site config."""
+    """Update a site configuration."""
     import json
     
     # Auto-configure Open-Meteo if not present in payload or existing
@@ -105,8 +143,19 @@ async def update_site(name: str, payload: SiteConfigPayload, session: Session = 
 
     record = session.exec(select(SiteConfig).where(SiteConfig.name == name)).first()
     if record:
-        for field, value in payload.model_dump(exclude_unset=True).items():
-            setattr(record, field, value)
+        if payload.latitude is not None:
+            record.latitude = payload.latitude
+        if payload.longitude is not None:
+            record.longitude = payload.longitude
+        if payload.altitude_m is not None:
+            record.altitude_m = payload.altitude_m
+        if payload.bortle is not None:
+            record.bortle = payload.bortle
+        if payload.weather_sensors is not None:
+            record.weather_sensors = payload.weather_sensors
+        if payload.equipment_profile is not None:
+            record.equipment_profile = payload.equipment_profile
+            
         session.add(record)
         session.commit()
         session.refresh(record)
@@ -118,29 +167,12 @@ async def update_site(name: str, payload: SiteConfigPayload, session: Session = 
             record.horizon_mask_json = json.dumps(profile)
             session.add(record)
             session.commit()
-            session.refresh(record)
-        except Exception as e:
+        except Exception:
             logger.error("Failed to auto-fetch horizon", exc_info=True)
-            
-        return record
-
-    model = SiteConfig(**payload.model_dump())
-    session.add(model)
-    session.commit()
-    session.refresh(model)
-    
-    # Trigger async horizon fetch
-    try:
-        from app.services.horizon import fetch_horizon_profile
-        profile = await fetch_horizon_profile(model.latitude, model.longitude)
-        model.horizon_mask_json = json.dumps(profile)
-        session.add(model)
-        session.commit()
-        session.refresh(model)
-    except Exception as e:
-        logger.error("Failed to auto-fetch horizon", exc_info=True)
         
-    return model
+        return record
+    
+    raise HTTPException(status_code=404, detail="Site not found")
 
 
 @router.post("/{name}/horizon/refresh", response_model=SiteConfig)

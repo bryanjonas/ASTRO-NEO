@@ -142,6 +142,15 @@ def dashboard_status() -> Any:
     bridge = NinaBridgeService()
     bridge_status = bridge.get_status()
     session_info = SESSION_STATE.current.to_dict() if SESSION_STATE.current else None
+    
+    # Fetch local weather status
+    from app.services.weather import WeatherService
+    from app.db.session import get_session
+    weather_summary = None
+    with get_session() as session:
+        weather_service = WeatherService(session)
+        weather_summary = weather_service.get_status()
+
     return {
         "bridge_blockers": bridge_status.get("blockers"),
         "bridge_ready": bridge_status.get("ready"),
@@ -149,4 +158,5 @@ def dashboard_status() -> Any:
         "ignore_weather": bridge_status.get("ignore_weather"),
         "session": session_info,
         "notifications": SESSION_STATE.log,
+        "weather_summary": weather_summary,
     }
