@@ -1,41 +1,42 @@
 <div class="panel-title">Observatory Configuration</div>
-<p class="panel-description">Fine‑tune the coordinates, sky quality, and environmental data that drive observability
-  scoring.</p>
-{% if saved %}<div class="pill good">Saved</div>{% endif %}
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<p class="panel-description">
+  Site configuration is managed via environment variables.
+</p>
 
 {% if site %}
 <div class="snapshot-grid">
+  <!-- Site Location Card -->
   <div class="snapshot-card">
-    <div class="snapshot-label">Site Coordinates</div>
+    <div class="snapshot-label">Site Location</div>
     <div class="snapshot-value">
       {{ "%.4f"|format(site.latitude) if site.latitude is not none else "—" }}° N /
       {{ "%.4f"|format(site.longitude) if site.longitude is not none else "—" }}° E
     </div>
-    <div class="snapshot-meta">Altitude {{ "%.0f"|format(site.altitude_m) if site.altitude_m is not none else "—" }} m
+    <div class="snapshot-meta">
+      Altitude {{ "%.0f"|format(site.altitude_m) if site.altitude_m is not none else "—" }} m
     </div>
   </div>
+
+  <!-- Sky Quality Card -->
   <div class="snapshot-card">
     <div class="snapshot-label">Sky Quality</div>
     <div class="snapshot-value">Bortle {{ site.bortle if site.bortle is not none else "—" }}</div>
     <div class="snapshot-meta">
-      {{ "Dark suburban skies" if site and site.bortle and site.bortle <= 5 else "Adjust for your SQM reading" }} </div>
+      {{ "Dark suburban skies" if site and site.bortle and site.bortle <= 5 else "Light polluted skies" }} </div>
     </div>
+
+    <!-- Weather & Horizon Card -->
     <div class="snapshot-card">
       <div class="snapshot-label">Weather & Horizon</div>
       {% if weather_summary %}
       <div class="weather-metrics">
         <span>{{ weather_summary.temperature_c if weather_summary.temperature_c is not none else "—" }}°C</span>
-        <span>
-          {{ weather_summary.wind_speed_mps if weather_summary.wind_speed_mps is not none else "—" }} m/s wind
-        </span>
-        <span>
-          {{ weather_summary.cloud_cover_pct if weather_summary.cloud_cover_pct is not none else "—" }}% clouds
-        </span>
-        <span>
-          {{ weather_summary.precipitation_probability_pct if weather_summary.precipitation_probability_pct is not none
-          else "—" }}% rain
-        </span>
+        <span>{{ weather_summary.wind_speed_mps if weather_summary.wind_speed_mps is not none else "—" }} m/s
+          wind</span>
+        <span>{{ weather_summary.cloud_cover_pct if weather_summary.cloud_cover_pct is not none else "—" }}%
+          clouds</span>
+        <span>{{ weather_summary.precipitation_probability_pct if weather_summary.precipitation_probability_pct is not
+          none else "—" }}% rain</span>
       </div>
       <div class="snapshot-meta">
         <span class="weather-pill {{ 'good' if weather_summary.is_safe else 'warn' }}">
@@ -61,138 +62,33 @@
       {% else %}
       <div class="snapshot-value">Weather feed unavailable</div>
       {% endif %}
-      <div class="snapshot-meta">
+
+      <div class="snapshot-meta" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;">
         Horizon {{ "loaded" if site.horizon_mask_json else "missing" }}
-      </div>
-      <div class="snapshot-meta">
-        {% if weather_sources %}
-        <div class="sensor-list compact">
-          {% for sensor in weather_sources %}
-          <span class="sensor-pill">
-            {{ sensor.get("name", "Unnamed sensor") }}
-            {% if sensor.get("type") %}<span class="sensor-meta">· {{ sensor.get("type") }}</span>{% endif %}
-          </span>
-          {% endfor %}
+        {% if site.horizon_mask_json %}
+        <div class="muted tiny">
+          {{ site.horizon_mask_json|length }} points from PVGIS
         </div>
-        {% else %}
-        No sensors configured
         {% endif %}
+      </div>
+
+      <div class="snapshot-meta" style="margin-top: 8px;">
+        <button type="button" class="btn-secondary small" hx-post="/site/{{ site.name }}/horizon/refresh"
+          hx-target="closest section" hx-swap="outerHTML">
+          🔄 Refresh Horizon
+        </button>
+      </div>
+
+      <div class="snapshot-meta" style="margin-top: 8px;">
+        <span class="sensor-pill">
+          Open-Meteo
+          <span class="sensor-meta">· Auto-configured</span>
+        </span>
       </div>
     </div>
   </div>
   {% else %}
   <div class="empty-state-small">
-    <div class="muted">No site details stored yet—fill out the form below.</div>
+    <div class="muted">No site details configured. Check your .env file.</div>
   </div>
   {% endif %}
-
-  <form hx-post="/dashboard/observatory/save" hx-target="closest section" hx-swap="innerHTML">
-
-    <!-- Location Section -->
-    <div class="form-section">
-      <div class="section-header">
-        <span class="section-icon">📍</span>
-        <span class="section-title">Site Location</span>
-      </div>
-      <p class="section-description">Precise coordinates keep altitude/azimuth conversions aligned with astroplan
-        predictions.</p>
-      <div class="form-grid three-col">
-        <label>
-          <span class="label-text">Latitude</span>
-          <input type="number" name="latitude" step="0.0001" value="{{ site.latitude if site else '' }}" required>
-          <span class="hint">Decimal degrees (N positive)</span>
-        </label>
-        <label>
-          <span class="label-text">Longitude</span>
-          <input type="number" name="longitude" step="0.0001" value="{{ site.longitude if site else '' }}" required>
-          <span class="hint">Decimal degrees (E positive)</span>
-        </label>
-        <label>
-          <span class="label-text">Altitude</span>
-          <input type="number" name="altitude_m" step="0.1" value="{{ site.altitude_m if site else '' }}" required>
-          <span class="hint">Meters above sea level</span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Sky Conditions Section -->
-    <div class="form-section">
-      <div class="section-header">
-        <span class="section-icon">🌌</span>
-        <span class="section-title">Sky Conditions</span>
-      </div>
-      <p class="section-description">Use your latest SQM or light-pollution reading so targets respect limiting
-        magnitude.</p>
-      <div class="form-grid">
-        <label>
-          <span class="label-text">Bortle Scale</span>
-          <input type="number" name="bortle" min="1" max="9" value="{{ site.bortle if site else '' }}">
-          <span class="hint">1 (darkest) to 9 (brightest) sky</span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Advanced Configuration Section -->
-    <!-- Advanced Configuration Section -->
-    <div class="form-section">
-      <div class="section-header">
-        <span class="section-icon">☁️</span>
-        <span class="section-title">Weather Configuration</span>
-      </div>
-      <p class="section-description">Weather data is automatically sourced from Open-Meteo based on your location.</p>
-      <div class="form-grid">
-        <div class="snapshot-meta">
-          <span class="sensor-pill">
-            Open-Meteo
-            <span class="sensor-meta">· Auto-configured</span>
-          </span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Horizon Configuration Section -->
-    <div class="form-section with-aside">
-      <div>
-        <div class="section-header">
-          <span class="section-icon">🏔️</span>
-          <span class="section-title">Horizon Configuration</span>
-        </div>
-        <p class="section-description">Horizon profile is automatically fetched from PVGIS based on your location.</p>
-
-        <div class="form-grid">
-          <div class="panel-actions" style="margin-bottom: 1rem;">
-            <button type="button" class="btn-secondary"
-              hx-post="/site/{{ site.name if site else 'default' }}/horizon/refresh" hx-target="closest section"
-              hx-swap="outerHTML" {% if not site or not site.latitude or not site.longitude %}disabled
-              title="Save coordinates first" {% endif %}>
-              🔄 Force Refresh Horizon
-            </button>
-          </div>
-
-          <div class="snapshot-meta">
-            Horizon Status: <strong>{{ "Loaded" if site and site.horizon_mask_json else "Pending" }}</strong>
-            {% if site and site.horizon_mask_json %}
-            <div class="muted tiny" style="margin-top: 4px;">
-              {{ site.horizon_mask_json|length }} points loaded
-            </div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
-
-      <div class="section-aside helper-card">
-        <div class="helper-title">Automatic Horizon Data</div>
-        <p>We use PVGIS data to automatically generate a horizon profile based on your coordinates.</p>
-        <ul class="helper-list">
-          <li><strong>Source:</strong> EU JRC PVGIS service.</li>
-          <li><strong>Update:</strong> Automatically updates when location changes.</li>
-        </ul>
-        <a href="https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/pvgis-tools/horizon-profile_en"
-          target="_blank" class="help-link">📊 Open PVGIS Horizon Tool</a>
-      </div>
-    </div>
-
-    <div class="actions">
-      <button type="submit" class="btn-primary">💾 Save Configuration</button>
-    </div>
-  </form>

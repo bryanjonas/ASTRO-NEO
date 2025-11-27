@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     site_latitude: float = 0.0
     site_longitude: float = 0.0
     site_altitude_m: float = 0.0
+    site_bortle: int | None = None
     site_config_path: str = "config/site.yml"
     neocp_html_url: str = "https://minorplanetcenter.net/iau/NEO/toconfirm_tabular.html"
     neocp_local_html: str = "/data/neocp_snapshots/toconfirm.html"
