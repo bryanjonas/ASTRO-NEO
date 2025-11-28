@@ -14,9 +14,8 @@ End-to-end orchestration stack for backyard NEOCP follow-up observations. This r
 - `alembic/` – Database migrations for the Postgres metadata store.
 - `documentation/` – Project documentation, including:
     - [Target Scoring & Scheduling](documentation/TARGET_SCORING.md) – Details on how targets are ranked and exposure presets selected.
-    - [Streamlining Report](documentation/STREAMLINE.md) – Maintenance log and design decisions.
     - [Quick Read](documentation/QUICK_READ.md) – High-level architectural summary.
-- `BUILD_NOTES.md` – Detailed design notes and backlog.
+
 
 ## Getting Started
 
@@ -188,7 +187,6 @@ docker compose run --rm api python scripts/nina_bridge_smoke.py
 
 ## Contributing
 
-- Follow the tasks/backlog in `BUILD_NOTES.md` (see "Proposed Build Order" and Running To-Do).
 - Run management commands through Docker only (no local Python environments).
 - Keep mock data and secrets out of git (`.gitignore` already excludes sensitive folders).
 
