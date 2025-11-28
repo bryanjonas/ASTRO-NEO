@@ -6,11 +6,11 @@ from typing import Any
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Form
 from pydantic import BaseModel, Field
 
 from app.services.automation import AutomationPlan, AutomationService
-from app.services.nina_bridge import NinaBridgeService
+from app.services.nina_client import NinaBridgeService
 from app.services.imaging import build_fits_path
 from app.services.session import SESSION_STATE
 
@@ -144,6 +144,19 @@ def telescope_slew(
     return bridge.slew(payload.ra_deg, payload.dec_deg)
 
 
+@router.get("/telescopes")
+def list_telescopes(bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
+    return bridge.list_telescopes()
+
+
+@router.post("/telescope/connect_device")
+def connect_telescope_device(
+    device_id: str = Form(...), bridge: NinaBridgeService = Depends(get_bridge)
+) -> Any:
+    SESSION_STATE.log_event(f"Connecting to telescope {device_id}", "info")
+    return bridge.connect_telescope(connect=True, device_id=device_id)
+
+
 @router.post("/focuser/move")
 def focuser_move(
     payload: FocuserMovePayload, bridge: NinaBridgeService = Depends(get_bridge)
@@ -174,6 +187,23 @@ def start_exposure(
     )
     SESSION_STATE.log_event(f"Starting exposure: {payload.exposure_seconds}s {payload.filter} bin={payload.binning}", "info")
     return {"expected_path": str(expected_path), "result": result}
+
+
+@router.get("/cameras")
+def list_cameras(bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
+    return bridge.list_cameras()
+
+
+class CameraConnectPayload(BaseModel):
+    device_id: str
+
+
+@router.post("/camera/connect")
+def connect_camera(
+    device_id: str = Form(...), bridge: NinaBridgeService = Depends(get_bridge)
+) -> Any:
+    SESSION_STATE.log_event(f"Connecting to camera {device_id}", "info")
+    return bridge.connect_camera(device_id)
 
 
 @router.post("/sequence/plan")
@@ -230,4 +260,7 @@ def automation_run(payload: AutomationPayload) -> Any:
         override_exposure_seconds=payload.exposure_seconds,
         override_count=payload.count,
     )
+    return automation.run_plan(plan)
+
+
     return automation.run_plan(plan)

@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.services.imaging import build_fits_path
-from app.services.nina_bridge import NinaBridgeService
+from app.services.nina_client import NinaBridgeService
 from app.services.session import SESSION_STATE
 from app.services.equipment import get_active_equipment_profile
 from app.services.presets import select_preset

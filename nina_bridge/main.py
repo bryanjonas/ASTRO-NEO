@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -229,6 +231,10 @@ async def bridge_status(
             },
             "sequence": {
                 "is_running": is_sequence_running,
+                # Extract name from sequence info if available
+                "name": sequence_info.get("Name") if isinstance(sequence_info, dict) else None,
+                "total": sequence_info.get("TotalItems") if isinstance(sequence_info, dict) else 0,
+                "current_index": sequence_info.get("CurrentItemIndex") if isinstance(sequence_info, dict) else 0,
             }
         }
         
@@ -341,10 +347,14 @@ async def weather_snapshot(force_refresh: bool = False) -> NinaResponse[dict[str
 
 @app.get(f"{API_PREFIX}/equipment/mount/connect")
 async def mount_connect(
+    to: str | None = Query(None, alias="to"),
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     _enforce_safety(action="mount_connect")
-    return await _forward_request(client, "GET", "/equipment/mount/connect")
+    params = {}
+    if to:
+        params["to"] = to
+    return await _forward_request(client, "GET", "/equipment/mount/connect", params=params)
 
 
 @app.get(f"{API_PREFIX}/equipment/mount/disconnect")
@@ -389,17 +399,84 @@ async def mount_set_tracking(
     return await _forward_request(client, "GET", "/equipment/mount/tracking", params={"mode": mode})
 
 
+@app.get(f"{API_PREFIX}/equipment/mount/list-devices")
+async def list_mount_devices(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    return await _forward_request(client, "GET", "/equipment/mount/list-devices")
+
+
 @app.get(f"{API_PREFIX}/equipment/camera/capture")
 async def camera_capture(
     duration: float = Query(..., alias="duration"),
     binning: int = Query(1, alias="binning"),
+    download: bool = Query(True, alias="download"),
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     _enforce_safety(action="camera_capture")
-    # First set binning
+    
+    # 1. Set binning
     await _forward_request(client, "GET", "/equipment/camera/set-binning", params={"binning": f"{binning}x{binning}"})
-    # Then capture (without binning arg)
-    return await _forward_request(client, "GET", "/equipment/camera/capture", params={"duration": duration})
+    
+    # 2. Prepare capture parameters
+    params = {
+        "duration": duration,
+        "save": "true", # Always tell NINA to save its own copy too
+    }
+    
+    if download:
+        params["stream"] = "true"
+        params["waitForResult"] = "true"
+    else:
+        params["omitImage"] = "true"
+        params["waitForResult"] = "false"
+
+    # 3. Execute capture
+    # We need to handle the response manually if downloading, as _forward_request expects JSON
+    if download:
+        logger.info("Starting capture with download: %s", params)
+        # We use the client directly here to handle binary response
+        try:
+            response = await client.get("/equipment/camera/capture", params=params, timeout=duration + 30.0)
+            response.raise_for_status()
+            
+            # Check content type
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type:
+                # NINA returned JSON, likely an error or metadata
+                return response.json()
+            
+            # It's an image! Save it.
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"capture_{timestamp}.fits" # Assuming FITS for now, NINA usually sends what you ask or default
+            # TODO: We might want to inspect headers or request specific format if NINA supports it via params
+            
+            save_dir = Path("/data/images")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            file_path = save_dir / filename
+            
+            with open(file_path, "wb") as f:
+                f.write(response.content)
+                
+            logger.info("Saved captured image to %s", file_path)
+            
+            return {
+                "Success": True,
+                "Message": "Image captured and downloaded",
+                "File": str(file_path),
+                "Type": "NINA_API"
+            }
+            
+        except httpx.TimeoutException:
+            logger.error("Capture timed out")
+            raise HTTPException(status_code=504, detail="Capture timed out")
+        except Exception as exc:
+            logger.error("Capture failed: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+            
+    else:
+        # Fire and forget (or wait for start)
+        return await _forward_request(client, "GET", "/equipment/camera/capture", params=params)
 
 
 @app.get(f"{API_PREFIX}/equipment/camera/abort-exposure")
@@ -440,8 +517,77 @@ async def dome_open(
     return await _forward_request(client, "GET", "/equipment/dome/open")
 
 
+@app.get(f"{API_PREFIX}/equipment/camera/list-devices")
+async def list_camera_devices(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    return await _forward_request(client, "GET", "/equipment/camera/list-devices")
+
+
+@app.get(f"{API_PREFIX}/equipment/camera/connect")
+async def camera_connect(
+    to: str | None = Query(None, alias="to"),
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    params = {}
+    if to:
+        params["to"] = to
+    return await _forward_request(client, "GET", "/equipment/camera/connect", params=params)
+
+
+@app.get(f"{API_PREFIX}/equipment/camera/disconnect")
+async def camera_disconnect(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    return await _forward_request(client, "GET", "/equipment/camera/disconnect")
+
+
+@app.put(f"{API_PREFIX}/telescope/center")
+async def telescope_center(
+    payload: dict[str, Any],
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    _enforce_safety(action="telescope_center")
+    # Payload should contain "ra" and "dec"
+    return await _forward_request(client, "PUT", "/telescope/center", json=payload)
+
+
 @app.get(f"{API_PREFIX}/equipment/dome/close")
 async def dome_close(
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     return await _forward_request(client, "GET", "/equipment/dome/close")
+
+
+from nina_bridge.sequence_builder import build_nina_sequence
+
+@app.post(f"{API_PREFIX}/sequence/start")
+async def sequence_start(
+    payload: dict[str, Any],
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    _enforce_safety(action="sequence_start")
+    
+    # 1. Build NINA-compatible sequence JSON
+    nina_sequence = build_nina_sequence(
+        name=payload.get("name", "Sequence"),
+        target=payload.get("target"),
+        count=payload.get("count", 1),
+        filter_name=payload.get("filter", "L"),
+        binning=payload.get("binning", 1),
+        exposure_seconds=payload.get("exposure_seconds", 1.0),
+        tracking_mode=payload.get("tracking_mode")
+    )
+    
+    # 2. Load the sequence (POST /sequence/load)
+    await _forward_request(client, "POST", "/sequence/load", json=nina_sequence)
+    
+    # 3. Start the sequence (GET /sequence/start)
+    return await _forward_request(client, "GET", "/sequence/start")
+
+
+@app.get(f"{API_PREFIX}/sequence/stop")
+async def sequence_stop(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    return await _forward_request(client, "GET", "/sequence/stop")

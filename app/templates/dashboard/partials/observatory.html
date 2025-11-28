@@ -148,6 +148,11 @@
             <input type="number" step="any" name="altitude_m" required
               value="{{ edit_site.altitude_m if edit_site else '' }}">
           </label>
+          <label>
+            <span class="label-text">Bortle Scale</span>
+            <input type="number" min="1" max="9" step="1" name="bortle"
+              value="{{ edit_site.bortle if edit_site and edit_site.bortle else '' }}" placeholder="1-9">
+          </label>
         </div>
       </div>
       <div class="section-aside helper-card">

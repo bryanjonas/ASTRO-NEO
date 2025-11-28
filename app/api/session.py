@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.nina_bridge import NinaBridgeService
+from app.services.nina_client import NinaBridgeService
 from app.services.night_ops import NightSessionError, kickoff_imaging
 from app.services.session import SESSION_STATE
 from datetime import datetime
@@ -73,7 +73,7 @@ def session_start(payload: SessionStartPayload | None = Body(None)) -> Any:
     try:
         automation = kickoff_imaging()
     except NightSessionError as exc:
-        SESSION_STATE.end()
+        SESSION_STATE.end(reason=exc.message)
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
     return {"active": True, "session": session.to_dict(), "automation": automation}
 
@@ -159,4 +159,30 @@ def dashboard_status() -> Any:
         "session": session_info,
         "notifications": SESSION_STATE.log,
         "weather_summary": weather_summary,
+        "target_available": _check_target_availability(),
     }
+
+
+def _check_target_availability() -> str | None:
+    from app.services.night_ops import _fetch_target_internal
+    try:
+        # Check availability ignoring the 'current time' constraint, 
+        # so the indicator reflects if there are ANY valid targets for the configured window.
+        target_now = _fetch_target_internal(ignore_time=False)
+        if target_now:
+            return "Available"
+            
+        target_any = _fetch_target_internal(ignore_time=True)
+        if target_any:
+            start_str = target_any.get("window_start", "").strftime("%H:%M") if target_any.get("window_start") else "window"
+            return f"Waiting for {start_str}"
+            
+        return "None (No observable targets)"
+    except Exception as exc:
+        # Extract message from exception if possible, or generic error
+        msg = str(exc)
+        if "No visible targets available" in msg:
+             return "None (No visible targets)"
+        if "No targets are currently observable" in msg:
+             return "None (Check window/weather)"
+        return "None (Error)"

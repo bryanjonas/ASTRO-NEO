@@ -151,10 +151,30 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 
 ## Phase 9 — Testing & Simulation
 
-- Maintain an offline dataset of NEOCP snapshots and ephemerides to drive regression tests and demos.
-- Provide simulators for NINA responses and telescope/mount behavior so automation can be tested without hardware.
-- Write integration tests that exercise the full pipeline (fetch → filter → schedule → report) using the simulators.
-- Add pre-night checklists and automated smoke tests to catch regressions before observing windows.
+- [ ] Maintain an offline dataset of NEOCP snapshots and ephemerides to drive regression tests and demos. (Directory `data/neocp_snapshots` exists but is currently empty.)
+- [x] Provide simulators for NINA responses and telescope/mount behavior so automation can be tested without hardware. (`mock_nina` service implemented but currently commented out in `docker-compose.yml`.)
+- [/] Write integration tests that exercise the full pipeline (fetch → filter → schedule → report) using the simulators. (`synthetic_neo_inject.py` provides partial pipeline testing (inject → solve → session), but full end-to-end integration suite is pending.)
+- [/] Add pre-night checklists and automated smoke tests to catch regressions before observing windows. (`nina_bridge_smoke.py` provides basic connectivity checks.)
+
+### Testing Strategy
+
+> **Fast Feedback Loop:** To avoid slow container rebuilds during development, run tests using a standard Python image with your local code mounted.
+
+**Recommended command:**
+```bash
+docker run --rm --network host -v $(pwd):/app -w /app python:3.11-slim sh -c "pip install -q httpx && python test_scripts/nina_bridge_smoke.py"
+```
+
+**Key benefits:**
+- **No rebuilds:** Uses the pre-pulled `python:3.11-slim` image.
+- **Live code:** Mounts your current directory (`$(pwd)`) so changes are tested immediately.
+- **Host networking:** `--network host` allows the test script to reach services running on `localhost` (like `nina-bridge` on port 1889).
+
+**Alternative (if images are fresh):**
+```bash
+docker compose run --rm api python test_scripts/nina_bridge_smoke.py
+```
+*Note: This may trigger a build if the image is missing or `pull_policy: build` is set.*
 
 ---
 
@@ -166,7 +186,7 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 - [x] Capture any regulatory or compliance requirements (data retention, backup).
 - [x] Define and implement container images + compose stack per service.
 - [x] Prototype the dashboard UI/UX (wireframes) before building frontend.
-- [x] Script nightly backups (Postgres dumps + /data mounts) and document restore procedures.
+- [x] Script nightly backups (Postgres dumps + /data mounts) and document restore procedures. (Backup scripts created in `ops/backup.sh`; cron container added to `docker-compose.yml`.)
 
 ### Reference Docs
 
@@ -175,6 +195,10 @@ All precise site details (coordinates, altitude, horizons, equipment identifiers
 - NINA REST + WebSocket API reference — https://nighttime-imaging-nina.readthedocs.io/en/latest/Advanced/RESTAPI/
 - MPC Observations API submission guide (`get-obs`, ADES/OBS80 formats) — https://data.minorplanetcenter.net/api/get-obs
 - ADES 2022 standard documentation — https://minorplanetcenter.net/iau/info/IAU2017ADESHandbook.pdf
+- ADES Documentation - ./documentation/ADES_Description.pdf
+- A Concise Description of the Astrometry Data Exchange Standard - ./documentation/ades_text.txt
+- NINA Advanced API Docs - ./documentation/advanced-api-openapi-source.json
+
 
 Add new questions or clarifications inline as they surface during development sessions.
 
@@ -311,3 +335,13 @@ Add new questions or clarifications inline as they surface during development se
     - Suppressed harmless `FITSFixedWarning` logs from `astropy` when loading header-only WCS.
     - Improved solver metric parsing to robustly capture RMS, SNR, and magnitude data from `solve-field` output.
     - Fixed duplicate capture logging and foreign key constraint issues during cleanup.
+
+---
+
+## Phase 11 — NINA Integration (Individual Exposures)
+
+- [x] **Architecture Pivot**: Shifted from complex NINA Sequence JSON construction to a robust "Individual Exposure" model. The system now manages the imaging cadence directly, issuing discrete slew and capture commands to NINA. This simplifies the bridge logic and provides finer-grained control over the NEOCP workflow (slew -> center -> capture N times -> solve).
+- [x] **Capture & Download**: Implemented `camera/capture` endpoint in `nina-bridge` with `download=True` support. This instructs NINA to stream the captured image back to the bridge, which saves it to a shared volume (`/data/images`) for immediate processing by the astrometry pipeline.
+- [x] **Direct Device Control**: Added `camera/connect`, `camera/disconnect`, and `telescope/center` endpoints to `nina-bridge` to support the new workflow.
+- [x] **Verification**: Validated the capture-and-download loop using `test_scripts/test_connect_capture.py` against the running `nina-bridge` container. Images are successfully retrieved and stored on the host.
+- [x] **Device Listing**: Implemented `camera/list-devices` to allow dynamic discovery of available cameras. Verified that it correctly proxies the list from NINA (or mock).

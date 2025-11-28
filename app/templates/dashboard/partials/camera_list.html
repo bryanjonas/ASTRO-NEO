@@ -1,0 +1,19 @@
+{% if cameras %}
+<div class="list-group">
+    {% for cam in cameras %}
+    <button class="list-group-item" hx-post="/api/bridge/camera/connect" hx-vals='{"device_id": "{{ cam.Id }}"}'
+        hx-swap="none"
+        @click="open = false; $dispatch('notify', {message: 'Connecting to {{ cam.Name }}...', level: 'info'})">
+        <div class="flex-row justify-between">
+            <span>{{ cam.Name }}</span>
+            {% if cam.Connected %}
+            <span class="badge success">Connected</span>
+            {% endif %}
+        </div>
+        <div class="muted tiny">{{ cam.DriverVersion }}</div>
+    </button>
+    {% endfor %}
+</div>
+{% else %}
+<div class="muted">No cameras found.</div>
+{% endif %}

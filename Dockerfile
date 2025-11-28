@@ -10,7 +10,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml BUILD_NOTES.md /app/
+COPY pyproject.toml README.md /app/
 
 # Create dummy app structure to allow installing dependencies
 # This ensures that changes to source code don't invalidate the dependency cache

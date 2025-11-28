@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.services.imaging import build_fits_path
-from app.services.nina_bridge import NinaBridgeService
+from app.services.nina_client import NinaBridgeService
 from app.services.notifications import NOTIFICATIONS
 
 if TYPE_CHECKING:  # pragma: no cover
