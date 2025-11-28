@@ -17,7 +17,14 @@
         <div class="panel-title">System Status</div>
         <div class="actions">
           {% if not session_active %}
-          <button class="btn-primary" hx-post="/dashboard/night/start" hx-target="closest section" hx-swap="outerHTML">
+          {% set weather_safe = bundle.ignore_weather or (bundle.weather_summary and bundle.weather_summary.is_safe) or
+          False %}
+          {% set system_ready = (not bundle.bridge_blockers) and telescope.get("is_connected") and
+          camera.get("is_connected") and weather_safe %}
+          <!-- DEBUG: Ready={{ system_ready }} Blockers={{ bundle.bridge_blockers }} Scope={{ telescope.get("is_connected") }} Cam={{ camera.get("is_connected") }} WX={{ weather_safe }} -->
+          <button class="btn-primary" hx-post="/dashboard/night/start" hx-target="closest section" hx-swap="outerHTML"
+            {% if not system_ready %}disabled style="opacity: 0.5; cursor: not-allowed;"
+            title="Ensure Bridge, Mount, Camera, and Weather are green" {% endif %}>
             ✨ Start Auto-Pilot
           </button>
           {% else %}
@@ -49,36 +56,33 @@
             {% endif %}
           </span>
         </div>
-        <div class="health-item">
-          <span class="health-label">Telescope</span>
+        <div class="health-item" style="cursor: pointer;" @click="$dispatch('open-mount-modal')"
+          title="Click to select mount">
+          <span class="health-label">Mount Select</span>
           <span class="health-value">
             {% if telescope and telescope.get("is_connected") %}
             <span class="dot good"></span> Connected
             {% else %}
-            <span class="dot error"></span> Disconnected
+            <span class="dot error"></span>
+            <span class="pulse-text">Select ▾</span>
             {% endif %}
           </span>
         </div>
-        <div class="health-item">
-          <span class="health-label">Camera</span>
+        <div class="health-item" style="cursor: pointer;" @click="$dispatch('open-camera-modal')"
+          title="Click to select camera">
+          <span class="health-label">Camera Select</span>
           <span class="health-value">
             {% if camera and camera.get("is_exposing") %}
-            <span class="dot good"></span> Exposing
+            <span class="dot warn"></span> Exposing
+            {% elif camera and camera.get("is_connected") %}
+            <span class="dot good"></span> Connected
             {% else %}
-            <span class="dot neutral"></span> Idle
+            <span class="dot error"></span>
+            <span class="pulse-text">Select ▾</span>
             {% endif %}
           </span>
         </div>
-        <div class="health-item">
-          <span class="health-label">Sequence</span>
-          <span class="health-value">
-            {% if sequence and sequence.get("is_running") %}
-            <span class="dot good"></span> Running
-            {% else %}
-            <span class="dot neutral"></span> Stopped
-            {% endif %}
-          </span>
-        </div>
+
         <div class="health-item">
           <span class="health-label">Weather</span>
           <div class="health-value-row">
@@ -87,8 +91,10 @@
               <span class="dot warn"></span> Ignored
               {% elif bundle.weather_summary and not bundle.weather_summary.is_safe %}
               <span class="dot error"></span> Unsafe
-              {% else %}
+              {% elif bundle.weather_summary and bundle.weather_summary.is_safe %}
               <span class="dot good"></span> Safe
+              {% else %}
+              <span class="dot warn"></span> No Data
               {% endif %}
             </span>
             <form hx-post="/dashboard/weather/override" hx-target="closest section" hx-swap="outerHTML"
@@ -100,6 +106,19 @@
               </button>
             </form>
           </div>
+        </div>
+
+        <div class="health-item">
+          <span class="health-label">Target</span>
+          <span class="health-value">
+            {% if bundle.target_available == "Available" %}
+            <span class="dot good"></span> Available
+            {% elif "Waiting" in (bundle.target_available or "") %}
+            <span class="dot warn"></span> {{ bundle.target_available }}
+            {% else %}
+            <span class="dot error"></span> {{ bundle.target_available or 'None' }}
+            {% endif %}
+          </span>
         </div>
       </div>
 
@@ -117,7 +136,7 @@
       <!-- Compact Telemetry -->
       <div class="telemetry-grid compact">
         <div class="telemetry-card">
-          <div class="telemetry-label">Target</div>
+          <div class="telemetry-label">Imaging Plan</div>
           <div class="telemetry-value large">
             {{ sequence.get("name") or (session.get("target") if session else None) or "—" }}
           </div>
@@ -127,6 +146,9 @@
             {% else %}
             No active plan
             {% endif %}
+          </div>
+          <div class="telemetry-meta">
+            {{ camera.get("last_exposure_duration") if camera and camera.get("last_exposure_duration") else "0" }}s Exp
           </div>
         </div>
 
@@ -142,16 +164,6 @@
           </div>
           <div class="telemetry-meta">
             {{ telescope.get("tracking_mode") if telescope and telescope.get("tracking_mode") else "Stopped" }}
-          </div>
-        </div>
-
-        <div class="telemetry-card">
-          <div class="telemetry-label">Last Image</div>
-          <div class="telemetry-value">
-            {{ camera.get("last_exposure_duration") if camera and camera.get("last_exposure_duration") else "0" }}s
-          </div>
-          <div class="telemetry-meta truncate">
-            {{ camera.get("last_image_path") | basename if camera and camera.get("last_image_path") else "—" }}
           </div>
         </div>
       </div>

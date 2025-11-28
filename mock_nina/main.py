@@ -130,6 +130,27 @@ async def status() -> NinaResponse[dict[str, Any]]:
 
 # --- Equipment / Mount ---
 
+@app.get(f"{API_PREFIX}/equipment/mount/info")
+async def mount_info() -> NinaResponse[dict]:
+    """Return mount status in NINA format."""
+    async with state_lock:
+        data = {
+            "Connected": STATE.telescope.is_connected,
+            "AtPark": STATE.telescope.is_parked,
+            "Slewing": STATE.telescope.is_slewing,
+            "RightAscension": STATE.telescope.ra_deg / 15.0,  # Hours
+            "Declination": STATE.telescope.dec_deg,
+            "Azimuth": 0.0,
+            "Altitude": 0.0,
+            "Coordinates": {
+                "RADegrees": STATE.telescope.ra_deg,
+                "Dec": STATE.telescope.dec_deg,
+            },
+            "TrackingMode": STATE.telescope.tracking_mode,
+        }
+    return _success(data)
+
+
 @app.get(f"{API_PREFIX}/equipment/mount/connect")
 async def mount_connect(to: Optional[str] = None) -> NinaResponse[str]:
     async with state_lock:
@@ -209,6 +230,17 @@ async def mount_set_tracking(mode: int) -> NinaResponse[str]:
 
 
 # --- Equipment / Camera ---
+
+@app.get(f"{API_PREFIX}/equipment/camera/info")
+async def camera_info() -> NinaResponse[dict]:
+    """Return camera status in NINA format."""
+    async with state_lock:
+        data = {
+            "Connected": True, # Always connected in mock
+            "Temperature": -10.0,
+            "IsExposing": STATE.camera.is_exposing,
+        }
+    return _success(data)
 
 @app.get(f"{API_PREFIX}/equipment/camera/connect")
 async def camera_connect(to: Optional[str] = None) -> NinaResponse[str]:
@@ -313,14 +345,36 @@ async def unhandled_exception_handler(request: Request, exc: Exception):  # type
 
 # --- Sequence ---
 
-@app.post(f"{API_PREFIX}/sequence/start")
-async def sequence_start(payload: dict[str, Any]) -> NinaResponse[str]:
+@app.get(f"{API_PREFIX}/sequence/json")
+async def sequence_json() -> NinaResponse[dict]:
+    """Return sequence status in NINA format."""
     async with state_lock:
-        STATE.sequence.is_running = True
+        data = {
+            "Name": STATE.sequence.name,
+            "IsRunning": STATE.sequence.is_running,
+            "TotalItems": STATE.sequence.total,
+            "CurrentItemIndex": STATE.sequence.current_index,
+        }
+    return _success(data)
+
+
+@app.post(f"{API_PREFIX}/sequence/load")
+async def sequence_load(payload: dict[str, Any]) -> NinaResponse[str]:
+    async with state_lock:
         STATE.sequence.name = payload.get("name")
         STATE.sequence.total = payload.get("count", 0)
         STATE.sequence.current_index = 0
-    logger.info("Sequence started: %s", payload)
+        # In real NINA, loading doesn't start it.
+        STATE.sequence.is_running = False
+    logger.info("Sequence loaded: %s", payload)
+    return _success("Sequence updated")
+
+
+@app.get(f"{API_PREFIX}/sequence/start")
+async def sequence_start() -> NinaResponse[str]:
+    async with state_lock:
+        STATE.sequence.is_running = True
+    logger.info("Sequence started")
     return _success("Sequence started")
 
 

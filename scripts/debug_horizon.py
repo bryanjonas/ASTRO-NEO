@@ -5,8 +5,8 @@ import json
 PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_2/printhorizon"
 
 async def fetch_horizon():
-    lat = 38.680661
-    lon = -77.132743
+    lat = 51.4769
+    lon = -0.0005
     params = {
         "lat": lat,
         "lon": lon,

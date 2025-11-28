@@ -7,7 +7,9 @@ from typing import Any
 
 import httpx
 
-BASE_URL = "http://localhost:1889/api"
+import os
+
+BASE_URL = os.getenv("NINA_BRIDGE_URL", "http://localhost:1889/api")
 
 
 def _get(client: httpx.Client, path: str) -> httpx.Response:

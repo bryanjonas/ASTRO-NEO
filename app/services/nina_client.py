@@ -43,9 +43,17 @@ class NinaBridgeService:
 
     # --- Mount ---
 
-    def connect_telescope(self, connect: bool) -> str:
+    def connect_telescope(self, connect: bool, device_id: str | None = None) -> str:
         endpoint = "/equipment/mount/connect" if connect else "/equipment/mount/disconnect"
-        return self._request("GET", endpoint)
+        params = {}
+        if connect and device_id:
+            params["to"] = device_id
+        return self._request("GET", endpoint, params=params)
+
+    def list_telescopes(self) -> list[dict[str, Any]]:
+        """List available telescope mounts."""
+        data = self._request("GET", "/equipment/mount/list-devices")
+        return data if isinstance(data, list) else []
 
     def park_telescope(self, park: bool) -> str:
         endpoint = "/equipment/mount/park" if park else "/equipment/mount/unpark"
@@ -65,6 +73,19 @@ class NinaBridgeService:
         return "Unknown"
 
     # --- Camera ---
+
+    def list_cameras(self) -> list[dict[str, Any]]:
+        """List available cameras."""
+        data = self._request("GET", "/equipment/camera/list-devices")
+        # NINA returns a list of devices
+        return data if isinstance(data, list) else []
+
+    def connect_camera(self, device_id: str | None = None) -> str:
+        """Connect to a specific camera."""
+        params = {}
+        if device_id:
+            params["to"] = device_id
+        return self._request("GET", "/equipment/camera/connect", params)
 
     def start_exposure(self, filter_name: str, binning: int, exposure_seconds: float | None = None) -> str:
         # Real NINA flow: Change Filter -> Capture

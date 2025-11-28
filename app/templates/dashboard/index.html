@@ -139,5 +139,14 @@
     </section>
 
   </main>
+
+  <!-- Modals -->
+  <div x-data="{ open: false }" @open-camera-modal.window="open = true">
+    {% include 'dashboard/partials/camera_modal.html' %}
+  </div>
+  <div x-data="{ openMount: false }" @open-mount-modal.window="openMount = true">
+    {% include 'dashboard/partials/mount_modal.html' %}
+  </div>
+
 </div>
 {% endblock %}

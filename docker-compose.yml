@@ -17,6 +17,7 @@ services:
     ports:
       - "18080:8000"
     volumes:
+      - ./app:/app/app
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
       - ./data:/data
@@ -54,15 +55,43 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
-  astrometry-worker:
-    build:
-      context: .
-      dockerfile: docker/astrometry.Dockerfile
-    pull_policy: build
-    environment:
-      ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
-      ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
-    volumes:
+  # cron:
+  #   image: postgres:15-alpine
+  #   container_name: astro-neo-cron
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - db
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - PGPASSWORD=${POSTGRES_PASSWORD:-astro}
+  #   volumes:
+  #     - ./ops:/ops
+  #     - ./data:/data
+  #   # Run a simple loop to execute backup every night at 09:00 UTC (adjust as needed)
+  #   # Or just sleep and let us exec into it.
+  #   # For a real cron, we'd need to install cron.
+  #   # Let's use a simple shell loop for MVP to avoid custom image build.
+  #   # Run backup immediately on start (for verification) then sleep 24h?
+  #   # Better: use a while loop checking time or just sleep.
+  #   # For this task, I'll implement a simple loop that runs backup every 24h.
+  #   command: >
+  #     sh -c "apk add --no-cache bash &&
+  #            while true; do
+  #              echo 'Running daily backup...';
+  #              /ops/backup.sh;
+  #              echo 'Sleeping for 24 hours...';
+  #              sleep 86400;
+  #            done"
+  # astrometry-worker:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/astrometry.Dockerfile
+  #   pull_policy: build
+  #   environment:
+  #     ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
+  #     ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
+  #   volumes:
       - ./data:/data
     ports:
       - "18100:8100"
@@ -78,7 +107,6 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      NINA_BRIDGE_NINA_BASE_URL: http://host.docker.internal:1888/v2/api
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["uvicorn", "nina_bridge.main:app", "--host", "0.0.0.0", "--port", "8001"]
@@ -86,8 +114,11 @@ services:
     ports:
       - "1889:8001"
     volumes:
+      - ./nina_bridge:/app/nina_bridge
+      - ./app:/app/app
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - ./data:/data
 #   mock-nina:
 #     build:
 #       context: .

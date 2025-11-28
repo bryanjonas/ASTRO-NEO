@@ -113,6 +113,8 @@ class ObservabilityService:
         self.weather_service = WeatherService(session, self.site_config)
         self.weather_summary: WeatherSummary | None = None
 
+        self.custom_start: datetime | None = None
+        self.custom_end: datetime | None = None
         self.time_grid = self._build_time_grid()
         datetime_grid = self.time_grid.to_datetime(timezone=timezone.utc)
         self.datetime_grid = [dt.replace(tzinfo=None, second=0, microsecond=0) for dt in datetime_grid]
@@ -122,6 +124,17 @@ class ObservabilityService:
         self.expected_samples = len(self.datetime_grid)
         self.sun_altitudes = self.observer.sun_altaz(self.time_grid).alt.deg
         self.recent_hours = settings.observability_recent_hours
+
+    def set_window(self, start: datetime, end: datetime) -> None:
+        """Override the default night window with a custom range."""
+        self.custom_start = start
+        self.custom_end = end
+        # Rebuild time grid for the new window
+        self.time_grid = self._build_time_grid()
+        datetime_grid = self.time_grid.to_datetime(timezone=timezone.utc)
+        self.datetime_grid = [dt.replace(tzinfo=None, second=0, microsecond=0) for dt in datetime_grid]
+        self.expected_samples = len(self.datetime_grid)
+        self.sun_altitudes = self.observer.sun_altaz(self.time_grid).alt.deg
 
     def refresh(self, trksubs: Sequence[str] | None = None) -> list[NeoObservability]:
         """Recompute observability for the requested (or all) MPC candidates."""
@@ -140,10 +153,15 @@ class ObservabilityService:
         return results
 
     def _build_time_grid(self) -> Time:
-        start_dt = datetime.utcnow().replace(second=0, microsecond=0)
+        if self.custom_start and self.custom_end:
+            start_dt = self.custom_start
+            duration_minutes = int((self.custom_end - self.custom_start).total_seconds() / 60)
+        else:
+            start_dt = datetime.utcnow().replace(second=0, microsecond=0)
+            duration_minutes = self.horizon_hours * 60
+            
         start = Time(start_dt, scale="utc")
-        total_minutes = self.horizon_hours * 60
-        offsets = np.arange(0, total_minutes + self.sample_minutes, self.sample_minutes)
+        offsets = np.arange(0, duration_minutes + self.sample_minutes, self.sample_minutes)
         return start + offsets * u.minute
 
     def _get_ephemeris_coordinates(

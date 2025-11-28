@@ -1,0 +1,13 @@
+<div class="modal-overlay" x-show="open" x-transition.opacity @click="open = false">
+  <div class="modal-card" @click.stop>
+    <div class="modal-header">
+      <h3>Select Camera</h3>
+      <button class="close-btn" @click="open = false">×</button>
+    </div>
+    <div class="modal-body">
+      <div hx-get="/dashboard/partials/camera_list" hx-trigger="intersect" hx-target="this" hx-swap="innerHTML">
+        <div class="muted">Loading cameras...</div>
+      </div>
+    </div>
+  </div>
+</div>

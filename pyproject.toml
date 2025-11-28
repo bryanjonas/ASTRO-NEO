@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "astro-neo"
 version = "0.1.0"
 description = "ASTRO-NEO orchestration services"
-readme = "BUILD_NOTES.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi~=0.115",

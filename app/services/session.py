@@ -78,6 +78,12 @@ class SessionState:
         self.master_calibrations: dict[str, str] = {}
         self.predicted: dict[str, dict[str, Any]] = {}
         self.log: list[dict[str, str]] = []
+        self.window_start: str | None = None
+        self.window_end: str | None = None
+
+    def set_window(self, start: str | None, end: str | None) -> None:
+        self.window_start = start
+        self.window_end = end
 
     def log_event(self, message: str, level: str = "info") -> None:
         """Add an event to the session log."""
@@ -114,13 +120,14 @@ class SessionState:
         self.log_event(f"Session started: {notes or 'No notes'}", "good")
         return session
 
-    def end(self) -> ObservingSession | None:
+    def end(self, reason: str | None = None) -> ObservingSession | None:
         if not self.current:
             return None
         session = self.current
         session.ended_at = datetime.utcnow()
         self.current = None
-        self.log_event("Session ended", "warn")
+        msg = f"Session ended: {reason}" if reason else "Session ended"
+        self.log_event(msg, "warn")
         return session
 
     def record_calibration(self, cal_type: str, count: int = 1) -> ObservingSession | None:

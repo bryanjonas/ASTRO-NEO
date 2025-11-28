@@ -4,7 +4,7 @@ import time
 import unittest
 from unittest.mock import MagicMock
 
-from app.services.nina_bridge import NinaBridgeService
+from app.services.nina_client import NinaBridgeService
 
 
 class TestNinaSmoke(unittest.TestCase):

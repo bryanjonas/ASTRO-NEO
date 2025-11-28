@@ -18,6 +18,8 @@ from PIL import Image
 from sqlmodel import Session, select, update
 from sqlalchemy import func
 
+from app.services.nina_client import NinaBridgeService
+
 from app.api.session import dashboard_status as session_dashboard_status
 from app.db.session import get_session
 from app.models import (
@@ -96,10 +98,25 @@ def dashboard_status_partial(request: Request) -> Any:
     return _render_status_panel(request)
 
 
+@router.get("/dashboard/partials/camera_list", response_class=HTMLResponse)
+def camera_list(request: Request) -> Any:
+    """Render list of available cameras."""
+    from app.services.nina_client import NinaBridgeService
+    bridge = NinaBridgeService()
+    try:
+        cameras = bridge.list_cameras()
+    except Exception:
+        cameras = []
+    return templates.TemplateResponse(
+        "dashboard/partials/camera_list.html",
+        {"request": request, "cameras": cameras},
+    )
+
+
 @router.post("/dashboard/weather/override", response_class=HTMLResponse)
 def weather_override(request: Request, ignore: bool = Form(...)) -> Any:
     """Toggle weather override."""
-    from app.services.nina_bridge import NinaBridgeService
+    from app.services.nina_client import NinaBridgeService
     bridge = NinaBridgeService()
     bridge.set_ignore_weather(ignore)
     return _render_status_panel(request)
@@ -173,6 +190,16 @@ def submissions_partial(request: Request) -> Any:
     )
 
 
+@router.get("/dashboard/partials/mount_list", response_class=HTMLResponse)
+def mount_list(request: Request) -> Any:
+    bridge = NinaBridgeService()
+    telescopes = bridge.list_telescopes()
+    return templates.TemplateResponse(
+        "dashboard/partials/mount_list.html",
+        {"request": request, "telescopes": telescopes},
+    )
+
+
 @router.get("/dashboard/partials/kpis", response_class=HTMLResponse)
 def kpis_partial(request: Request) -> Any:
     """Render KPI rollups (7-day window)."""
@@ -219,7 +246,7 @@ def observatory_partial(request: Request, edit_site_id: int | None = None) -> An
         weather_summary = weather_service.get_status()
     
     # Fetch bridge status to get ignore_weather flag
-    from app.services.nina_bridge import NinaBridgeService
+    from app.services.nina_client import NinaBridgeService
     bridge = NinaBridgeService()
     try:
         bridge_status = bridge.get_status()
@@ -285,6 +312,7 @@ def observatory_save(
     latitude: float = Form(...),
     longitude: float = Form(...),
     altitude_m: float = Form(...),
+    bortle: int | None = Form(None),
     activate: bool = Form(False),
     site_id: int | None = Form(None),
 ) -> Any:
@@ -304,6 +332,7 @@ def observatory_save(
                 existing.latitude = latitude
                 existing.longitude = longitude
                 existing.altitude_m = altitude_m
+                existing.bortle = bortle
                 
                 if activate:
                      session.exec(update(SiteConfig).where(SiteConfig.id != site_id).values(is_active=False))
@@ -323,6 +352,7 @@ def observatory_save(
                 latitude=latitude,
                 longitude=longitude,
                 altitude_m=altitude_m,
+                bortle=bortle,
                 telescope_design="Reflector", # Default
                 telescope_aperture=0.0,
                 telescope_detector="CCD",
@@ -462,13 +492,104 @@ def _load_targets(limit: int = 20) -> list[dict[str, Any]]:
     ]
 
 
+@router.post("/dashboard/targets/refresh", response_class=HTMLResponse)
+async def targets_refresh(
+    request: Request,
+    start_time: str | None = Form(None),
+    end_time: str | None = Form(None)
+) -> Any:
+    """Refresh targets with optional custom time window."""
+    from app.services.observability import ObservabilityService
+    from datetime import datetime, timedelta
+    
+    if start_time and end_time:
+        # Parse times (assuming today/tomorrow logic for crossing midnight)
+        now = datetime.utcnow()
+        try:
+            s_h, s_m = map(int, start_time.split(":"))
+            e_h, e_m = map(int, end_time.split(":"))
+            
+            start_dt = now.replace(hour=s_h, minute=s_m, second=0, microsecond=0)
+            end_dt = now.replace(hour=e_h, minute=e_m, second=0, microsecond=0)
+            
+            # If end is before start, assume it's tomorrow
+            if end_dt <= start_dt:
+                end_dt += timedelta(days=1)
+                
+            # If start is significantly in the past (e.g. > 12h), assume it's for tomorrow?
+            # Or if user sets 18:00 and it's currently 10:00, they mean tonight (future).
+            # If user sets 18:00 and it's currently 20:00, they mean tonight (past).
+            # Let's keep it simple: use the nearest future occurrence or just relative to now?
+            # Actually, standard practice: if time has passed today, maybe they mean tomorrow?
+            # But usually we want to plan for "tonight".
+            # Let's just use the calculated datetimes.
+            
+            with get_session() as session:
+                svc = ObservabilityService(session)
+                svc.set_window(start_dt, end_dt)
+                svc.refresh()
+                
+            # Persist to session state for UI stability
+            SESSION_STATE.set_window(start_time, end_time)
+            import logging
+            logging.getLogger("uvicorn").info(f"Persisted window: {start_time} - {end_time}")
+                
+        except ValueError as e:
+            import logging
+            logging.getLogger("uvicorn").error(f"Window update failed: {e}")
+            pass # Invalid format, ignore
+            
+    return _render_targets_partial(request, start_time=start_time, end_time=end_time)
+
+
+@router.get("/dashboard/partials/targets", response_class=HTMLResponse)
+def targets_partial(request: Request) -> Any:
+    """Render top observability-ranked targets."""
+    return _render_targets_partial(request)
+
+
 def _render_targets_partial(
     request: Request,
     targets: list[dict[str, Any]] | None = None,
     error: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
 ) -> HTMLResponse:
     if targets is None:
         targets = _load_targets()
+    
+    # Default times if not provided (e.g. current night window)
+    if not start_time:
+        start_time = SESSION_STATE.window_start or "18:00"
+    if not end_time:
+        end_time = SESSION_STATE.window_end or "06:00"
+
+    import logging
+    logging.getLogger("uvicorn").info(f"Rendering targets with window: {start_time} - {end_time} (Session: {SESSION_STATE.window_start}-{SESSION_STATE.window_end})")
+
+    active_preset = None
+    active_target_data = None
+    
+    # Determine which target is "active" (manual selection or top auto pick)
+    if SESSION_STATE.target_mode == "manual" and SESSION_STATE.selected_target:
+        active_target_data = next((t for t in targets if t["trksub"] == SESSION_STATE.selected_target), None)
+    elif targets:
+        active_target_data = targets[0]
+        
+    if active_target_data:
+        from app.services.presets import select_preset
+        from app.services.equipment import get_active_equipment_profile
+        
+        profile = get_active_equipment_profile()
+        score = active_target_data.get("score")
+        urgency = max(0.0, min(1.0, score / 100.0)) if score is not None else None
+        
+        active_preset = select_preset(
+            vmag=active_target_data.get("vmag"),
+            profile=profile,
+            urgency=urgency
+        )
+
     return templates.TemplateResponse(
         "dashboard/partials/targets.html",
         {
@@ -476,15 +597,12 @@ def _render_targets_partial(
             "targets": targets,
             "target_mode": SESSION_STATE.target_mode,
             "selected_target": SESSION_STATE.selected_target,
+            "active_preset": active_preset,
             "error": error,
+            "start_time": start_time,
+            "end_time": end_time,
         },
     )
-
-
-@router.get("/dashboard/partials/targets", response_class=HTMLResponse)
-def targets_partial(request: Request) -> Any:
-    """Render top observability-ranked targets."""
-    return _render_targets_partial(request)
 
 
 def _bridge_is_ready(bundle: dict[str, Any]) -> bool:
@@ -940,7 +1058,7 @@ def night_start(request: Request) -> Any:
     try:
         kickoff_imaging()
     except NightSessionError as exc:
-        SESSION_STATE.end()
+        SESSION_STATE.end(reason=exc.message)
         return _render_status_panel(
             request,
             status_banner={"kind": "warn", "text": exc.message},

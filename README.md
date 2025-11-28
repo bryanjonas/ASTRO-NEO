@@ -10,8 +10,12 @@ End-to-end orchestration stack for backyard NEOCP follow-up observations. This r
 
 - `app/` – FastAPI application exposing REST APIs (health, site config, future services).
 - `mock_nina/` – Standalone FastAPI service that emulates key NINA endpoints for telescope/camera control and writes dummy FITS files.
-- `scripts/` – Container-only utilities (NEOCP ingest CLI plus the MPC HTML snapshot).
+- `scripts/` – Container-only utilities and tests.
 - `alembic/` – Database migrations for the Postgres metadata store.
+- `documentation/` – Project documentation, including:
+    - [Target Scoring & Scheduling](documentation/TARGET_SCORING.md) – Details on how targets are ranked and exposure presets selected.
+    - [Streamlining Report](documentation/STREAMLINE.md) – Maintenance log and design decisions.
+    - [Quick Read](documentation/QUICK_READ.md) – High-level architectural summary.
 - `BUILD_NOTES.md` – Detailed design notes and backlog.
 
 ## Getting Started
@@ -43,7 +47,7 @@ The containers automatically apply Alembic migrations on startup (with retries u
 If you ever need to run migrations manually, you can still do so:
 
 ```bash
-docker compose run --rm api alembic upgrade head
+docker compose run --rm api python scripts/nina_bridge_smoke.py
 ```
 
 ### Management commands
@@ -51,7 +55,7 @@ docker compose run --rm api alembic upgrade head
 - Sync the live MPC NEOCP list into Postgres:
 
   ```bash
-  docker compose run --rm api python scripts/neocp_ingest.py
+  docker compose run --rm neocp-fetcher python -m app.services.neocp_fetcher --oneshot
   ```
 
   Pass `--local` to parse the local snapshot defined by `NEOCP_LOCAL_HTML` (defaults to `/data/neocp_snapshots/toconfirm.html`) instead of hitting the network.
@@ -175,9 +179,11 @@ docker compose run --rm api alembic upgrade head
 | Path | Description |
 | --- | --- |
 | `app/` | FastAPI app, models, API routers, services |
+| `nina_bridge/` | Standalone NINA Bridge service source code |
 | `mock_nina/` | Mock NINA FastAPI app + Dockerfile |
 | `alembic/` | Database migrations |
-| `scripts/` | Container-only utilities (NEOCP ingest CLI, MPC HTML snapshot) |
+| `scripts/` | Container-only utilities and tests |
+| `documentation/` | Architecture, scoring logic, and maintenance notes |
 | `docker-compose.yml` | Orchestrates API, Postgres, mock NINA |
 
 ## Contributing

@@ -9,7 +9,7 @@ from .equipment import (
     MountCapabilities,
     get_active_equipment_profile,
 )
-from .nina_bridge import NinaBridgeService
+from .nina_client import NinaBridgeService
 from .observability import ObservabilityService
 from .tracking import TrackingService
 from .weather import WeatherService, WeatherSummary
