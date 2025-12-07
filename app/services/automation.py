@@ -134,23 +134,8 @@ class AutomationService:
             )
         )
 
-        expected_paths: list[dict[str, Any]] = []
-        for idx in range(1, plan.count + 1):
-            path = build_fits_path(plan.target, started_at, sequence_name=plan.target, index=idx)
-            expected_paths.append({"index": idx, "path": str(path)})
-        SESSION_STATE.add_captures(
-            [
-                {
-                    "kind": "sequence",
-                    "target": plan.target,
-                    "sequence": plan.target,
-                    "index": entry["index"],
-                    "started_at": started_at.isoformat(),
-                    "path": entry["path"],
-                }
-                for entry in expected_paths
-            ]
-        )
+        # Start background monitor to detect when files actually arrive
+        threading.Thread(target=self._monitor_captures, args=(plan, started_at), daemon=True).start()
 
         if plan.park_after:
             total_duration = max(plan.exposure_seconds * plan.count + 30.0, 0.0)
@@ -159,9 +144,71 @@ class AutomationService:
         return {
             "target": plan.target,
             "started_at": started_at.isoformat(),
-            "expected_paths": expected_paths,
+            "expected_paths": [], # No longer predicting exact paths
             "park_after": plan.park_after,
         }
+
+    def _monitor_captures(self, plan: AutomationPlan, started_at: datetime) -> None:
+        """Poll for new FITS files matching the plan."""
+        from app.services.imaging import sanitize_target_name
+        from app.core.config import settings
+        from pathlib import Path
+        import time
+
+        safe_target = sanitize_target_name(plan.target)
+        
+        # Calculate NINA's "DateMinus12" logic (standard night folder)
+        # If hour < 12, it belongs to previous day
+        nina_date = started_at
+        if nina_date.hour < 12:
+            nina_date = nina_date - timedelta(days=1)
+        date_str = nina_date.strftime("%Y-%m-%d")
+        
+        # Search in /data/fits/<YYYY-MM-DD>/
+        # This assumes the user has mounted their NINA output to /data/fits
+        search_root = Path(settings.data_root) / "fits" / date_str
+        
+        required = plan.count
+        # Timeout: exposure time * count * 2.5 (safety factor) + 60s overhead
+        deadline = time.time() + (plan.count * max(10.0, plan.exposure_seconds) * 2.5) + 60
+        
+        found_paths = set()
+        logger.info(f"Automation: Monitoring {search_root} for {required} captures of {safe_target}...")
+        
+        while len(found_paths) < required and time.time() < deadline:
+            if search_root.exists():
+                # Recursive search for files containing the target name
+                # This handles patterns like:
+                # YYYY-MM-DD/Target/LIGHT/file.fits
+                # YYYY-MM-DD/LIGHT/Target_file.fits
+                for p in search_root.rglob(f"*{safe_target}*.fits"):
+                    try:
+                        stat = p.stat()
+                        # Check if file is new enough (allow 10s clock skew)
+                        if stat.st_mtime >= started_at.timestamp() - 10:
+                            if str(p) not in found_paths:
+                                # Simple stability check: wait for size to stabilize
+                                initial_size = stat.st_size
+                                time.sleep(1.0)
+                                if p.stat().st_size == initial_size and initial_size > 0:
+                                    found_paths.add(str(p))
+                                    SESSION_STATE.add_capture({
+                                        "kind": "sequence",
+                                        "target": plan.target,
+                                        "sequence": plan.target,
+                                        "index": len(found_paths),
+                                        "started_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                                        "path": str(p),
+                                    })
+                    except Exception as e:
+                        logger.warning(f"Error checking file {p}: {e}")
+            
+            time.sleep(2)
+            
+        if len(found_paths) < required:
+            logger.warning(f"Automation: Timed out. Found {len(found_paths)}/{required} captures for {plan.target}")
+        else:
+            logger.info(f"Automation: Successfully captured all {required} frames for {plan.target}")
 
     def _park_after(self, delay_seconds: float) -> None:
         logger.info("Automation: will park after %.1fs", delay_seconds)

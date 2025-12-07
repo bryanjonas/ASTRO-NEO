@@ -55,7 +55,7 @@
       <div class="stat-meta">
         <button type="button" class="ghost-small"
           hx-post="/dashboard/observatory/{{ active_site.name }}/refresh_horizon" hx-target="closest section"
-          hx-swap="outerHTML">
+          hx-swap="innerHTML">
           🔄 Refresh
         </button>
       </div>
@@ -82,7 +82,7 @@
         </div>
         <div class="muted tiny">{{ s.latitude | round(2) }}, {{ s.longitude | round(2) }}</div>
       </div>
-      <form hx-post="/dashboard/observatory/activate" hx-target="closest section" hx-swap="outerHTML"
+      <form hx-post="/dashboard/observatory/activate" hx-target="closest section" hx-swap="innerHTML"
         style="display:inline;">
         <input type="hidden" name="site_id" value="{{ s.id }}">
         <button type="submit" class="ghost-small" {% if s.is_active %}disabled{% endif %}>
@@ -90,12 +90,12 @@
         </button>
       </form>
       <button hx-get="/dashboard/partials/observatory?edit_site_id={{ s.id }}" hx-target="closest section"
-        hx-swap="outerHTML" class="ghost-small">
+        hx-swap="innerHTML" class="ghost-small">
         Edit
       </button>
       {% if not s.is_active %}
       <button hx-post="/dashboard/observatory/delete" hx-vals='{"site_id": {{ s.id }}}'
-        hx-confirm="Are you sure you want to delete this site?" hx-target="closest section" hx-swap="outerHTML"
+        hx-confirm="Are you sure you want to delete this site?" hx-target="closest section" hx-swap="innerHTML"
         class="ghost-small danger">
         Delete
       </button>
@@ -115,7 +115,7 @@
     {% if edit_site %}Edit Site: {{ edit_site.name }}{% else %}Add New Site{% endif %}
   </div>
 
-  <form hx-post="/dashboard/observatory/save" hx-target="closest section" hx-swap="outerHTML">
+  <form hx-post="/dashboard/observatory/save" hx-target="closest section" hx-swap="innerHTML">
     {% if edit_site %}
     <input type="hidden" name="site_id" value="{{ edit_site.id }}">
     {% endif %}
@@ -149,6 +149,15 @@
               value="{{ edit_site.altitude_m if edit_site else '' }}">
           </label>
           <label>
+            <span class="label-text">Timezone</span>
+            <select name="timezone" required class="input">
+              {% for tz in timezones %}
+              <option value="{{ tz }}" {% if edit_site and edit_site.timezone==tz %}selected{% elif not edit_site and
+                tz=='UTC' %}selected{% endif %}>{{ tz }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
             <span class="label-text">Bortle Scale</span>
             <input type="number" min="1" max="9" step="1" name="bortle"
               value="{{ edit_site.bortle if edit_site and edit_site.bortle else '' }}" placeholder="1-9">
@@ -172,7 +181,7 @@
       <div class="actions">
         <button type="submit" class="btn-primary">💾 Save Site</button>
         {% if edit_site %}
-        <button hx-get="/dashboard/partials/observatory" hx-target="closest section" hx-swap="outerHTML"
+        <button hx-get="/dashboard/partials/observatory" hx-target="closest section" hx-swap="innerHTML"
           class="btn-secondary">Cancel</button>
         {% endif %}
       </div>

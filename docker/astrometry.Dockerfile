@@ -15,7 +15,7 @@ WORKDIR /app
 
 ENV ASTROMETRY_INDEX_DIR=/data/indexes
 
-COPY pyproject.toml BUILD_NOTES.md /app/
+COPY pyproject.toml /app/
 # Create dummy app structure to allow installing dependencies
 RUN mkdir -p app && touch app/__init__.py
 

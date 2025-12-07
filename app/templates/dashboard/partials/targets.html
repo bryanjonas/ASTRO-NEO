@@ -1,65 +1,71 @@
 {% set manual_mode = target_mode == 'manual' %}
 {% set best_target = targets|first if targets else None %}
 
-<div class="panel-title">
-  Targets
-  {% if best_target and best_target.is_observable %}
-  <span class="status-dot good" title="Target available"></span>
-  {% else %}
-  <span class="status-dot warn" title="No targets available"></span>
-  {% endif %}
-</div>
-<p class="panel-description">Let automation chase the top-ranked object.</p>
+<div id="targets-content">
+  <div class="panel-title">
+    Targets
+    {% if best_target and best_target.is_observable %}
+    <span class="status-dot good" title="Target available"></span>
+    {% else %}
+    <span class="status-dot warn" title="No targets available"></span>
+    {% endif %}
+  </div>
+  <p class="panel-description">Let automation chase the top-ranked object.</p>
 
-<div class="targets-controls" style="margin-bottom: 1rem; gap: 0.5rem; align-items: center;">
-  <form hx-post="/dashboard/targets/refresh" hx-target="closest section" hx-swap="innerHTML"
-    style="display: flex; gap: 0.5rem; align-items: center;">
-    <label class="tiny">Start: <input type="time" name="start_time" value="{{ start_time }}" class="input-tiny"></label>
-    <label class="tiny">End: <input type="time" name="end_time" value="{{ end_time }}" class="input-tiny"></label>
-    <button type="submit" class="ghost-small">Update Window</button>
-  </form>
-</div>
+  <div class="targets-controls" style="margin-bottom: 1rem; gap: 0.5rem; align-items: center;">
+    <form hx-post="/dashboard/targets/refresh" hx-target="#targets-content" hx-swap="outerHTML"
+      style="display: flex; gap: 0.5rem; align-items: center;">
+      <label class="tiny">Start: <input type="time" name="start_time" value="{{ start_time }}"
+          class="input-tiny"></label>
+      <label class="tiny">End: <input type="time" name="end_time" value="{{ end_time }}" class="input-tiny"></label>
+      <button type="submit" class="ghost-small">Update Window</button>
+      <button hx-post="/dashboard/targets/refresh" hx-include="closest form" hx-target="#targets-content"
+        hx-swap="outerHTML" class="ghost-small" title="Re-run target selection logic">Refresh</button>
+    </form>
+  </div>
 
-{% if best_target %}
-<div class="status-banner info">
-  Automation will image {{ best_target.trksub }} first
-  {% if best_target.score is not none %}(score {{ '%.1f'|format(best_target.score) }}){% endif %}.
-  {% if active_preset %}
-  <div class="tiny" style="margin-top: 0.25rem; opacity: 0.9;">
-    <strong>Plan:</strong> {{ active_preset.count }}x {{ active_preset.exposure_seconds }}s {{ active_preset.filter }}
-    (Bin {{ active_preset.binning }})
-    <span class="muted">— {{ active_preset.name|title }} preset</span>
+  {% if active_target %}
+  <div class="status-banner info">
+    Automation will image {{ active_target.trksub }} first
+    {% if active_target.score is not none %}(score {{ '%.1f'|format(active_target.score) }}){% endif %}.
+    {% if active_preset %}
+    <div class="tiny" style="margin-top: 0.25rem; opacity: 0.9;">
+      <strong>Plan:</strong> {{ active_preset.count }}x {{ active_preset.exposure_seconds }}s {{ active_preset.filter }}
+      (Bin {{ active_preset.binning }})
+      <span class="muted">— {{ active_preset.name|title }} preset</span>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
+
+
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if targets %}
+  <ul class="target-list">
+    {% for t in targets %}
+    <li class="target-item">
+      <div class="target-main">
+        <div>
+          <span class="pill {% if t.is_observable %}good{% else %}warn{% endif %}">{{ 'visible' if t.is_observable else
+            'blocked' }}</span>
+          <strong>{{ t.trksub }}</strong>
+          {% if t.vmag %}<span class="muted">V {{ '%.1f'|format(t.vmag) }}</span>{% endif %}
+          {% if t.score is not none %}<span class="muted">Score {{ '%.1f'|format(t.score) }}</span>{% endif %}
+        </div>
+        <div class="muted tiny">
+          {% if t.duration_minutes %}Window {{ '%.0f'|format(t.duration_minutes) }} min ·{% endif %}
+          {% if t.max_altitude_deg %} Max alt {{ '%.1f'|format(t.max_altitude_deg) }}° ·{% endif %}
+          {% if t.min_moon_separation_deg %} Moon sep {{ '%.0f'|format(t.min_moon_separation_deg) }}°{% endif %}
+        </div>
+        {% if t.window_start %}
+        <div class="muted tiny">Visibility {{ t.window_start | to_local(timezone) }} → {{ t.window_end |
+          to_local(timezone) }}</div>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="muted">No observability results yet. Run /api/observability/refresh.</div>
+  {% endif %}
 </div>
-{% endif %}
-
-
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-{% if targets %}
-<ul class="target-list">
-  {% for t in targets %}
-  <li class="target-item">
-    <div class="target-main">
-      <div>
-        <span class="pill {% if t.is_observable %}good{% else %}warn{% endif %}">{{ 'visible' if t.is_observable else
-          'blocked' }}</span>
-        <strong>{{ t.trksub }}</strong>
-        {% if t.vmag %}<span class="muted">V {{ '%.1f'|format(t.vmag) }}</span>{% endif %}
-        {% if t.score is not none %}<span class="muted">Score {{ '%.1f'|format(t.score) }}</span>{% endif %}
-      </div>
-      <div class="muted tiny">
-        {% if t.duration_minutes %}Window {{ '%.0f'|format(t.duration_minutes) }} min ·{% endif %}
-        {% if t.max_altitude_deg %} Max alt {{ '%.1f'|format(t.max_altitude_deg) }}° ·{% endif %}
-        {% if t.min_moon_separation_deg %} Moon sep {{ '%.0f'|format(t.min_moon_separation_deg) }}°{% endif %}
-      </div>
-      {% if t.window_start %}
-      <div class="muted tiny">Visibility {{ t.window_start }} → {{ t.window_end }}</div>
-      {% endif %}
-    </div>
-  </li>
-  {% endfor %}
-</ul>
-{% else %}
-<div class="muted">No observability results yet. Run /api/observability/refresh.</div>
-{% endif %}

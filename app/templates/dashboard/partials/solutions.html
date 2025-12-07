@@ -2,54 +2,54 @@
 {% if solver_activity %}<div class="status-banner info">{{ solver_activity }}</div>{% endif %}
 
 {% if targets %}
-  <form class="targets-controls" hx-get="/dashboard/partials/solutions" hx-target="closest section" hx-swap="outerHTML">
-    <label class="muted tiny">Select target</label>
-    <select name="target" onchange="this.form.submit()">
-      {% for t in targets %}
-        <option value="{{ t.name }}" {% if t.name == selected_target %}selected{% endif %}>
-          {{ t.name }} ({{ t.count }})
-        </option>
-      {% endfor %}
-    </select>
-  </form>
+<form class="targets-controls" hx-get="/dashboard/partials/solutions" hx-target="closest section" hx-swap="outerHTML">
+  <label class="muted tiny">Select target</label>
+  <select name="target" onchange="this.form.submit()">
+    {% for t in targets %}
+    <option value="{{ t.name }}" {% if t.name==selected_target %}selected{% endif %}>
+      {{ t.name }} ({{ t.count }})
+    </option>
+    {% endfor %}
+  </select>
+</form>
 {% endif %}
 
 {% if captures %}
-  <table class="solver-table">
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Started</th>
-        <th>Status</th>
-        <th>RA</th>
-        <th>Dec</th>
-        <th>RMS (")</th>
-        <th>SNR</th>
-        <th>Mag</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for cap in captures %}
-        {% set sol = solutions_map.get(cap.id) if solutions_map else None %}
-        <tr>
-          <td>{{ cap.index or '-' }}</td>
-          <td>{{ cap.started_at }}</td>
-          <td>
-            {% if sol %}
-              <span class="pill {{ 'good' if sol.success else 'warn' }}">{{ 'solved' if sol.success else 'failed' }}</span>
-            {% else %}
-              <span class="pill warn">pending</span>
-            {% endif %}
-          </td>
-          <td>{{ '%.4f'|format(sol.ra_deg) if sol and sol.ra_deg is not none else '—' }}</td>
-          <td>{{ '%.4f'|format(sol.dec_deg) if sol and sol.dec_deg is not none else '—' }}</td>
-          <td>{{ '%.2f'|format(sol.uncertainty_arcsec) if sol and sol.uncertainty_arcsec is not none else '—' }}</td>
-          <td>{{ '%.1f'|format(sol.snr) if sol and sol.snr is not none else '—' }}</td>
-          <td>{{ '%.2f'|format(sol.mag_inst) if sol and sol.mag_inst is not none else '—' }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<table class="solver-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Started</th>
+      <th>Status</th>
+      <th>RA</th>
+      <th>Dec</th>
+      <th>RMS (")</th>
+      <th>SNR</th>
+      <th>Mag</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for cap in captures %}
+    {% set sol = solutions_map.get(cap.id) if solutions_map else None %}
+    <tr>
+      <td>{{ cap.index or '-' }}</td>
+      <td>{{ cap.started_at | to_local(timezone) }}</td>
+      <td>
+        {% if sol %}
+        <span class="pill {{ 'good' if sol.success else 'warn' }}">{{ 'solved' if sol.success else 'failed' }}</span>
+        {% else %}
+        <span class="pill warn">pending</span>
+        {% endif %}
+      </td>
+      <td>{{ '%.4f'|format(sol.ra_deg) if sol and sol.ra_deg is not none else '—' }}</td>
+      <td>{{ '%.4f'|format(sol.dec_deg) if sol and sol.dec_deg is not none else '—' }}</td>
+      <td>{{ '%.2f'|format(sol.uncertainty_arcsec) if sol and sol.uncertainty_arcsec is not none else '—' }}</td>
+      <td>{{ '%.1f'|format(sol.snr) if sol and sol.snr is not none else '—' }}</td>
+      <td>{{ '%.2f'|format(sol.mag_inst) if sol and sol.mag_inst is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
 {% else %}
-  <div class="muted">No captures found for this target.</div>
+<div class="muted">No captures found for this target.</div>
 {% endif %}

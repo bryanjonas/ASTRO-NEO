@@ -21,6 +21,10 @@ services:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
       - ./data:/data
+      # Mount NINA's Documents folder (adjust host path as needed)
+      - ${NINA_IMAGES_PATH:-./data/fits}:/data/fits
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
   neocp-fetcher:
     build:
       context: .
@@ -39,6 +43,8 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
   observability-engine:
     build:
       context: .
@@ -55,6 +61,8 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
   # cron:
   #   image: postgres:15-alpine
   #   container_name: astro-neo-cron
@@ -68,6 +76,8 @@ services:
   #   volumes:
   #     - ./ops:/ops
   #     - ./data:/data
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /etc/timezone:/etc/timezone:ro
   #   # Run a simple loop to execute backup every night at 09:00 UTC (adjust as needed)
   #   # Or just sleep and let us exec into it.
   #   # For a real cron, we'd need to install cron.
@@ -83,16 +93,18 @@ services:
   #              echo 'Sleeping for 24 hours...';
   #              sleep 86400;
   #            done"
-  # astrometry-worker:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/astrometry.Dockerfile
-  #   pull_policy: build
-  #   environment:
-  #     ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
-  #     ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
-  #   volumes:
+  astrometry-worker:
+    build:
+      context: .
+      dockerfile: docker/astrometry.Dockerfile
+    pull_policy: build
+    environment:
+      ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
+      ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
+    volumes:
       - ./data:/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     ports:
       - "18100:8100"
   nina-bridge:
@@ -119,6 +131,8 @@ services:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
       - ./data:/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
 #   mock-nina:
 #     build:
 #       context: .
@@ -143,6 +157,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
 
 volumes:
   postgres_data:

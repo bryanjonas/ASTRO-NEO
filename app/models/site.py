@@ -28,3 +28,4 @@ class SiteConfig(SQLModel, table=True):
     telescope_design: str = Field(default="Reflector", description="Telescope design (e.g. Reflector, Refractor)")
     telescope_aperture: float = Field(default=0.0, description="Aperture in meters")
     telescope_detector: str = Field(default="CCD", description="Detector type (e.g. CCD, CMOS)")
+    timezone: str = Field(default="UTC", max_length=64, description="IANA timezone identifier (e.g. America/Los_Angeles)")

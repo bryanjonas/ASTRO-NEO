@@ -69,6 +69,7 @@ def _render_status_panel(
     status_banner: dict[str, str] | None = None,
     status_code: int = 200,
     bundle: dict | None = None,
+    oob: bool = False,
 ) -> HTMLResponse:
     bundle = bundle or session_dashboard_status()
     raw_blockers = bundle.get("bridge_blockers") or []
@@ -87,6 +88,8 @@ def _render_status_panel(
             "request": request,
             "bundle": bundle,
             "status_banner": status_banner,
+            "oob": oob,
+            "timezone": SESSION_STATE.timezone,
         },
         status_code=status_code,
     )
@@ -95,6 +98,8 @@ def _render_status_panel(
 @router.get("/dashboard/partials/status", response_class=HTMLResponse)
 def dashboard_status_partial(request: Request) -> Any:
     """HTMX-friendly status bundle."""
+    import logging
+    logging.getLogger("uvicorn").info("Overview status update requested")
     return _render_status_panel(request)
 
 
@@ -128,7 +133,7 @@ def captures_partial(request: Request) -> Any:
     captures = SESSION_STATE.current.captures if SESSION_STATE.current else []
     return templates.TemplateResponse(
         "dashboard/partials/captures.html",
-        {"request": request, "captures": captures},
+        {"request": request, "captures": captures, "timezone": SESSION_STATE.timezone},
     )
 
 
@@ -174,6 +179,7 @@ def solutions_partial(request: Request) -> Any:
             "captures": captures,
             "solutions_map": solutions_map,
             "solver_activity": solver_activity,
+            "timezone": SESSION_STATE.timezone,
         },
     )
 
@@ -186,7 +192,7 @@ def submissions_partial(request: Request) -> Any:
         submissions = session.exec(stmt).all()
     return templates.TemplateResponse(
         "dashboard/partials/submissions.html",
-        {"request": request, "submissions": submissions},
+        {"request": request, "submissions": submissions, "timezone": SESSION_STATE.timezone},
     )
 
 
@@ -215,6 +221,9 @@ def kpis_partial(request: Request) -> Any:
 def observatory_partial(request: Request, edit_site_id: int | None = None) -> Any:
     """Render site config snapshot."""
     from app.core.site_config import db_site_to_file_config
+    import zoneinfo
+    
+    timezones = sorted(list(zoneinfo.available_timezones()))
     
     with get_session() as session:
         sites = session.exec(select(SiteConfig).order_by(SiteConfig.name)).all()
@@ -233,8 +242,6 @@ def observatory_partial(request: Request, edit_site_id: int | None = None) -> An
             pass
         elif active_site:
             # Default to showing active site details if not editing another
-            # But for the "Edit" form, we might want to be explicit.
-            # Let's say if no edit_site_id is passed, we just show the list and active details.
             pass
 
         # Use active site for weather/horizon context
@@ -280,6 +287,7 @@ def observatory_partial(request: Request, edit_site_id: int | None = None) -> An
             "weather_sources": weather_sources,
             "weather_summary": formatted_weather,
             "ignore_weather": ignore_weather,
+            "timezones": timezones,
         },
     )
 
@@ -306,12 +314,13 @@ def observatory_delete(request: Request, site_id: int = Form(...)) -> Any:
 
 
 @router.post("/dashboard/observatory/save", response_class=HTMLResponse)
-def observatory_save(
+async def observatory_save(
     request: Request,
     name: str = Form(...),
     latitude: float = Form(...),
     longitude: float = Form(...),
     altitude_m: float = Form(...),
+    timezone: str = Form(...),
     bortle: int | None = Form(None),
     activate: bool = Form(False),
     site_id: int | None = Form(None),
@@ -319,9 +328,6 @@ def observatory_save(
     """Save or update a site profile."""
     from app.api.site import upsert_site
     from app.models import SiteConfig
-    
-    # We no longer take telescope details from this form
-    # Defaulting to generic values if creating new, or keeping existing if updating
     
     with get_session() as session:
         if site_id:
@@ -332,6 +338,7 @@ def observatory_save(
                 existing.latitude = latitude
                 existing.longitude = longitude
                 existing.altitude_m = altitude_m
+                existing.timezone = timezone
                 existing.bortle = bortle
                 
                 if activate:
@@ -352,6 +359,7 @@ def observatory_save(
                 latitude=latitude,
                 longitude=longitude,
                 altitude_m=altitude_m,
+                timezone=timezone,
                 bortle=bortle,
                 telescope_design="Reflector", # Default
                 telescope_aperture=0.0,
@@ -360,8 +368,7 @@ def observatory_save(
             )
             
             # Use upsert logic
-            import asyncio
-            asyncio.run(upsert_site(payload, session))
+            await upsert_site(payload, session)
 
     return observatory_partial(request)
 
@@ -468,16 +475,43 @@ def equipment_partial(request: Request, edit_profile_id: int | None = None) -> A
 
 
 def _load_targets(limit: int = 20) -> list[dict[str, Any]]:
+    imaged_targets = set()
+    if SESSION_STATE.current:
+        for cap in SESSION_STATE.current.captures:
+            t = cap.get("target")
+            if t:
+                imaged_targets.add(t)
+
+    # Ensure the currently selected target is NOT filtered out, even if it has captures
+    current_target = SESSION_STATE.selected_target
+    if current_target and current_target in imaged_targets:
+        imaged_targets.remove(current_target)
+
     with get_session() as session:
         stmt = (
             select(NeoObservability, NeoCandidate)
             .join(NeoCandidate, NeoCandidate.id == NeoObservability.candidate_id)
-            .order_by(NeoObservability.score.desc())
+            .order_by(NeoObservability.score.desc(), NeoCandidate.updated_at.desc())
             .limit(limit)
         )
         rows = session.exec(stmt).all()
-    return [
-        {
+    
+    from datetime import datetime
+    now = datetime.utcnow()
+    
+    results = []
+    for obs, cand in rows:
+        # Filter out imaged targets
+        if obs.trksub in imaged_targets:
+            continue
+            
+        # Filter out targets that have already set (window end in past),
+        # UNLESS it is the currently selected target (we might be finishing a run)
+        if obs.window_end and obs.window_end <= now:
+             if obs.trksub != SESSION_STATE.selected_target:
+                 continue
+
+        results.append({
             "trksub": obs.trksub,
             "score": obs.score,
             "is_observable": obs.is_observable,
@@ -487,9 +521,8 @@ def _load_targets(limit: int = 20) -> list[dict[str, Any]]:
             "max_altitude_deg": obs.max_altitude_deg,
             "min_moon_separation_deg": obs.min_moon_separation_deg,
             "vmag": cand.vmag,
-        }
-        for obs, cand in rows
-    ]
+        })
+    return results
 
 
 @router.post("/dashboard/targets/refresh", response_class=HTMLResponse)
@@ -500,29 +533,41 @@ async def targets_refresh(
 ) -> Any:
     """Refresh targets with optional custom time window."""
     from app.services.observability import ObservabilityService
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone, time as dt_time
+    import zoneinfo
     
     if start_time and end_time:
-        # Parse times (assuming today/tomorrow logic for crossing midnight)
-        now = datetime.utcnow()
         try:
+            # Get local timezone
+            tz_name = SESSION_STATE.timezone
+            try:
+                tz = zoneinfo.ZoneInfo(tz_name)
+            except Exception:
+                tz = timezone.utc
+
+            now_utc = datetime.now(timezone.utc)
+            now_local = now_utc.astimezone(tz)
+            
+            # Determine reference date (the "start" of the night)
+            # If it's before noon, we assume the night started yesterday.
+            if now_local.hour < 12:
+                reference_date = now_local.date() - timedelta(days=1)
+            else:
+                reference_date = now_local.date()
+
             s_h, s_m = map(int, start_time.split(":"))
             e_h, e_m = map(int, end_time.split(":"))
             
-            start_dt = now.replace(hour=s_h, minute=s_m, second=0, microsecond=0)
-            end_dt = now.replace(hour=e_h, minute=e_m, second=0, microsecond=0)
+            start_local = datetime.combine(reference_date, dt_time(s_h, s_m), tzinfo=tz)
+            end_local = datetime.combine(reference_date, dt_time(e_h, e_m), tzinfo=tz)
             
-            # If end is before start, assume it's tomorrow
-            if end_dt <= start_dt:
-                end_dt += timedelta(days=1)
-                
-            # If start is significantly in the past (e.g. > 12h), assume it's for tomorrow?
-            # Or if user sets 18:00 and it's currently 10:00, they mean tonight (future).
-            # If user sets 18:00 and it's currently 20:00, they mean tonight (past).
-            # Let's keep it simple: use the nearest future occurrence or just relative to now?
-            # Actually, standard practice: if time has passed today, maybe they mean tomorrow?
-            # But usually we want to plan for "tonight".
-            # Let's just use the calculated datetimes.
+            # If end is before start, it must be the next day
+            if end_local <= start_local:
+                end_local += timedelta(days=1)
+            
+            # Convert to naive UTC for ObservabilityService
+            start_dt = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+            end_dt = end_local.astimezone(timezone.utc).replace(tzinfo=None)
             
             with get_session() as session:
                 svc = ObservabilityService(session)
@@ -532,20 +577,59 @@ async def targets_refresh(
             # Persist to session state for UI stability
             SESSION_STATE.set_window(start_time, end_time)
             import logging
-            logging.getLogger("uvicorn").info(f"Persisted window: {start_time} - {end_time}")
+            logging.getLogger("uvicorn").info(f"Persisted window: {start_time} - {end_time} (Local: {start_local} -> {end_local})")
                 
         except ValueError as e:
             import logging
             logging.getLogger("uvicorn").error(f"Window update failed: {e}")
             pass # Invalid format, ignore
             
-    return _render_targets_partial(request, start_time=start_time, end_time=end_time)
+    # Render main targets partial
+    targets_response = _render_targets_partial(request, start_time=start_time, end_time=end_time)
+    
+    # Render OOB status partial
+    status_response = _render_status_panel(request, oob=True)
+    
+    # Concatenate responses
+    combined_content = targets_response.body + status_response.body
+    
+    import logging
+    logging.getLogger("uvicorn").info("Targets refreshed. Returning OOB update for Overview.")
+    
+    return HTMLResponse(content=combined_content)
 
 
 @router.get("/dashboard/partials/targets", response_class=HTMLResponse)
 def targets_partial(request: Request) -> Any:
     """Render top observability-ranked targets."""
     return _render_targets_partial(request)
+
+
+def to_local_filter(value: Any, tz_name: str = "UTC") -> str:
+    if not value:
+        return ""
+    
+    from datetime import datetime, timezone
+    import zoneinfo
+    
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+            
+    if not value.tzinfo:
+        value = value.replace(tzinfo=timezone.utc)
+        
+    try:
+        tz = zoneinfo.ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+        
+    local_dt = value.astimezone(tz)
+    return local_dt.strftime("%H:%M")
+
+templates.env.filters["to_local"] = to_local_filter
 
 
 def _render_targets_partial(
@@ -574,7 +658,8 @@ def _render_targets_partial(
     if SESSION_STATE.target_mode == "manual" and SESSION_STATE.selected_target:
         active_target_data = next((t for t in targets if t["trksub"] == SESSION_STATE.selected_target), None)
     elif targets:
-        active_target_data = targets[0]
+        # Pick the first target that is actually observable
+        active_target_data = next((t for t in targets if t["is_observable"]), None)
         
     if active_target_data:
         from app.services.presets import select_preset
@@ -598,9 +683,11 @@ def _render_targets_partial(
             "target_mode": SESSION_STATE.target_mode,
             "selected_target": SESSION_STATE.selected_target,
             "active_preset": active_preset,
+            "active_target": active_target_data,
             "error": error,
             "start_time": start_time,
             "end_time": end_time,
+            "timezone": SESSION_STATE.timezone,
         },
     )
 
@@ -642,7 +729,7 @@ def reports_partial(request: Request) -> Any:
         submissions = session.exec(stmt).all()
     return templates.TemplateResponse(
         "dashboard/partials/reports.html",
-        {"request": request, "submissions": submissions},
+        {"request": request, "submissions": submissions, "timezone": SESSION_STATE.timezone},
     )
 
 
@@ -682,7 +769,7 @@ def session_status_partial_panel(request: Request) -> Any:
         session_info["active"] = True
     return templates.TemplateResponse(
         "dashboard/partials/session_status.html",
-        {"request": request, "session": session_info},
+        {"request": request, "session": session_info, "timezone": SESSION_STATE.timezone},
     )
 
 
