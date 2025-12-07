@@ -60,8 +60,9 @@
     </div>
 
     <!-- Panels -->
-    <section x-show="tab==='overview'" class="panel" hx-get="/dashboard/partials/status" hx-trigger="revealed, every 8s"
-      hx-target="this" hx-swap="innerHTML">
+    <!-- Panels -->
+    <section id="overview-panel" x-show="tab==='overview'" class="panel" hx-get="/dashboard/partials/status"
+      hx-trigger="revealed, every 8s" hx-target="this" hx-swap="innerHTML">
       <div class="panel-title">Status</div>
       <div class="muted">Loading...</div>
     </section>
@@ -78,7 +79,7 @@
       <p class="muted">Loading equipment profile...</p>
     </section>
 
-    <section x-show="tab==='targets'" class="panel" hx-get="/dashboard/partials/targets"
+    <section id="targets-panel" x-show="tab==='targets'" class="panel" hx-get="/dashboard/partials/targets"
       hx-trigger="revealed, every 20s" hx-target="this" hx-swap="innerHTML">
       <div class="panel-title">Targets</div>
       <p class="muted">Loading targets...</p>

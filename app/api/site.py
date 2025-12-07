@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select, update
 
@@ -30,6 +30,7 @@ class SiteConfigPayload(BaseModel):
         default=None,
         description="Optional JSON blob of the active equipment profile (mirrors selected profile).",
     )
+    timezone: Optional[str] = Field(default="UTC", description="IANA timezone identifier")
 
 
 @router.get("/", response_model=List[SiteConfig])
@@ -38,7 +39,11 @@ def list_sites(session: Session = Depends(get_db)) -> List[SiteConfig]:
 
 
 @router.post("/{site_id}/activate", response_model=SiteConfig)
-def activate_site(site_id: int, session: Session = Depends(get_db)) -> SiteConfig:
+def activate_site(
+    site_id: int, 
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db)
+) -> SiteConfig:
     """Set a site as active, deactivating others."""
     site = session.get(SiteConfig, site_id)
     if not site:
@@ -53,12 +58,31 @@ def activate_site(site_id: int, session: Session = Depends(get_db)) -> SiteConfi
     session.refresh(site)
     
     # Trigger async horizon fetch for the newly active site
-    try:
-        from app.services.horizon import fetch_horizon_profile
-        import asyncio
-        asyncio.create_task(fetch_horizon_profile(site.latitude, site.longitude))
-    except Exception:
-        logger.error("Failed to trigger horizon fetch on activation", exc_info=True)
+    from app.services.horizon import fetch_horizon_profile
+    
+    async def _fetch_and_save(lat: float, lon: float, site_id: int):
+        try:
+            # Re-open session in background task or pass necessary data?
+            # Ideally we should use a new session.
+            # But fetch_horizon_profile returns data, we need to save it.
+            # Let's define a wrapper that handles DB.
+            profile = await fetch_horizon_profile(lat, lon)
+            
+            # We need a new session here because the main session is closed?
+            # Actually, we can just use a new session context manager.
+            from app.db.session import get_session
+            import json
+            
+            with get_session() as db:
+                s = db.get(SiteConfig, site_id)
+                if s:
+                    s.horizon_mask_json = json.dumps(profile)
+                    db.add(s)
+                    db.commit()
+        except Exception:
+            logger.error("Failed to background fetch horizon", exc_info=True)
+
+    background_tasks.add_task(_fetch_and_save, site.latitude, site.longitude, site.id)
         
     return site
 
@@ -81,6 +105,8 @@ async def upsert_site(config: SiteConfig, session: Session = Depends(get_db)) ->
             existing.weather_sensors = config.weather_sensors
         if config.equipment_profile:
             existing.equipment_profile = config.equipment_profile
+        if config.timezone:
+            existing.timezone = config.timezone
             
         # If setting as active, deactivate others
         if config.is_active:
@@ -155,6 +181,8 @@ async def update_site(name: str, payload: SiteConfigPayload, session: Session = 
             record.weather_sensors = payload.weather_sensors
         if payload.equipment_profile is not None:
             record.equipment_profile = payload.equipment_profile
+        if payload.timezone is not None:
+            record.timezone = payload.timezone
             
         session.add(record)
         session.commit()

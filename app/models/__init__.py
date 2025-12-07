@@ -17,6 +17,7 @@ from .neocp import (
 )
 from .site import SiteConfig
 from .weather import WeatherSnapshot
+from .session import ObservingSession, SystemEvent
 
 __all__ = [
     "CandidateAssociation",
@@ -33,4 +34,6 @@ __all__ = [
     "NeoObservabilityRead",
     "WeatherSnapshot",
     "EquipmentProfileRecord",
+    "ObservingSession",
+    "SystemEvent",
 ]

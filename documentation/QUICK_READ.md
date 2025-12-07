@@ -46,6 +46,7 @@ The system automates the following pipeline:
 
 ## Development Rules
 -   **Container-First**: No local Python environments. Run everything via `docker compose`.
+-   **Troubleshooting**: Always run troubleshooting commands (e.g., database queries, python scripts) inside the running containers using `docker compose exec <service> <command>`.
 -   **Secrets**: Stored in `.env` (gitignored). Site config in `config/site.yml` (gitignored).
 -   **State**: All persistent state resides in Postgres or mounted `/data` volumes.
 -   **Frontend**: Keep it simple with HTMX/Alpine. No complex build steps (React/Vue) unless necessary.

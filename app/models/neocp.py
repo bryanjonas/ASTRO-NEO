@@ -12,7 +12,7 @@ from sqlmodel import Field, SQLModel
 class NeoCandidate(SQLModel, table=True):
     """Normalized entry scraped from the MPC NEO Confirmation Page."""
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[str] = Field(default=None, primary_key=True)
     trksub: str = Field(index=True, unique=True, max_length=16)
     score: Optional[int] = Field(default=None, description="MPC ranking score (0-100)")
     observations: Optional[int] = Field(
@@ -95,7 +95,7 @@ class NeoEphemeris(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    candidate_id: int = Field(foreign_key="neocandidate.id", nullable=False, index=True)
+    candidate_id: str = Field(foreign_key="neocandidate.id", nullable=False, index=True)
     trksub: str = Field(max_length=16, index=True)
     epoch: datetime = Field(index=True)
     ra_deg: float
@@ -109,7 +109,7 @@ class NeoEphemeris(SQLModel, table=True):
 
 
 class NeoObservabilityBase(SQLModel):
-    candidate_id: int = Field(foreign_key="neocandidate.id", nullable=False, index=True)
+    candidate_id: str = Field(foreign_key="neocandidate.id", nullable=False, index=True)
     trksub: str = Field(max_length=16, index=True)
     night_key: date = Field(index=True, description="UTC date the plan covers")
     night_start: datetime

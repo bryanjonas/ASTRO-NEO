@@ -174,11 +174,30 @@ def _check_target_availability() -> str | None:
             
         target_any = _fetch_target_internal(ignore_time=True)
         if target_any:
-            start_str = target_any.get("window_start", "").strftime("%H:%M") if target_any.get("window_start") else "window"
+            # If we found a target but it's not available NOW, then we are waiting.
+            # However, _fetch_target_internal(ignore_time=True) returns the BEST target in the window.
+            # If that target is also available now, target_now would have caught it.
+            # So if we are here, target_now is None, meaning the best target is NOT available now.
+            start_dt = target_any.get("window_start")
+            if start_dt:
+                from datetime import timezone
+                import zoneinfo
+                if not start_dt.tzinfo:
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+                try:
+                    tz = zoneinfo.ZoneInfo(SESSION_STATE.timezone)
+                    start_dt = start_dt.astimezone(tz)
+                except Exception:
+                    pass
+                start_str = start_dt.strftime("%H:%M")
+            else:
+                start_str = "window"
             return f"Waiting for {start_str}"
             
         return "None (No observable targets)"
     except Exception as exc:
+        import logging
+        logging.getLogger("uvicorn").error(f"Target availability check failed: {exc}")
         # Extract message from exception if possible, or generic error
         msg = str(exc)
         if "No visible targets available" in msg:

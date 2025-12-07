@@ -9,7 +9,8 @@
 {% set seq_total = sequence.get("total") if sequence and sequence.get("total") is not none else 0 %}
 {% set seq_index = sequence.get("current_index") if sequence and sequence.get("current_index") is not none else 0 %}
 {% set exposures_left = seq_total - seq_index %}
-{% if exposures_left < 0 %}{% set exposures_left=0 %}{% endif %} <section class="panel">
+{% if exposures_left < 0 %}{% set exposures_left=0 %}{% endif %} <div id="overview-content" {% if oob
+  %}hx-swap-oob="true" {% endif %}>
   <div class="status-grid">
     <!-- Left Column: Controls & Telemetry -->
     <div class="status-main">
@@ -22,18 +23,18 @@
           {% set system_ready = (not bundle.bridge_blockers) and telescope.get("is_connected") and
           camera.get("is_connected") and weather_safe %}
           <!-- DEBUG: Ready={{ system_ready }} Blockers={{ bundle.bridge_blockers }} Scope={{ telescope.get("is_connected") }} Cam={{ camera.get("is_connected") }} WX={{ weather_safe }} -->
-          <button class="btn-primary" hx-post="/dashboard/night/start" hx-target="closest section" hx-swap="outerHTML"
+          <button class="btn-primary" hx-post="/dashboard/night/start" hx-target="closest section" hx-swap="innerHTML"
             {% if not system_ready %}disabled style="opacity: 0.5; cursor: not-allowed;"
             title="Ensure Bridge, Mount, Camera, and Weather are green" {% endif %}>
             ✨ Start Auto-Pilot
           </button>
           {% else %}
           <button class="btn-secondary" hx-post="/dashboard/night/pause" hx-target="closest section"
-            hx-swap="outerHTML">
+            hx-swap="innerHTML">
             {% if session_paused %}▶️ Resume{% else %}⏸️ Pause{% endif %}
           </button>
           <button class="btn-danger ghost" hx-post="/dashboard/night/end" hx-target="closest section"
-            hx-swap="outerHTML">
+            hx-swap="innerHTML">
             🛑 End
           </button>
           {% endif %}
@@ -97,7 +98,7 @@
               <span class="dot warn"></span> No Data
               {% endif %}
             </span>
-            <form hx-post="/dashboard/weather/override" hx-target="closest section" hx-swap="outerHTML"
+            <form hx-post="/dashboard/weather/override" hx-target="closest section" hx-swap="innerHTML"
               style="display:inline-flex;">
               <input type="hidden" name="ignore" value="{{ 'false' if bundle.ignore_weather else 'true' }}">
               <button type="submit" class="ghost-tiny {{ 'warn' if bundle.ignore_weather }}"
@@ -138,15 +139,24 @@
         <div class="telemetry-card">
           <div class="telemetry-label">Imaging Plan</div>
           <div class="telemetry-value large">
-            {{ sequence.get("name") or (session.get("target") if session else None) or "—" }}
+            {{ (session.get("selected_target") if session else None) or sequence.get("name") or (session.get("target")
+            if session else None) or "—" }}
           </div>
           <div class="telemetry-meta">
             {% if sequence and sequence.get("total") %}
             Frame {{ seq_index }} / {{ sequence.get("total") }}
+            {% elif session and session.get("selected_preset") %}
+            {% set p = session.get("selected_preset") %}
+            Plan: {{ p.count }} x {{ p.exposure_seconds }}s
             {% else %}
             No active plan
             {% endif %}
           </div>
+          {% if session and session.get("selected_target_ra") %}
+          <div class="telemetry-meta">
+            Target: {{ "%.4f"|format(session.get("selected_target_ra")) }}, {{ "%.4f"|format(session.get("selected_target_dec")) }}
+          </div>
+          {% endif %}
           <div class="telemetry-meta">
             {{ camera.get("last_exposure_duration") if camera and camera.get("last_exposure_duration") else "0" }}s Exp
           </div>
@@ -186,4 +196,4 @@
       </div>
     </div>
   </div>
-  </section>
+  </div>

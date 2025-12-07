@@ -76,6 +76,7 @@ class SiteFileConfig(BaseModel):
     is_active: bool = False
     weather_sensors: list[WeatherSensorConfig] = Field(default_factory=list)
     equipment_profile: EquipmentProfileConfig | None = None
+    timezone: str = "UTC"
 
 
 def load_site_config(path: str | Path | None = None) -> SiteFileConfig:
@@ -93,6 +94,9 @@ def load_site_config(path: str | Path | None = None) -> SiteFileConfig:
     site_payload.setdefault("altitude_m", settings.site_altitude_m)
     if settings.site_bortle is not None:
         site_payload.setdefault("bortle", settings.site_bortle)
+    
+    # Default timezone if not in config
+    site_payload.setdefault("timezone", "UTC")
 
     return SiteFileConfig.model_validate(site_payload)
 
@@ -107,6 +111,7 @@ def _site_config_to_model(site_config: SiteFileConfig) -> dict[str, Any]:
         "horizon_mask_path": site_config.horizon_mask.source if site_config.horizon_mask else None,
         "weather_sensors": None,
         "equipment_profile": None,
+        "timezone": site_config.timezone,
     }
     if site_config.weather_sensors:
         payload["weather_sensors"] = json.dumps(
@@ -155,6 +160,7 @@ def db_site_to_file_config(db_site: SiteConfigModel) -> SiteFileConfig:
         horizon_mask=horizon_mask,
         weather_sensors=weather_sensors,
         equipment_profile=equipment_profile,
+        timezone=db_site.timezone,
     )
 
 

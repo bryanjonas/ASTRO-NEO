@@ -9,7 +9,7 @@
       <span class="pill">{{ cap.kind }}</span>
       <strong>{{ cap.target }}</strong>
       {% if cap.sequence %}<span class="muted">seq={{ cap.sequence }} #{{ cap.index }}</span>{% endif %}
-      <div class="muted tiny">{{ cap.started_at }}</div>
+      <div class="muted tiny">{{ cap.started_at | to_local(timezone) }}</div>
       <div class="muted tiny">{{ cap.path }}</div>
     </button>
     <form hx-post="/dashboard/capture/delete" hx-target="closest .subpanel" hx-swap="innerHTML" style="display:inline;">
