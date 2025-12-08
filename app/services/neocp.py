@@ -124,6 +124,7 @@ def sync_candidates(
                 results.append(existing)
             else:
                 model = NeoCandidate(
+                    id=payload.trksub,
                     trksub=payload.trksub,
                     score=payload.score,
                     observations=payload.observations,

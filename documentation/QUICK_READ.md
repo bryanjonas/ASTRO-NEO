@@ -31,18 +31,25 @@ The system automates the following pipeline:
 | :--- | :--- |
 | **`app` (API)** | Central FastAPI application serving the Dashboard and REST endpoints. |
 | **`neocp-fetcher`** | Background worker that polls MPC for new candidates and updates the DB. |
-| **`observability-engine`** | Background worker that computes visibility windows using `astroplan`. |
+| **`observability-engine`** | Background worker that computes visibility windows using `astroplan`. Synthetic “FAKE-*” targets are left as-is so they remain observable immediately. |
 | **`nina-bridge`** | Proxy service that standardizes communication with the local NINA instance. |
 | **`astrometry-worker`** | Dedicated worker for CPU-intensive plate solving tasks. |
 | **`mock_nina`** | Simulation service emulating NINA's API for offline development/testing. |
+| **`synthetic-targets`** | Seeder that refreshes synthetic NEOCP entries (30°–45° altitude) for daylight/offline testing; runs continuously so test targets are always available. |
 
 ## Data Flow
 1.  **Ingestion**: `neocp-fetcher` scrapes MPC -> Stores candidates in `neocandidate` table.
 2.  **Observability**: `observability-engine` checks weather/horizon -> Updates `neoobservability` table.
-3.  **Session**: User/Auto starts session -> `night_ops` selects top target -> Sends commands to `nina-bridge`.
-4.  **Imaging**: `nina-bridge` commands NINA -> NINA captures FITS -> Saves to shared volume.
-5.  **Processing**: `astrometry-worker` picks up FITS -> Solves -> Updates `astrometricsolution`.
-6.  **Reporting**: Operator reviews data -> `reporting` generates ADES XML -> `submission` sends to MPC.
+3.  **Session**: User/Auto starts session -> `night_ops` selects targets -> Processes targets ONE AT A TIME sequentially.
+4.  **Imaging (Per Target)**: For each target:
+    a. `nina-bridge` generates a NINA Advanced Sequencer payload (SequenceRootContainer) for SINGLE target with N exposures.
+    b. Each exposure gets ONE DeepSkyObjectContainer to enable motion tracking (re-center before each exposure).
+    c. NINA executes: slew → center → expose → save → repeat for each exposure.
+    d. System waits for all images from current target before moving to next target.
+5.  **Monitoring**: `image_monitor` watches `/data/fits` directory for new FITS files from NINA. `sequence_processor` checks if NINA plate-solved each image (WCS headers in FITS).
+6.  **Solving**: If NINA solved the image, solution is recorded directly. Otherwise, local `astrometry-worker` runs `solve-field` with RA/Dec hints and updates `astrometricsolution`.
+7.  **Repeat**: Steps 4-6 repeat for each target sequentially until all targets complete.
+8.  **Reporting**: Operator reviews data -> `reporting` generates ADES XML -> `submission` sends to MPC.
 
 ## Development Rules
 -   **Container-First**: No local Python environments. Run everything via `docker compose`.
@@ -50,3 +57,16 @@ The system automates the following pipeline:
 -   **Secrets**: Stored in `.env` (gitignored). Site config in `config/site.yml` (gitignored).
 -   **State**: All persistent state resides in Postgres or mounted `/data` volumes.
 -   **Frontend**: Keep it simple with HTMX/Alpine. No complex build steps (React/Vue) unless necessary.
+
+## NINA Integration Notes
+-   **Sequence Format**: NINA's `/v2/api/sequence/load` endpoint expects a single **SequenceRootContainer** object (NOT an array). See `documentation/NINA_SEQ_INSTRUCTIONS.md` for the complete, tested format.
+-   **Sequential Target Processing**: Targets are processed ONE AT A TIME. Each target gets its own complete sequence: slew → center → expose (N times) → solve. Only after all images from Target A are received and solved does the system move to Target B.
+-   **One Exposure Per Container**: `build_multi_target_sequence()` creates one DeepSkyObjectContainer per exposure (not per target). If a target needs 4 exposures, we create 4 containers. This enables motion tracking by re-centering before each exposure.
+-   **Coordinates**: NINA uses Hours/Minutes/Seconds format for RA and Degrees/Minutes/Seconds for Dec. The `sequence_builder.py` automatically converts from decimal degrees.
+-   **Implementation**: `nina_bridge/sequence_builder.py` generates properly formatted NINA Advanced Sequencer payloads that include:
+    -   Start/End containers for setup/teardown
+    -   Multiple DeepSkyObjectContainer entries (one per exposure, for ONE target at a time)
+    -   Each container has: Plate-solve/center instruction (inherits coordinates from parent), optional filter switching, and exactly ONE exposure
+    -   TakeExposure instruction with proper binning format and ExposureCount=0 (NINA's 0-based count for 1 exposure)
+-   **Image Monitoring**: System watches `/data/fits` for new images using NINA's filename template: `$$DATEMINUS12$$\$$TARGETNAME$$\$$IMAGETYPE$$\$$TARGETNAME$$_$$DATETIME$$_$$FILTER$$_$$EXPOSURETIME$$s_$$FRAMENR$$`
+-   **Plate Solving**: Checks FITS headers for WCS keywords (NINA's solve). If not present, runs local astrometry.net with RA/Dec hints from target coordinates.
