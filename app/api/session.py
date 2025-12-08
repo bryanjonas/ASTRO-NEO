@@ -45,6 +45,13 @@ class CaptureIn(BaseModel):
     predicted_dec_deg: float | None = Field(default=None)
 
 
+class MultiTargetSequencePayload(BaseModel):
+    """Payload for starting a multi-target sequence."""
+    name: str | None = Field(default=None, max_length=128)
+    target_ids: list[str] = Field(..., min_items=1, max_items=20, description="List of NEOCP target IDs")
+    park_after: bool = Field(default=False)
+
+
 @router.post("/calibration/run")
 def calibration_run() -> Any:
     if not SESSION_STATE.current:
@@ -135,6 +142,80 @@ def ingest_captures(captures: list[CaptureIn]) -> Any:
     return {"active": True, "session": SESSION_STATE.current.to_dict(), "count": len(payloads)}
 
 
+@router.post("/sequence/multi-target")
+def start_multi_target_sequence(payload: MultiTargetSequencePayload) -> Any:
+    """
+    Start sequential observations of multiple targets.
+
+    This endpoint processes targets ONE AT A TIME:
+    1. Fetches target data from the database
+    2. Builds a plan with appropriate presets for each target
+    3. For each target sequentially:
+       a. Sends single-target sequence to NINA
+       b. Waits for all images from that target
+       c. Plate-solves any images NINA didn't solve
+       d. Moves to next target
+    4. Optionally parks telescope when all targets complete
+    """
+    from app.db.session import get_session
+    from app.models import NeoCandidate
+    from app.services.automation import AutomationService
+    from sqlmodel import select
+
+    # Start a session if not already active
+    if not SESSION_STATE.current:
+        SESSION_STATE.start(notes="multi-target-sequence")
+
+    # Fetch target data from database
+    targets_data = []
+    with get_session() as session:
+        for target_id in payload.target_ids:
+            candidate = session.exec(
+                select(NeoCandidate).where(NeoCandidate.id == target_id)
+            ).first()
+
+            if not candidate:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Target not found: {target_id}"
+                )
+
+            targets_data.append({
+                "name": candidate.id,
+                "ra_deg": candidate.ra_deg,
+                "dec_deg": candidate.dec_deg,
+                "vmag": candidate.vmag,
+            })
+
+    if not targets_data:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid targets found"
+        )
+
+    # Build and execute multi-target plan
+    automation = AutomationService()
+    plan = automation.build_multi_target_plan(
+        targets=targets_data,
+        name=payload.name,
+        park_after=payload.park_after,
+    )
+
+    try:
+        result = automation.run_multi_target_sequence(plan)
+        return {
+            "success": True,
+            "sequence": result,
+            "targets_count": len(targets_data),
+        }
+    except Exception as e:
+        SESSION_STATE.log_event(f"Failed to start sequence: {e}", "error")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start sequence: {str(e)}"
+        )
+
+
 @router.get("/dashboard/status")
 def dashboard_status() -> Any:
     """Bundle bridge + session info for a lightweight dashboard poll."""
@@ -142,7 +223,7 @@ def dashboard_status() -> Any:
     bridge = NinaBridgeService()
     bridge_status = bridge.get_status()
     session_info = SESSION_STATE.current.to_dict() if SESSION_STATE.current else None
-    
+
     # Fetch local weather status
     from app.services.weather import WeatherService
     from app.db.session import get_session

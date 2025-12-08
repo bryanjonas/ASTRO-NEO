@@ -16,6 +16,7 @@ from prometheus_client import Counter, Gauge, Histogram, start_http_server
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.logging_config import setup_logging
 from app.db.session import get_session
 from app.models import NeoObservationPayload, NeoCPSnapshot
 from app.services.neocp import (
@@ -26,6 +27,7 @@ from app.services.neocp import (
     sync_candidates,
 )
 
+setup_logging(service_name="neocp-fetcher")
 logger = logging.getLogger(__name__)
 
 _METRICS_SERVER_STARTED = False
@@ -332,10 +334,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
     args = parse_args()
     service = NeoCPFetcherService(
         interval_seconds=args.interval,

@@ -8,9 +8,11 @@ import time
 from dataclasses import dataclass
 
 from app.core.config import settings
+from app.core.logging_config import setup_logging
 from app.db.session import get_session
 from app.services.observability import ObservabilityService
 
+setup_logging(service_name="observability-engine")
 logger = logging.getLogger(__name__)
 
 
@@ -72,10 +74,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
     args = parse_args()
     engine = ObservabilityEngine(interval_minutes=args.interval)
     if args.oneshot:

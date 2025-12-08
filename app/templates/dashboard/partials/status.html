@@ -57,29 +57,25 @@
             {% endif %}
           </span>
         </div>
-        <div class="health-item" style="cursor: pointer;" @click="$dispatch('open-mount-modal')"
-          title="Click to select mount">
-          <span class="health-label">Mount Select</span>
+        <div class="health-item">
+          <span class="health-label">Mount</span>
           <span class="health-value">
             {% if telescope and telescope.get("is_connected") %}
             <span class="dot good"></span> Connected
             {% else %}
-            <span class="dot error"></span>
-            <span class="pulse-text">Select ▾</span>
+            <span class="dot error"></span> Disconnected
             {% endif %}
           </span>
         </div>
-        <div class="health-item" style="cursor: pointer;" @click="$dispatch('open-camera-modal')"
-          title="Click to select camera">
-          <span class="health-label">Camera Select</span>
+        <div class="health-item">
+          <span class="health-label">Camera</span>
           <span class="health-value">
             {% if camera and camera.get("is_exposing") %}
             <span class="dot warn"></span> Exposing
             {% elif camera and camera.get("is_connected") %}
             <span class="dot good"></span> Connected
             {% else %}
-            <span class="dot error"></span>
-            <span class="pulse-text">Select ▾</span>
+            <span class="dot error"></span> Disconnected
             {% endif %}
           </span>
         </div>

@@ -26,6 +26,7 @@
       <th>RMS (")</th>
       <th>SNR</th>
       <th>Mag</th>
+      <th>Preview</th>
     </tr>
   </thead>
   <tbody>
@@ -46,6 +47,24 @@
       <td>{{ '%.2f'|format(sol.uncertainty_arcsec) if sol and sol.uncertainty_arcsec is not none else '—' }}</td>
       <td>{{ '%.1f'|format(sol.snr) if sol and sol.snr is not none else '—' }}</td>
       <td>{{ '%.2f'|format(sol.mag_inst) if sol and sol.mag_inst is not none else '—' }}</td>
+      <td>
+        {% if cap.path %}
+        {% set viewer_payload = {
+          "path": cap.path,
+          "target": cap.target,
+          "index": cap.index or "",
+          "started_at": cap.started_at.isoformat() if cap.started_at else ""
+        } %}
+        <button class="ghost-tiny"
+          hx-get="/dashboard/partials/capture_viewer"
+          hx-target="#capture-viewer-panel"
+          hx-vals='{{ viewer_payload | tojson }}'>
+          View
+        </button>
+        {% else %}
+        <span class="muted tiny">—</span>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>

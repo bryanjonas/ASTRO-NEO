@@ -6,12 +6,11 @@ from typing import Any
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services.automation import AutomationPlan, AutomationService
 from app.services.nina_client import NinaBridgeService
-from app.services.imaging import build_fits_path
 from app.services.session import SESSION_STATE
 
 router = APIRouter(prefix="/bridge", tags=["bridge"])
@@ -170,23 +169,46 @@ def start_exposure(
     payload: ExposurePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
     started_at = datetime.utcnow()
-    expected_path = build_fits_path(
-        target_name=payload.target or "exposure",
-        start_time=started_at,
-        sequence_name="exposure",
-        index=1,
-    )
-    result = bridge.start_exposure(payload.filter, payload.binning, payload.exposure_seconds)
+    result = bridge.start_exposure(payload.filter, payload.binning, payload.exposure_seconds, target=payload.target)
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=502, detail={"reason": "invalid_capture_response"})
+    plate_result = result.get("platesolve")
+    file_path = result.get("file")
+    if plate_result:
+        coords = plate_result.get("Coordinates") or {}
+        ra_deg = coords.get("RADegrees")
+        dec_deg = coords.get("DECDegrees")
+        coord_str = (
+            f"RA {ra_deg:.3f}° Dec {dec_deg:.3f}°"
+            if isinstance(ra_deg, (int, float)) and isinstance(dec_deg, (int, float))
+            else ""
+        )
+        if plate_result.get("Success"):
+            SESSION_STATE.log_event(
+                f"NINA solve succeeded for {payload.target or 'exposure'} {coord_str}".strip(),
+                "good",
+            )
+        else:
+            SESSION_STATE.log_event(
+                f"NINA solve failed for {payload.target or 'exposure'} – local solver will retry",
+                "warn",
+            )
+    else:
+        SESSION_STATE.log_event(
+            f"NINA solve result unavailable for {payload.target or 'exposure'}",
+            "warn",
+        )
     SESSION_STATE.add_capture(
         {
             "kind": "exposure",
             "target": payload.target or "exposure",
             "started_at": started_at.isoformat(),
-            "path": str(expected_path),
+            "path": str(file_path or ""),
+            "platesolve": plate_result,
         }
     )
     SESSION_STATE.log_event(f"Starting exposure: {payload.exposure_seconds}s {payload.filter} bin={payload.binning}", "info")
-    return {"expected_path": str(expected_path), "result": result}
+    return {"result": result}
 
 
 @router.get("/cameras")

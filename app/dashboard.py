@@ -6,6 +6,7 @@ import base64
 import json
 from io import BytesIO
 from pathlib import Path
+import logging
 from typing import Any
 
 import numpy as np
@@ -51,6 +52,7 @@ from app.services.weather import WeatherService
 templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["basename"] = lambda p: Path(p).name if p else ""
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -101,21 +103,6 @@ def dashboard_status_partial(request: Request) -> Any:
     import logging
     logging.getLogger("uvicorn").info("Overview status update requested")
     return _render_status_panel(request)
-
-
-@router.get("/dashboard/partials/camera_list", response_class=HTMLResponse)
-def camera_list(request: Request) -> Any:
-    """Render list of available cameras."""
-    from app.services.nina_client import NinaBridgeService
-    bridge = NinaBridgeService()
-    try:
-        cameras = bridge.list_cameras()
-    except Exception:
-        cameras = []
-    return templates.TemplateResponse(
-        "dashboard/partials/camera_list.html",
-        {"request": request, "cameras": cameras},
-    )
 
 
 @router.post("/dashboard/weather/override", response_class=HTMLResponse)
@@ -193,16 +180,6 @@ def submissions_partial(request: Request) -> Any:
     return templates.TemplateResponse(
         "dashboard/partials/submissions.html",
         {"request": request, "submissions": submissions, "timezone": SESSION_STATE.timezone},
-    )
-
-
-@router.get("/dashboard/partials/mount_list", response_class=HTMLResponse)
-def mount_list(request: Request) -> Any:
-    bridge = NinaBridgeService()
-    telescopes = bridge.list_telescopes()
-    return templates.TemplateResponse(
-        "dashboard/partials/mount_list.html",
-        {"request": request, "telescopes": telescopes},
     )
 
 
@@ -495,6 +472,7 @@ def _load_targets(limit: int = 20) -> list[dict[str, Any]]:
             .limit(limit)
         )
         rows = session.exec(stmt).all()
+    total_rows = len(rows)
     
     from datetime import datetime
     now = datetime.utcnow()
@@ -522,6 +500,13 @@ def _load_targets(limit: int = 20) -> list[dict[str, Any]]:
             "min_moon_separation_deg": obs.min_moon_separation_deg,
             "vmag": cand.vmag,
         })
+    if not results:
+        logger.info(
+            "Targets refresh: no candidates available (rows=%s, imaged_filtered=%s, time=%s)",
+            total_rows,
+            len(imaged_targets),
+            now.isoformat(),
+        )
     return results
 
 

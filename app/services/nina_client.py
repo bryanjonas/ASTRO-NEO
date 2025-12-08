@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -87,19 +88,49 @@ class NinaBridgeService:
             params["to"] = device_id
         return self._request("GET", "/equipment/camera/connect", params)
 
-    def start_exposure(self, filter_name: str, binning: int, exposure_seconds: float | None = None) -> str:
-        # Real NINA flow: Change Filter -> Capture
-        # We need to map filter name to ID. For now, we'll skip filter change in this simple bridge
-        # or assume filter is already set.
-        # But wait, the mock expects binning.
-        params = {"binning": binning, "save": True}
+    def start_exposure(
+        self,
+        filter_name: str,
+        binning: int,
+        exposure_seconds: float | None = None,
+        target: str | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {
+            "binning": binning,
+            "save": True,
+            "solve": True,
+            "waitForResult": True,
+            "getResult": True,
+            "omitImage": False,
+        }
         if exposure_seconds:
             params["duration"] = exposure_seconds
-            
+        if target:
+            params["target"] = target
         return self._request("GET", "/equipment/camera/capture", params)
 
     def abort_exposure(self) -> str:
         return self._request("GET", "/equipment/camera/abort-exposure")
+
+    def wait_for_mount_ready(self, timeout: float = 180.0, poll_interval: float = 1.0) -> None:
+        """Poll mount info until slewing stops."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status = self._request("GET", "/equipment/mount/info")
+            if not status.get("Slewing", False):
+                return
+            time.sleep(poll_interval)
+        raise Exception("Mount is still slewing after timeout")
+
+    def wait_for_camera_idle(self, timeout: float = 120.0, poll_interval: float = 0.5) -> None:
+        """Ensure the camera is not currently exposing before starting a new capture."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            info = self._request("GET", "/equipment/camera/info")
+            if not info.get("IsExposing", False):
+                return
+            time.sleep(poll_interval)
+        raise Exception("Camera never reached idle state before exposure")
 
     # --- Focuser ---
 

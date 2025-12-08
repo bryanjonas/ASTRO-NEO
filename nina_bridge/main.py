@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import base64
 from pathlib import Path
 from datetime import datetime
 from typing import Any
@@ -25,10 +26,13 @@ from nina_bridge.models import (
 from nina_bridge.state import STATE
 from nina_bridge.templates import select_template
 
+from app.core.logging_config import setup_logging
 from app.db.session import get_session
 from app.services.equipment import EquipmentProfile, get_active_equipment_profile
+from app.services.imaging import sanitize_target_name
 from app.services.weather import WeatherService, WeatherSummary
 
+setup_logging()
 logger = logging.getLogger("nina_bridge")
 
 app = FastAPI(title="NINA Bridge", version="0.1.0")
@@ -321,23 +325,6 @@ async def plan_sequence(payload: SequencePlanRequest) -> NinaResponse[SequencePl
     return _success(plan)
 
 
-@app.post(f"{API_PREFIX}/sequence/start")
-async def sequence_start(
-    payload: dict[str, Any],
-    client: httpx.AsyncClient = Depends(get_client),
-) -> Any:
-    # Forward to NINA
-    return await _forward_request(client, "POST", "/sequence/start", json=payload)
-
-
-@app.get(f"{API_PREFIX}/sequence/stop")
-async def sequence_stop(
-    client: httpx.AsyncClient = Depends(get_client),
-) -> Any:
-    # Forward to NINA
-    return await _forward_request(client, "GET", "/sequence/stop")
-
-
 @app.get(f"{API_PREFIX}/weather")
 async def weather_snapshot(force_refresh: bool = False) -> NinaResponse[dict[str, Any] | None]:
     return _success(_summary_to_dict(_current_weather(force_refresh=force_refresh)))
@@ -410,73 +397,62 @@ async def list_mount_devices(
 async def camera_capture(
     duration: float = Query(..., alias="duration"),
     binning: int = Query(1, alias="binning"),
-    download: bool = Query(True, alias="download"),
+    solve: bool = Query(True, alias="solve"),
+    target: str | None = Query(None, alias="target"),
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     _enforce_safety(action="camera_capture")
-    
-    # 1. Set binning
-    await _forward_request(client, "GET", "/equipment/camera/set-binning", params={"binning": f"{binning}x{binning}"})
-    
-    # 2. Prepare capture parameters
+
+    await _forward_request(
+        client,
+        "GET",
+        "/equipment/camera/set-binning",
+        params={"binning": f"{binning}x{binning}"},
+    )
+
     params = {
         "duration": duration,
-        "save": "true", # Always tell NINA to save its own copy too
+        "save": "true",
+        "solve": "true" if solve else "false",
+        "waitForResult": "true",
+        "getResult": "true",
+        "omitImage": "false",
     }
-    
-    if download:
-        params["stream"] = "true"
-        params["waitForResult"] = "true"
-    else:
-        params["omitImage"] = "true"
-        params["waitForResult"] = "false"
+    if target:
+        params["targetName"] = target
 
-    # 3. Execute capture
-    # We need to handle the response manually if downloading, as _forward_request expects JSON
-    if download:
-        logger.info("Starting capture with download: %s", params)
-        # We use the client directly here to handle binary response
-        try:
-            response = await client.get("/equipment/camera/capture", params=params, timeout=duration + 30.0)
-            response.raise_for_status()
-            
-            # Check content type
-            content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type:
-                # NINA returned JSON, likely an error or metadata
-                return response.json()
-            
-            # It's an image! Save it.
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            filename = f"capture_{timestamp}.fits" # Assuming FITS for now, NINA usually sends what you ask or default
-            # TODO: We might want to inspect headers or request specific format if NINA supports it via params
-            
-            save_dir = Path("/data/images")
-            save_dir.mkdir(parents=True, exist_ok=True)
-            file_path = save_dir / filename
-            
-            with open(file_path, "wb") as f:
-                f.write(response.content)
-                
-            logger.info("Saved captured image to %s", file_path)
-            
-            return {
-                "Success": True,
-                "Message": "Image captured and downloaded",
-                "File": str(file_path),
-                "Type": "NINA_API"
-            }
-            
-        except httpx.TimeoutException:
-            logger.error("Capture timed out")
-            raise HTTPException(status_code=504, detail="Capture timed out")
-        except Exception as exc:
-            logger.error("Capture failed: %s", exc)
-            raise HTTPException(status_code=500, detail=str(exc))
-            
-    else:
-        # Fire and forget (or wait for start)
-        return await _forward_request(client, "GET", "/equipment/camera/capture", params=params)
+    payload = await _forward_request(
+        client, "GET", "/equipment/camera/capture", params=params, unwrap=True
+    )
+
+    if isinstance(payload, str):
+        raise HTTPException(status_code=409, detail={"reason": payload})
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail={"reason": "invalid_capture_response"})
+
+    image_b64 = payload.get("Image")
+    if not image_b64:
+        raise HTTPException(status_code=502, detail={"reason": "capture_missing_image"})
+
+    try:
+        image_bytes = base64.b64decode(image_b64)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to decode capture image: %s", exc)
+        raise HTTPException(status_code=502, detail={"reason": "decode_failed"})
+
+    safe_target = sanitize_target_name(target or "capture")
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    save_dir = Path("/data/images")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    file_path = save_dir / f"{safe_target}_{timestamp}.fits"
+    file_path.write_bytes(image_bytes)
+
+    result_payload = {
+        "file": str(file_path),
+        "platesolve": payload.get("PlateSolveResult"),
+        "nina_response": payload,
+    }
+    return {"Success": True, "Response": result_payload}
 
 
 @app.get(f"{API_PREFIX}/equipment/camera/abort-exposure")
@@ -559,29 +535,95 @@ async def dome_close(
     return await _forward_request(client, "GET", "/equipment/dome/close")
 
 
-from nina_bridge.sequence_builder import build_nina_sequence
+from nina_bridge.sequence_builder import build_nina_sequence, build_multi_target_sequence, TargetSpec
 
 @app.post(f"{API_PREFIX}/sequence/start")
 async def sequence_start(
     payload: dict[str, Any],
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
+    """Start a NINA sequence with one or more targets.
+
+    Single target payload:
+    {
+        "name": "Sequence Name",
+        "target": "Target Name",
+        "ra_deg": 123.45,
+        "dec_deg": 67.89,
+        "count": 3,
+        "filter": "L",
+        "binning": 1,
+        "exposure_seconds": 60.0
+    }
+
+    Multi-target payload:
+    {
+        "name": "Multi-Target Sequence",
+        "targets": [
+            {
+                "name": "Target1",
+                "ra_deg": 123.45,
+                "dec_deg": 67.89,
+                "count": 3,
+                "filter_name": "L",
+                "binning": 1,
+                "exposure_seconds": 60.0
+            },
+            {
+                "name": "Target2",
+                "ra_deg": 234.56,
+                "dec_deg": -12.34,
+                "count": 4,
+                "filter_name": "L",
+                "binning": 1,
+                "exposure_seconds": 90.0
+            }
+        ]
+    }
+    """
     _enforce_safety(action="sequence_start")
-    
-    # 1. Build NINA-compatible sequence JSON
-    nina_sequence = build_nina_sequence(
-        name=payload.get("name", "Sequence"),
-        target=payload.get("target"),
-        count=payload.get("count", 1),
-        filter_name=payload.get("filter", "L"),
-        binning=payload.get("binning", 1),
-        exposure_seconds=payload.get("exposure_seconds", 1.0),
-        tracking_mode=payload.get("tracking_mode")
-    )
-    
+
+    # Check if this is a multi-target sequence
+    targets = payload.get("targets")
+
+    if targets and isinstance(targets, list) and len(targets) > 0:
+        # Build multi-target sequence
+        target_specs: list[TargetSpec] = []
+        for t in targets:
+            target_spec: TargetSpec = {
+                "name": t.get("name", "Unknown"),
+                "ra_deg": t.get("ra_deg", 0.0),
+                "dec_deg": t.get("dec_deg", 0.0),
+                "filter_name": t.get("filter_name", t.get("filter", "L")),
+                "binning": t.get("binning", 1),
+                "exposure_seconds": t.get("exposure_seconds", 60.0),
+                "count": t.get("count", 1),
+                "gain": t.get("gain", -1),
+                "offset": t.get("offset", -1),
+            }
+            target_specs.append(target_spec)
+
+        nina_sequence = build_multi_target_sequence(
+            name=payload.get("name", "Multi-Target Sequence"),
+            targets=target_specs
+        )
+    else:
+        # Build single-target sequence (backward compatible)
+        nina_sequence = build_nina_sequence(
+            name=payload.get("name", "Sequence"),
+            target=payload.get("target"),
+            count=payload.get("count", 1),
+            filter_name=payload.get("filter", "L"),
+            binning=payload.get("binning", 1),
+            exposure_seconds=payload.get("exposure_seconds", 1.0),
+            tracking_mode=payload.get("tracking_mode"),
+            ra_deg=payload.get("ra_deg"),
+            dec_deg=payload.get("dec_deg")
+        )
+
     # 2. Load the sequence (POST /sequence/load)
     await _forward_request(client, "POST", "/sequence/load", json=nina_sequence)
-    
+
     # 3. Start the sequence (GET /sequence/start)
     return await _forward_request(client, "GET", "/sequence/start")
 

@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     calibration_dark_counts: int = 10
     calibration_flat_counts: int = 10
     calibration_bias_counts: int = 20
+    synthetic_target_count: int = 3
+    synthetic_target_min_altitude_deg: float = 30.0
+    synthetic_target_max_altitude_deg: float = 45.0
+    synthetic_target_interval_minutes: int = 10
+    synthetic_target_prefix: str = "FAKE"
 
     model_config = SettingsConfigDict(
         env_file=".env",

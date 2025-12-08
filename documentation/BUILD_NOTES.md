@@ -345,3 +345,70 @@ Add new questions or clarifications inline as they surface during development se
 - [x] **Direct Device Control**: Added `camera/connect`, `camera/disconnect`, and `telescope/center` endpoints to `nina-bridge` to support the new workflow.
 - [x] **Verification**: Validated the capture-and-download loop using `test_scripts/test_connect_capture.py` against the running `nina-bridge` container. Images are successfully retrieved and stored on the host.
 - [x] **Device Listing**: Implemented `camera/list-devices` to allow dynamic discovery of available cameras. Verified that it correctly proxies the list from NINA (or mock).
+
+---
+
+## Phase 12 — Sequential Target Processing (NINA Advanced Sequencer)
+
+- [x] **Sequential Target Architecture**: Implemented ONE-TARGET-AT-A-TIME processing. Targets are handled sequentially - each target completes its full imaging workflow (slew → center → expose N times → solve all images) before moving to the next target. This ensures focused attention on each NEOCP candidate and allows for immediate astrometric verification before proceeding.
+- [x] **One Exposure Per Container Design**: Critical architectural decision for NEO tracking - each exposure gets its own `DeepSkyObjectContainer` with plate-solve/center step. If a target needs 4 exposures, we create 4 separate containers (not 1 container with ExposureCount=3). This enables motion tracking by re-centering the target before each exposure, essential for fast-moving NEOs.
+- [x] **Single-Target Sequence Builder** (`nina_bridge/sequence_builder.py`):
+    - `build_multi_target_sequence()` processes ONLY the first target in the array (accepts list for API compatibility)
+    - Creates proper SequenceRootContainer with Start/End containers for ONE target
+    - Each exposure for that target generates a DeepSkyObjectContainer with:
+        - Plate solve/center instruction (inherits coordinates from parent Target)
+        - Optional filter switching
+        - Single exposure instruction (ExposureCount=0 for 1 exposure in NINA's 0-based system)
+    - Coordinate conversion from decimal degrees to HMS (RA) and DMS (Dec) format
+    - Container naming: `{target_name} #{exposure_index}` for tracking (e.g., "A11wdXf #3")
+- [x] **NINA Bridge Endpoint Updates** (`nina_bridge/main.py`):
+    - `/sequence/start` endpoint accepts single-target payload (array with one element)
+    - Maintains backward compatibility with original single-target format
+- [x] **Automation Service** (`app/services/automation.py`):
+    - `build_multi_target_plan()` applies exposure presets based on target magnitude for each target
+    - `run_multi_target_sequence()` processes targets SEQUENTIALLY in a loop:
+        - For each target: weather check → send single-target sequence to NINA → wait for all images → plate-solve → move to next target
+        - Blocks until current target completes before starting next
+        - Comprehensive logging with target progress (1/5, 2/5, etc.)
+        - Optional auto-park after ALL targets complete
+- [x] **Image Monitoring Service** (`app/services/image_monitor.py`):
+    - `ImageMonitor` watches `/data/fits` directory for new FITS files from NINA
+    - Parses NINA filename template: `$$DATEMINUS12$$\$$TARGETNAME$$\$$IMAGETYPE$$\$$TARGETNAME$$_$$DATETIME$$_$$FILTER$$_$$EXPOSURETIME$$s_$$FRAMENR$$`
+    - Tracks seen files to avoid reprocessing
+    - Example: `20251207/A11wdXf/LIGHT/A11wdXf_2025-12-07_23-45-12_L_60.0s_001.fits`
+- [x] **Sequence Processor** (`app/services/sequence_processor.py`):
+    - Expects SINGLE target per call (warns if multiple targets provided)
+    - Checks if NINA plate-solved each image (looks for WCS keywords in FITS headers: CTYPE1, CTYPE2, CRVAL1, CRVAL2)
+    - Falls back to local astrometry.net with RA/Dec hints if NINA didn't solve
+    - Records solutions to database (both NINA and local solves)
+    - Creates CaptureLog entries for each image
+    - Enhanced progress logging: "Target A11wdXf: 3/4 images solved (75%) in 45.2s"
+- [x] **REST API Endpoint** (`app/api/session.py`):
+    - `POST /session/sequence/multi-target` accepts target IDs from database
+    - Fetches target coordinates and magnitudes automatically
+    - Processes targets sequentially (not in parallel)
+    - Returns immediately while processing continues in background
+    - Updated docstring to clarify sequential processing
+
+**Key Design Benefits:**
+1. **Sequential Focus**: Complete one target before starting next - better for time-sensitive NEO observations
+2. **Motion Tracking**: Re-centering before each exposure tracks NEO motion across the sky
+3. **Individual Plate Solving**: Every exposure gets its own astrometric solution
+4. **Temporal Spacing**: Natural time gaps between exposures (slew + center + expose) help detect asteroid motion
+5. **Immediate Verification**: Solve all images for Target A before moving to Target B - allows operator to verify quality
+4. **Error Recovery**: If one exposure fails to solve, subsequent exposures can still succeed
+5. **Better Astrometry**: Each frame has precise WCS coordinates for the exact moment captured
+
+**Workflow Example:**
+```
+User calls: POST /session/sequence/multi-target
+  → Fetches targets A11wdXf, P12inpc from database
+  → Applies presets: A11wdXf needs 4×60s, P12inpc needs 5×90s
+  → Generates sequence with 9 DeepSkyObjectContainers (4+5)
+  → Sends to NINA via bridge
+  → NINA executes: slew → center → expose → save (×9 times)
+  → ImageMonitor detects new FITS files
+  → SequenceProcessor checks WCS headers
+  → Either records NINA's solve or runs local astrometry.net
+  → All solutions persisted to database
+```
