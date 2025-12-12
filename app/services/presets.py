@@ -33,6 +33,8 @@ DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
         filter="L",
         binning=1,
         delay_seconds=90.0,  # 1.5 min spacing for motion detection
+        gain=250,
+        offset=20,
     ),
     ExposurePreset(
         name="medium",
@@ -42,6 +44,8 @@ DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
         filter="L",
         binning=1,
         delay_seconds=120.0,  # 2 min spacing
+        gain=250,
+        offset=20,
     ),
     ExposurePreset(
         name="faint",
@@ -51,6 +55,8 @@ DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
         filter="L",
         binning=2,
         delay_seconds=180.0,  # 3 min spacing for slower objects
+        gain=250,
+        offset=20,
     ),
 )
 

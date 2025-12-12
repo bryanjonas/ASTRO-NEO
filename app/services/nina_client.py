@@ -191,5 +191,13 @@ class NinaBridgeService:
         """Stop the current sequence."""
         return self._request("GET", "/sequence/stop")
 
+    def start_guiding(self) -> str:
+        """Start the guider if infrastructure is available."""
+        return self._request("GET", "/equipment/guider/start")
+
+    def stop_guiding(self) -> str:
+        """Stop the guider (called after exposures complete)."""
+        return self._request("GET", "/equipment/guider/stop")
+
 
 __all__ = ["NinaBridgeService"]

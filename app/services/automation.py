@@ -24,6 +24,7 @@ from app.services.presets import select_preset, ExposurePreset
 from app.services.weather import WeatherService
 from app.services.task_queue import TASK_QUEUE, Task
 from app.db.session import get_session
+from app.services.prediction import EphemerisPredictionService
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ class AutomationPlan:
 
 
 @dataclass
-class MultiTargetPlan:
-    """Plan for a multi-target sequence."""
+class SequentialTargetPlan:
+    """Plan describing the sequential single-target workflow."""
     name: str
     targets: list[dict[str, Any]]
     park_after: bool = False
@@ -107,6 +108,14 @@ class AutomationService:
         self._ensure_weather_safe()
         self._ensure_devices_ready()
         started_at = datetime.utcnow()
+        guiding_started = False
+        try:
+            self.bridge.start_guiding()
+            guiding_started = True
+            SESSION_STATE.log_event("Guiding started for sequential sequence", "info")
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning("Automation: failed to start guiding: %s", exc)
+            SESSION_STATE.log_event("Guiding could not be enabled for sequence", "warn")
         SESSION_STATE.log_event(f"Automation: Starting run for {plan.target}", "info")
         # Queue retryable tasks so failures raise dashboard alerts
         if plan.focus_position is not None:
@@ -225,14 +234,14 @@ class AutomationService:
                 "warn",
             )
 
-    def build_multi_target_plan(
+    def build_sequential_target_plan(
         self,
         targets: list[dict[str, Any]],
         name: str | None = None,
         park_after: bool = False,
-    ) -> MultiTargetPlan:
+    ) -> SequentialTargetPlan:
         """
-        Build a multi-target sequence plan from a list of target candidates.
+        Build a sequential target plan from a list of target candidates.
 
         Each target dict should have: name, ra_deg, dec_deg, vmag (optional)
         Presets will be applied based on vmag for each target.
@@ -243,32 +252,44 @@ class AutomationService:
         except Exception:
             pass
 
+        sequence_name = name or f"NEOCP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
         planned_targets = []
-        for target in targets:
-            preset = select_preset(target.get("vmag"), profile=profile)
+        now = datetime.utcnow()
+        with get_session() as session:
+            predictor = EphemerisPredictionService(session)
+            for target in targets:
+                preset = select_preset(target.get("vmag"), profile=profile)
+                predicted_coords = predictor.predict(target.get("candidate_id"), now)
+                ra_deg = predicted_coords[0] if predicted_coords else target["ra_deg"]
+                dec_deg = predicted_coords[1] if predicted_coords else target["dec_deg"]
 
+            target_name = (
+                target.get("name")
+                or target.get("target")
+                or target.get("trksub")
+                or target.get("sequence_name")
+            )
             planned_target = {
-                "name": target["name"],
-                "ra_deg": target["ra_deg"],
-                "dec_deg": target["dec_deg"],
+                "name": target_name or "Unknown",
+                "ra_deg": ra_deg,
+                "dec_deg": dec_deg,
                 "filter_name": preset.filter,
                 "binning": preset.binning,
                 "exposure_seconds": preset.exposure_seconds,
                 "count": preset.count,
                 "gain": preset.gain,
                 "offset": preset.offset,
+                "sequence_name": sequence_name,
             }
             planned_targets.append(planned_target)
 
-        sequence_name = name or f"NEOCP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
-
-        return MultiTargetPlan(
+        return SequentialTargetPlan(
             name=sequence_name,
             targets=planned_targets,
             park_after=park_after,
         )
 
-    def run_multi_target_sequence(self, plan: MultiTargetPlan) -> dict[str, Any]:
+    def run_sequential_target_sequence(self, plan: SequentialTargetPlan) -> dict[str, Any]:
         """
         Execute targets sequentially, one at a time.
 
@@ -285,120 +306,145 @@ class AutomationService:
         self._ensure_devices_ready()
 
         started_at = datetime.utcnow()
+        guiding_started = False
 
-        # Calculate sequence details for logging
-        total_exposures = sum(t["count"] for t in plan.targets)
-        target_names = [t["name"] for t in plan.targets]
-
-        SESSION_STATE.log_event(
-            f"🎯 Starting sequential observation of {len(plan.targets)} targets, {total_exposures} total exposures",
-            "info"
-        )
-
-        # Log target details
-        for idx, target in enumerate(plan.targets, 1):
-            SESSION_STATE.log_event(
-                f"  {idx}. {target['name']}: {target['count']}×{target['exposure_seconds']:.0f}s @ {target['filter_name']}, bin {target['binning']}×{target['binning']}",
-                "info"
-            )
-
-        # Process each target sequentially
-        all_results = []
-
-        for idx, target in enumerate(plan.targets, 1):
-            SESSION_STATE.log_event(
-                f"📍 Target {idx}/{len(plan.targets)}: {target['name']}",
-                "info"
-            )
-
+        try:
             try:
-                # Send single-target sequence to NINA
+                self.bridge.start_guiding()
+                guiding_started = True
+                SESSION_STATE.log_event("Guiding started for sequential sequence", "info")
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning("Automation: failed to start guiding: %s", exc)
+                SESSION_STATE.log_event("Guiding could not be enabled for sequence", "warn")
+
+            # Calculate sequence details for logging
+            total_exposures = sum(t["count"] for t in plan.targets)
+            target_names = [t["name"] for t in plan.targets]
+
+            SESSION_STATE.log_event(
+                f"🎯 Starting sequential observation of {len(plan.targets)} targets, {total_exposures} total exposures",
+                "info"
+            )
+
+            # Log target details
+            for idx, target in enumerate(plan.targets, 1):
                 SESSION_STATE.log_event(
-                    f"📤 Sending {target['count']}-exposure sequence to NINA for {target['name']}...",
+                    f"  {idx}. {target['name']}: {target['count']}×{target['exposure_seconds']:.0f}s @ {target['filter_name']}, bin {target['binning']}×{target['binning']}",
                     "info"
                 )
 
-                response = self.bridge._post(
-                    "/sequence/start",
-                    json={
-                        "name": f"{plan.name} - {target['name']}",
-                        "targets": [target],  # Single target only
-                    }
-                )
+            # Process each target sequentially
+            all_results = []
 
+            for idx, target in enumerate(plan.targets, 1):
                 SESSION_STATE.log_event(
-                    f"✓ Sequence loaded - NINA will slew → center → expose {target['count']}× for {target['name']}",
-                    "good"
+                    f"📍 Target {idx}/{len(plan.targets)}: {target['name']}",
+                    "info"
                 )
 
-                # Process images for this target
-                from app.services.sequence_processor import SequenceProcessor
-
-                with get_session() as session:
-                    processor = SequenceProcessor(session)
-
-                    # Calculate timeout: exposure time × count + overhead per exposure
-                    timeout = target["count"] * (target["exposure_seconds"] + 120.0)  # 2 min overhead per exposure
-
+                try:
+                    # Send single-target sequence to NINA
                     SESSION_STATE.log_event(
-                        f"👁 Monitoring for {target['count']} images from {target['name']} (timeout: {timeout/60:.1f}m)",
+                        f"📤 Sending {target['count']}-exposure sequence to NINA for {target['name']}...",
                         "info"
                     )
 
-                    result = processor.process_sequence(
-                        targets=[target],  # Single target
-                        timeout_seconds=timeout,
-                        poll_interval=3.0,
+                    response = self.bridge.start_sequence(
+                        {
+                            "name": f"{plan.name} - {target['name']}",
+                            "targets": [target],  # Single target only
+                        }
                     )
 
-                    all_results.append({
-                        "target": target["name"],
-                        "result": result,
-                    })
+                    SESSION_STATE.log_event(
+                        f"✓ Sequence loaded - NINA will slew → center → expose {target['count']}× for {target['name']}",
+                        "good"
+                    )
 
-                SESSION_STATE.log_event(
-                    f"✓ Completed {target['name']} ({idx}/{len(plan.targets)})",
-                    "good"
-                )
+                    # Process images for this target
+                    from app.services.sequence_processor import SequenceProcessor
 
-            except Exception as e:
-                logger.error(f"Error processing target {target['name']}: {e}", exc_info=True)
-                SESSION_STATE.log_event(
-                    f"✗ Failed to process {target['name']}: {e}",
-                    "error"
-                )
-                # Continue with next target instead of failing entire sequence
-                continue
+                    with get_session() as session:
+                        processor = SequenceProcessor(session)
 
-        # Summary
-        total_solved = sum(r["result"].images_solved for r in all_results)
-        total_received = sum(r["result"].images_received for r in all_results)
+                        # Calculate timeout: exposure time × count + overhead per exposure
+                        timeout = target["count"] * (target["exposure_seconds"] + 120.0)  # 2 min overhead per exposure
 
-        SESSION_STATE.log_event(
-            f"🏁 Sequential observation complete: {len(all_results)}/{len(plan.targets)} targets processed, {total_solved}/{total_received} images solved",
-            "good" if len(all_results) == len(plan.targets) else "warn"
-        )
+                        SESSION_STATE.log_event(
+                            f"👁 Monitoring for {target['count']} images from {target['name']} (timeout: {timeout/60:.1f}m)",
+                            "info"
+                        )
 
-        # Optionally park after all targets complete
-        if plan.park_after:
-            SESSION_STATE.log_event("🅿 Parking telescope...", "info")
-            try:
-                self.bridge.park_telescope(True)
-                SESSION_STATE.log_event("✓ Telescope parked", "good")
-            except Exception as e:
-                logger.warning(f"Failed to park telescope: {e}")
-                SESSION_STATE.log_event(f"✗ Park failed: {e}", "warn")
+                        result = processor.process_sequence(
+                            targets=[target],  # Single target
+                            timeout_seconds=timeout,
+                            poll_interval=3.0,
+                        )
 
-        return {
-            "sequence_name": plan.name,
-            "targets": target_names,
-            "started_at": started_at.isoformat(),
-            "completed_at": datetime.utcnow().isoformat(),
-            "targets_processed": len(all_results),
-            "total_images_solved": total_solved,
-            "total_images_received": total_received,
-            "park_after": plan.park_after,
-        }
+                        all_results.append({
+                            "target": target["name"],
+                            "result": result,
+                        })
+
+                    SESSION_STATE.log_event(
+                        f"✓ Completed {target['name']} ({idx}/{len(plan.targets)})",
+                        "good"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error processing target {target['name']}: {e}", exc_info=True)
+                    SESSION_STATE.log_event(
+                        f"✗ Failed to process {target['name']}: {e}",
+                        "error"
+                    )
+                    # Continue with next target instead of failing entire sequence
+                    continue
+                finally:
+                    try:
+                        self.bridge.stop_sequence()
+                        SESSION_STATE.log_event("Automation: Cleared sequence from NINA", "info")
+                    except Exception as exc:  # pragma: no cover - best effort
+                        logger.warning("Automation: failed to stop sequence after %s: %s", target["name"], exc)
+                        SESSION_STATE.log_event("Automation: Could not clear NINA sequence", "warn")
+
+            # Summary
+            total_solved = sum(r["result"].images_solved for r in all_results)
+            total_received = sum(r["result"].images_received for r in all_results)
+
+            SESSION_STATE.log_event(
+                f"🏁 Sequential observation complete: {len(all_results)}/{len(plan.targets)} targets processed, {total_solved}/{total_received} images solved",
+                "good" if len(all_results) == len(plan.targets) else "warn"
+            )
+
+            # Optionally park after all targets complete
+            if plan.park_after:
+                SESSION_STATE.log_event("🅿 Parking telescope...", "info")
+                try:
+                    self.bridge.park_telescope(True)
+                    SESSION_STATE.log_event("✓ Telescope parked", "good")
+                except Exception as e:
+                    logger.warning(f"Failed to park telescope: {e}")
+                    SESSION_STATE.log_event(f"✗ Park failed: {e}", "warn")
+
+            result = {
+                "sequence_name": plan.name,
+                "targets": target_names,
+                "started_at": started_at.isoformat(),
+                "completed_at": datetime.utcnow().isoformat(),
+                "targets_processed": len(all_results),
+                "total_images_solved": total_solved,
+                "total_images_received": total_received,
+                "park_after": plan.park_after,
+            }
+            return result
+        finally:
+            if guiding_started:
+                try:
+                    self.bridge.stop_guiding()
+                    SESSION_STATE.log_event("Guiding stopped after sequential sequence", "info")
+                except Exception as exc:  # pragma: no cover - best effort
+                    logger.warning("Automation: failed to stop guiding: %s", exc)
+                    SESSION_STATE.log_event("Guiding could not be stopped cleanly", "warn")
 
 
-__all__ = ["AutomationPlan", "MultiTargetPlan", "AutomationService"]
+__all__ = ["AutomationPlan", "SequentialTargetPlan", "AutomationService"]

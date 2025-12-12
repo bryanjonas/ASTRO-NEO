@@ -636,37 +636,7 @@ class SessionState:
                 associated_count += 1
                 
         if associated_count >= expected_count:
-            self.log_event(f"Target {target} complete. Moving to next...", "good")
-            
-            # We need to trigger kickoff_imaging, but we can't import it at top level.
-            # And we are in a background thread (TaskQueue).
-            # We should probably schedule it on the TaskQueue or run it here?
-            # kickoff_imaging calls AutomationService.run_plan which calls bridge methods.
-            # It's synchronous but fast (just submits tasks).
-            
-            from app.services.night_ops import kickoff_imaging, NightSessionError
-            try:
-                # We need to clear the current target first so _choose_target picks a NEW one?
-                # No, _choose_target picks the highest score.
-                # If we just finished the highest score, it will pick it AGAIN unless we mark it as "done" or "imaged".
-                
-                # We need to mark the candidate as "observed" or lower its score?
-                # The `NeoObservability` table has `is_observable`.
-                # We don't have a "is_observed" flag there.
-                
-                # But `_load_targets` (dashboard) filters out imaged targets.
-                # `_fetch_target` (night_ops) does NOT.
-                
-                # We need `_fetch_target` to exclude targets we just imaged.
-                # Or we update `_choose_target` to exclude them.
-                
-                # Let's modify `_choose_target` in `night_ops.py` later.
-                
-                kickoff_imaging()
-            except NightSessionError as e:
-                self.log_event(f"Auto-pilot finished: {e}", "warn")
-            except Exception as e:
-                self.log_event(f"Auto-pilot error: {e}", "error")
+            self.log_event(f"Target {target} complete.", "good")
 
     def pause(self) -> ObservingSession | None:
         with get_session() as session:

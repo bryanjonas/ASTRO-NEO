@@ -24,8 +24,8 @@ services:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
       - ./data:/data
-      # Mount NINA's Documents folder (adjust host path as needed)
-      - ${NINA_IMAGES_PATH:-./data/fits}:/data/fits
+      # Mount the shared NINA images folder
+      - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
   neocp-fetcher:
@@ -143,6 +143,7 @@ services:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
       - ./data:/data
+      - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
   # synthetic-targets: #Turn off neocp-fetcher
@@ -193,3 +194,9 @@ services:
 volumes:
   postgres_data:
   mock_nina_data:
+  nina_images:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${NINA_IMAGES_PATH:-./data/fits}

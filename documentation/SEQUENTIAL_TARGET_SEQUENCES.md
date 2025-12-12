@@ -1,16 +1,16 @@
-# Multi-Target NINA Sequences
+# Sequential Target NINA Sequences
 
-This document describes the multi-target sequence functionality that allows ASTRO-NEO to observe multiple NEOCP candidates in a single automated session.
+This document describes ASTRO-NEO's sequential single-target workflow: targets are observed one at a time via repeated, self-contained NINA sequences that individually slew, center, and image each NEOCP candidate.
 
 ## Overview
 
-The multi-target sequence system automates the full workflow for observing multiple NEO candidates:
+The sequential workflow automates the repeated process of building, executing, and validating one-target NINA sequences back-to-back:
 
-1. **Sequence Building** - Constructs a NINA Advanced Sequencer payload with multiple DeepSkyObjectContainer targets
-2. **Image Acquisition** - NINA autonomously slews, centers, and exposes each target
-3. **Image Monitoring** - Watches the shared FITS directory for new images as they're captured
+1. **Sequence Building** - Constructs a NINA Advanced Sequencer payload focused on a single DeepSkyObjectContainer target
+2. **Image Acquisition** - NINA slews, centers, and exposes that one target, then repeats the process after the next target is selected
+3. **Image Monitoring** - Watches the shared FITS directory for new images as they appear
 4. **Plate Solving** - Verifies NINA's plate solve or runs local astrometry.net if needed
-5. **Data Persistence** - Records all images and solutions to the database
+5. **Data Persistence** - Records all images and solutions to the database before moving to the next candidate
 
 ## Architecture
 
@@ -19,13 +19,13 @@ The multi-target sequence system automates the full workflow for observing multi
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  API Layer (app/api/session.py)                             │
-│  POST /session/sequence/multi-target                        │
+│  POST /session/sequence                                      │
 └──────────────────────┬──────────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │  Automation Service (app/services/automation.py)            │
-│  - build_multi_target_plan()                                │
-│  - run_multi_target_sequence()                              │
+│  - build_sequential_target_plan()                           │
+│  - run_sequential_target_sequence()                         │
 └──────────────────────┬──────────────────────────────────────┘
                        │
        ┌───────────────┼───────────────┐
@@ -54,7 +54,7 @@ The multi-target sequence system automates the full workflow for observing multi
 ### API Endpoint
 
 ```
-POST /session/sequence/multi-target
+POST /session/sequence
 ```
 
 **Request Body:**
@@ -92,9 +92,9 @@ POST /session/sequence/multi-target
 ```python
 import httpx
 
-# Start a multi-target sequence
+# Start a sequential sequence request
 response = httpx.post(
-    "http://localhost:18080/session/sequence/multi-target",
+    "http://localhost:18080/session/sequence",
     json={
         "name": "Priority Targets",
         "target_ids": ["A11wdXf", "P12inpc"],
@@ -326,7 +326,7 @@ docker compose exec db psql -U astro -d astro -c \
 2. Start a test sequence:
 
 ```bash
-curl -X POST http://localhost:18080/session/sequence/multi-target \
+curl -X POST http://localhost:18080/session/sequence \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Test Sequence",

@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from astropy.io import fits as astropy_fits
+
 from app.core.config import settings
 from app.services.session import SESSION_STATE
 
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Example: 20251207\A11wdXf\LIGHT\A11wdXf_2025-12-07_23-45-12_L_60.0s_001.fits
 
 NINA_FILENAME_PATTERN = re.compile(
-    r"^(?P<target>[^_]+)_"  # Target name
+    r"^(?:(?P<target>[^_]+)_)?"
     r"(?P<datetime>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})_"  # DateTime
     r"(?P<filter>[^_]+)_"  # Filter
     r"(?P<exposure>[\d.]+)s_"  # Exposure time
@@ -102,7 +104,7 @@ class ImageMonitor:
             # Return basic info even if pattern doesn't match
             return ImageFileInfo(
                 path=path,
-                target=target,
+                target=self._guess_target(path, target),
                 datetime_str="",
                 filter="",
                 exposure_seconds=0.0,
@@ -110,15 +112,45 @@ class ImageMonitor:
                 image_type=image_type
             )
 
+        parsed_target = match.group("target")
+        parsed_filter = match.group("filter")
         return ImageFileInfo(
             path=path,
-            target=match.group("target"),
+            target=self._guess_target(path, parsed_target),
             datetime_str=match.group("datetime"),
-            filter=match.group("filter"),
+            filter=self._guess_filter(path, parsed_filter),
             exposure_seconds=float(match.group("exposure")),
             frame_number=int(match.group("frame")),
             image_type=image_type
         )
+
+    def _guess_target(self, path: Path, parsed_target: str | None) -> str:
+        if parsed_target:
+            return parsed_target
+        target = self._read_header_field(path, ("OBJECT", "TARGET", "OBJECT-NAME", "OBJECT_NAME"))
+        if target:
+            return target
+        return "Unknown"
+
+    def _guess_filter(self, path: Path, parsed_filter: str | None) -> str:
+        if parsed_filter and parsed_filter.strip():
+            return parsed_filter
+        filter_name = self._read_header_field(path, ("FILTER", "FILTER_NAME"))
+        if filter_name:
+            return filter_name
+        return ""
+
+    def _read_header_field(self, path: Path, keys: tuple[str, ...]) -> str | None:
+        try:
+            with astropy_fits.open(str(path)) as hdul:
+                header = hdul[0].header
+                for key in keys:
+                    value = header.get(key)
+                    if value:
+                        return str(value)
+        except Exception as exc:
+            logger.debug(f"Unable to read FITS header {keys} from {path.name}: {exc}")
+        return None
 
     def watch_for_sequence(
         self,

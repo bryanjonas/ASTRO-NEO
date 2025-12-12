@@ -175,6 +175,42 @@ def _ready_flags(nina_status: dict[str, Any] | None, blockers: list[dict[str, An
     }
 
 
+def _flatten_sequence_items(sequence_info: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+
+    def visit(item: dict[str, Any]) -> None:
+        if not isinstance(item, dict):
+            return
+
+        type_name = item.get("$type", "")
+        status = item.get("Status")
+        is_running = bool(item.get("IsRunning"))
+        is_completed = bool(
+            item.get("IsCompleted")
+            or (isinstance(status, str) and status.upper() in {"COMPLETED", "COMPLETE", "DONE"})
+        )
+        entry = {
+            "name": item.get("Name") or item.get("TargetName"),
+            "status": status,
+            "type": type_name,
+            "is_running": is_running,
+            "is_completed": is_completed,
+            "is_exposure": "TakeExposure" in type_name or "DeepSkyObjectContainer" in type_name,
+        }
+        items.append(entry)
+
+        for child in item.get("Items", []):
+            visit(child)
+
+    if isinstance(sequence_info, dict):
+        visit(sequence_info)
+    elif isinstance(sequence_info, list):
+        for element in sequence_info:
+            visit(element)
+
+    return items
+
+
 @app.get(f"{API_PREFIX}/status", response_model=NinaResponse[BridgeStatus])
 async def bridge_status(
     client: httpx.AsyncClient = Depends(get_client),
@@ -207,6 +243,26 @@ async def bridge_status(
         elif isinstance(sequence_info, dict):
             is_sequence_running = sequence_info.get("IsRunning", False) or sequence_info.get("Running", False)
 
+        sequence_items = _flatten_sequence_items(sequence_info)
+        exposure_items = [item for item in sequence_items if item["is_exposure"]]
+        current_exposure_index = next(
+            (idx + 1 for idx, item in enumerate(exposure_items) if item["is_running"]),
+            0,
+        )
+        sequence_progress = {
+            "total_exposures": len(exposure_items),
+            "completed_exposures": sum(1 for item in exposure_items if item["is_completed"]),
+            "current_index": current_exposure_index,
+            "items": exposure_items,
+        }
+
+        sequence_total = (
+            sequence_info.get("TotalItems") if isinstance(sequence_info, dict) else len(exposure_items)
+        )
+        sequence_current_item = (
+            sequence_info.get("CurrentItemIndex") if isinstance(sequence_info, dict) else current_exposure_index
+        )
+
         # Map to the structure expected by the frontend/bridge logic
         nina_status = {
             "camera": {
@@ -237,8 +293,9 @@ async def bridge_status(
                 "is_running": is_sequence_running,
                 # Extract name from sequence info if available
                 "name": sequence_info.get("Name") if isinstance(sequence_info, dict) else None,
-                "total": sequence_info.get("TotalItems") if isinstance(sequence_info, dict) else 0,
-                "current_index": sequence_info.get("CurrentItemIndex") if isinstance(sequence_info, dict) else 0,
+                "progress": sequence_progress,
+                "total": sequence_total,
+                "current_index": sequence_current_item,
             }
         }
         
@@ -535,7 +592,7 @@ async def dome_close(
     return await _forward_request(client, "GET", "/equipment/dome/close")
 
 
-from nina_bridge.sequence_builder import build_nina_sequence, build_multi_target_sequence, TargetSpec
+from nina_bridge.sequence_builder import build_nina_sequence, build_target_sequence, TargetSpec
 
 @app.post(f"{API_PREFIX}/sequence/start")
 async def sequence_start(
@@ -558,7 +615,7 @@ async def sequence_start(
 
     Multi-target payload:
     {
-        "name": "Multi-Target Sequence",
+        "name": "Sequential Target Sequence",
         "targets": [
             {
                 "name": "Target1",
@@ -583,11 +640,11 @@ async def sequence_start(
     """
     _enforce_safety(action="sequence_start")
 
-    # Check if this is a multi-target sequence
+    # Check if this is a sequence payload with multiple target specs
     targets = payload.get("targets")
 
     if targets and isinstance(targets, list) and len(targets) > 0:
-        # Build multi-target sequence
+        # Build sequential target sequence (list is for compatibility)
         target_specs: list[TargetSpec] = []
         for t in targets:
             target_spec: TargetSpec = {
@@ -603,8 +660,8 @@ async def sequence_start(
             }
             target_specs.append(target_spec)
 
-        nina_sequence = build_multi_target_sequence(
-            name=payload.get("name", "Multi-Target Sequence"),
+        nina_sequence = build_target_sequence(
+            name=payload.get("name", "Sequential Target Sequence"),
             targets=target_specs
         )
     else:

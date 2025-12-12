@@ -2,7 +2,7 @@ from typing import Any, TypedDict
 
 
 class TargetSpec(TypedDict, total=False):
-    """Target specification for multi-target sequences."""
+    """Target specification for sequential target sequences."""
     name: str
     ra_deg: float
     dec_deg: float
@@ -31,7 +31,7 @@ def build_nina_sequence(
     Returns a SequenceRootContainer object (not an array) that contains
     Start, Target, and End containers following NINA's actual format.
 
-    For multi-target sequences, use build_multi_target_sequence() instead.
+    For sequential target sequences, use build_target_sequence() instead.
     """
     target_spec: TargetSpec = {
         "name": target or name,
@@ -44,19 +44,19 @@ def build_nina_sequence(
         "gain": -1,
         "offset": -1,
     }
-    return build_multi_target_sequence(name, [target_spec])
+    return build_target_sequence(name, [target_spec])
 
 
-def build_multi_target_sequence(
+def build_target_sequence(
     name: str,
     targets: list[TargetSpec],
 ) -> dict[str, Any]:
     """
     Build the Advanced Sequencer payload for a SINGLE target with multiple exposures.
 
-    NOTE: Despite the name, this function is designed to handle ONE target at a time.
     The 'targets' parameter accepts a list for API compatibility, but only the first
-    target is processed. Use this in a loop to process multiple targets sequentially.
+    target is processed. Use this function repeatedly, once per target, when observing
+    multiple candidates sequentially.
 
     Returns a SequenceRootContainer object that contains:
     - Start container
@@ -170,20 +170,6 @@ def _build_target_container(target: TargetSpec) -> dict[str, Any]:
         "ErrorBehavior": 0,
         "Attempts": 1
     })
-
-    # Add filter switch if specified
-    filter_name = target.get("filter_name", "L")
-    if filter_name:
-        target_items.append({
-            "$type": "NINA.Sequencer.SequenceItem.Utility.SwitchFilter, NINA.Sequencer",
-            "Name": f"Switch Filter to {filter_name}",
-            "Filter": {
-                "Name": filter_name
-            },
-            "Parent": None,
-            "ErrorBehavior": 0,
-            "Attempts": 1
-        })
 
     # Add exposure instruction - ALWAYS ONE EXPOSURE
     exposure_seconds = target.get("exposure_seconds", 60.0)
