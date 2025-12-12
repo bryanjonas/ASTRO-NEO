@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -12,6 +14,23 @@ from app.db.session import get_session
 from app.models import NeoCandidate, NeoObservability
 from app.services.automation import AutomationService
 from app.services.session import SESSION_STATE
+from app.services.task_queue import TASK_QUEUE, Task
+
+logger = logging.getLogger(__name__)
+
+_sequence_lock = threading.Lock()
+_sequence_running = False
+
+
+def _is_sequence_running() -> bool:
+    with _sequence_lock:
+        return _sequence_running
+
+
+def _set_sequence_running(value: bool) -> None:
+    global _sequence_running
+    with _sequence_lock:
+        _sequence_running = value
 
 
 @dataclass
@@ -26,26 +45,78 @@ class NightSessionError(Exception):
 def kickoff_imaging() -> dict[str, Any]:
     """Select the configured target (auto/manual) and start automation."""
 
+    if _is_sequence_running():
+        raise NightSessionError(status_code=409, message="An automation sequence is already running.")
+
+    current_session = SESSION_STATE.current
+    if current_session and current_session.paused:
+        raise NightSessionError(status_code=409, message="Session is paused.")
+
     target = _choose_target()
     if not target:
         raise NightSessionError(status_code=404, message="No targets are currently observable (check time window, weather, or switch to Manual).")
+
     automation = AutomationService()
-    urgency = None
-    if target.get("score") is not None:
-        urgency = max(0.0, min(1.0, target["score"] / 100.0))
-    plan = automation.build_plan(
-        target=target["trksub"],
-        ra_deg=target["ra_deg"],
-        dec_deg=target["dec_deg"],
-        vmag=target.get("vmag"),
-        urgency=urgency,
+    targets_data = [
+        {
+            "name": target["trksub"],
+            "ra_deg": target["ra_deg"],
+            "dec_deg": target["dec_deg"],
+            "vmag": target.get("vmag"),
+            "candidate_id": target.get("candidate_id"),
+        }
+    ]
+    plan = automation.build_sequential_target_plan(
+        targets=targets_data,
+        name=None,
+        park_after=False,
     )
-    # Update session state with the selected target so the dashboard reflects it immediately
-    # If we are in auto mode (or starting it), keep it auto.
+
     mode = "manual" if SESSION_STATE.target_mode == "manual" else "auto"
     SESSION_STATE.select_target(target["trksub"], mode=mode)
-        
-    return automation.run_plan(plan)
+    started_at = datetime.utcnow()
+
+    def _run_sequence_task() -> None:
+        exception_occurred = False
+        try:
+            automation.run_sequential_target_sequence(plan)
+        except Exception as exc:  # pragma: no cover - background safety
+            exception_occurred = True
+            SESSION_STATE.log_event(
+                f"Sequential target sequence failed for {target['trksub']}: {exc}",
+                "error"
+            )
+            logger.error("Sequential target sequence for %s failed: %s", target["trksub"], exc, exc_info=True)
+        finally:
+            _set_sequence_running(False)
+
+        if not exception_occurred and SESSION_STATE.target_mode == "auto":
+            next_session = SESSION_STATE.current
+            if not next_session or next_session.paused:
+                return
+            try:
+                kickoff_imaging()
+            except NightSessionError as exc:
+                SESSION_STATE.log_event(f"Auto-pilot finished: {exc}", "warn")
+            except Exception as exc:  # pragma: no cover - best-effort
+                SESSION_STATE.log_event(f"Auto-pilot error restarting sequence: {exc}", "error")
+                logger.error("Failed to restart auto sequence: %s", exc, exc_info=True)
+
+    _set_sequence_running(True)
+    TASK_QUEUE.submit(
+        Task(
+            name=f"sequential_target_sequence_{plan.name}",
+            func=_run_sequence_task,
+            retries=1,
+            backoff_seconds=5.0,
+        )
+    )
+
+    return {
+        "sequence_name": plan.name,
+        "targets": [target["trksub"]],
+        "started_at": started_at.isoformat(),
+    }
 
 
 def _choose_target() -> dict[str, Any] | None:
@@ -108,6 +179,7 @@ def _fetch_target_internal(trksub: str | None = None, ignore_time: bool = False)
         raise NightSessionError(status_code=400, message="Target is missing coordinates (ra/dec).")
     return {
         "trksub": obs.trksub,
+        "candidate_id": cand.id,
         "ra_deg": cand.ra_deg,
         "dec_deg": cand.dec_deg,
         "vmag": cand.vmag,

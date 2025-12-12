@@ -45,8 +45,8 @@ class CaptureIn(BaseModel):
     predicted_dec_deg: float | None = Field(default=None)
 
 
-class MultiTargetSequencePayload(BaseModel):
-    """Payload for starting a multi-target sequence."""
+class TargetSequencePayload(BaseModel):
+    """Payload for starting a sequential target sequence."""
     name: str | None = Field(default=None, max_length=128)
     target_ids: list[str] = Field(..., min_items=1, max_items=20, description="List of NEOCP target IDs")
     park_after: bool = Field(default=False)
@@ -142,14 +142,14 @@ def ingest_captures(captures: list[CaptureIn]) -> Any:
     return {"active": True, "session": SESSION_STATE.current.to_dict(), "count": len(payloads)}
 
 
-@router.post("/sequence/multi-target")
-def start_multi_target_sequence(payload: MultiTargetSequencePayload) -> Any:
+@router.post("/sequence")
+def start_sequence(payload: TargetSequencePayload) -> Any:
     """
-    Start sequential observations of multiple targets.
+    Start sequential observations of the requested targets.
 
     This endpoint processes targets ONE AT A TIME:
     1. Fetches target data from the database
-    2. Builds a plan with appropriate presets for each target
+    2. Builds a sequential plan with presets for each target
     3. For each target sequentially:
        a. Sends single-target sequence to NINA
        b. Waits for all images from that target
@@ -164,7 +164,7 @@ def start_multi_target_sequence(payload: MultiTargetSequencePayload) -> Any:
 
     # Start a session if not already active
     if not SESSION_STATE.current:
-        SESSION_STATE.start(notes="multi-target-sequence")
+        SESSION_STATE.start(notes="sequential-target-sequence")
 
     # Fetch target data from database
     targets_data = []
@@ -185,6 +185,7 @@ def start_multi_target_sequence(payload: MultiTargetSequencePayload) -> Any:
                 "ra_deg": candidate.ra_deg,
                 "dec_deg": candidate.dec_deg,
                 "vmag": candidate.vmag,
+                "candidate_id": candidate.id,
             })
 
     if not targets_data:
@@ -193,16 +194,16 @@ def start_multi_target_sequence(payload: MultiTargetSequencePayload) -> Any:
             detail="No valid targets found"
         )
 
-    # Build and execute multi-target plan
+    # Build and execute sequential plan
     automation = AutomationService()
-    plan = automation.build_multi_target_plan(
+    plan = automation.build_sequential_target_plan(
         targets=targets_data,
         name=payload.name,
         park_after=payload.park_after,
     )
 
     try:
-        result = automation.run_multi_target_sequence(plan)
+        result = automation.run_sequential_target_sequence(plan)
         return {
             "success": True,
             "sequence": result,

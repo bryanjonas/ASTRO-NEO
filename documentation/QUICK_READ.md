@@ -51,6 +51,13 @@ The system automates the following pipeline:
 7.  **Repeat**: Steps 4-6 repeat for each target sequentially until all targets complete.
 8.  **Reporting**: Operator reviews data -> `reporting` generates ADES XML -> `submission` sends to MPC.
 
+## Automation Sequence Plan
+
+- The automation path always routes through `AutomationService.run_sequential_target_sequence()`; it loops over candidates one at a time, so each call emits a single-target NINA sequence before picking the next target.
+- Before building a plan we now refresh each target’s RA/Dec via MPC ephemerides for the current UTC time, so the slews sent to NINA reflect the most recent prediction even before the solver centers.
+- Targets are processed sequentially—each complete NINA Advanced Sequencer payload (built via `build_sequential_target_plan`) slews, centers, and takes the configured number of exposures, then waits for all image files to arrive and be solved before advancing to the next entry.
+- This approach guarantees that the session scheduler can continue to call the same sequential workflow repeatedly, ensuring the “auto” mode always works off of the sequential NINA Advanced Sequencer design and can easily scale to multiple targets without changing the basic control flow.
+
 ## Development Rules
 -   **Container-First**: No local Python environments. Run everything via `docker compose`.
 -   **Troubleshooting**: Always run troubleshooting commands (e.g., database queries, python scripts) inside the running containers using `docker compose exec <service> <command>`.
@@ -61,7 +68,8 @@ The system automates the following pipeline:
 ## NINA Integration Notes
 -   **Sequence Format**: NINA's `/v2/api/sequence/load` endpoint expects a single **SequenceRootContainer** object (NOT an array). See `documentation/NINA_SEQ_INSTRUCTIONS.md` for the complete, tested format.
 -   **Sequential Target Processing**: Targets are processed ONE AT A TIME. Each target gets its own complete sequence: slew → center → expose (N times) → solve. Only after all images from Target A are received and solved does the system move to Target B.
--   **One Exposure Per Container**: `build_multi_target_sequence()` creates one DeepSkyObjectContainer per exposure (not per target). If a target needs 4 exposures, we create 4 containers. This enables motion tracking by re-centering before each exposure.
+-   **One Exposure Per Container**: `build_target_sequence()` creates one DeepSkyObjectContainer per exposure (not per target). If a target needs 4 exposures, we create 4 containers. This enables motion tracking by re-centering before each exposure.
+-   **Sequence Progress Watch**: `bridge_status()` now surfaces `nina_status.sequence.progress` (total exposures, current index, and per-item status flags) so the overview tab and automation logic can see which exposures are done before polling the file system.
 -   **Coordinates**: NINA uses Hours/Minutes/Seconds format for RA and Degrees/Minutes/Seconds for Dec. The `sequence_builder.py` automatically converts from decimal degrees.
 -   **Implementation**: `nina_bridge/sequence_builder.py` generates properly formatted NINA Advanced Sequencer payloads that include:
     -   Start/End containers for setup/teardown

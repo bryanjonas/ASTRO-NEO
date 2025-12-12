@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     synthetic_target_max_altitude_deg: float = 45.0
     synthetic_target_interval_minutes: int = 10
     synthetic_target_prefix: str = "FAKE"
+    nina_images_path: str = "/data/fits"
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -103,6 +103,18 @@ class SequenceProcessor:
             )
 
         for idx, image in enumerate(images, 1):
+            SESSION_STATE.add_capture(
+                {
+                    "kind": "sequence",
+                    "target": target_name,
+                    "sequence": target.get("sequence_name") or target_name,
+                    "index": image.frame_number or idx,
+                    "started_at": datetime.utcnow().isoformat(),
+                    "path": str(image.path),
+                    "predicted_ra_deg": ra_hint,
+                    "predicted_dec_deg": dec_hint,
+                }
+            )
             # Check if NINA already solved this image
             nina_solved = self._check_nina_solve(image)
 

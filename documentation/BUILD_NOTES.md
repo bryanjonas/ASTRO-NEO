@@ -353,7 +353,7 @@ Add new questions or clarifications inline as they surface during development se
 - [x] **Sequential Target Architecture**: Implemented ONE-TARGET-AT-A-TIME processing. Targets are handled sequentially - each target completes its full imaging workflow (slew → center → expose N times → solve all images) before moving to the next target. This ensures focused attention on each NEOCP candidate and allows for immediate astrometric verification before proceeding.
 - [x] **One Exposure Per Container Design**: Critical architectural decision for NEO tracking - each exposure gets its own `DeepSkyObjectContainer` with plate-solve/center step. If a target needs 4 exposures, we create 4 separate containers (not 1 container with ExposureCount=3). This enables motion tracking by re-centering the target before each exposure, essential for fast-moving NEOs.
 - [x] **Single-Target Sequence Builder** (`nina_bridge/sequence_builder.py`):
-    - `build_multi_target_sequence()` processes ONLY the first target in the array (accepts list for API compatibility)
+    - `build_target_sequence()` processes ONLY the first target in the array (accepts list for API compatibility)
     - Creates proper SequenceRootContainer with Start/End containers for ONE target
     - Each exposure for that target generates a DeepSkyObjectContainer with:
         - Plate solve/center instruction (inherits coordinates from parent Target)
@@ -365,8 +365,8 @@ Add new questions or clarifications inline as they surface during development se
     - `/sequence/start` endpoint accepts single-target payload (array with one element)
     - Maintains backward compatibility with original single-target format
 - [x] **Automation Service** (`app/services/automation.py`):
-    - `build_multi_target_plan()` applies exposure presets based on target magnitude for each target
-    - `run_multi_target_sequence()` processes targets SEQUENTIALLY in a loop:
+- `build_sequential_target_plan()` applies exposure presets based on target magnitude for each target
+- `run_sequential_target_sequence()` processes targets SEQUENTIALLY in a loop:
         - For each target: weather check → send single-target sequence to NINA → wait for all images → plate-solve → move to next target
         - Blocks until current target completes before starting next
         - Comprehensive logging with target progress (1/5, 2/5, etc.)
@@ -384,7 +384,7 @@ Add new questions or clarifications inline as they surface during development se
     - Creates CaptureLog entries for each image
     - Enhanced progress logging: "Target A11wdXf: 3/4 images solved (75%) in 45.2s"
 - [x] **REST API Endpoint** (`app/api/session.py`):
-    - `POST /session/sequence/multi-target` accepts target IDs from database
+- `POST /session/sequence` accepts target IDs from database
     - Fetches target coordinates and magnitudes automatically
     - Processes targets sequentially (not in parallel)
     - Returns immediately while processing continues in background
@@ -401,7 +401,7 @@ Add new questions or clarifications inline as they surface during development se
 
 **Workflow Example:**
 ```
-User calls: POST /session/sequence/multi-target
+User calls: POST /session/sequence
   → Fetches targets A11wdXf, P12inpc from database
   → Applies presets: A11wdXf needs 4×60s, P12inpc needs 5×90s
   → Generates sequence with 9 DeepSkyObjectContainers (4+5)
