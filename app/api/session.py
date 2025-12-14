@@ -87,6 +87,7 @@ def session_start(payload: SessionStartPayload | None = Body(None)) -> Any:
 
 @router.post("/end")
 def session_end() -> Any:
+    SESSION_STATE.request_stop_auto_restart()
     session = SESSION_STATE.end()
     if not session:
         raise HTTPException(status_code=404, detail="no_active_session")

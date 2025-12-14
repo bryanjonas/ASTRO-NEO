@@ -21,6 +21,9 @@ class NeoCandidate(SQLModel, table=True):
     observed_ut: Optional[str] = Field(
         default=None, description="Observation timestamp string from MPC bracket text"
     )
+    last_obs_utc: Optional[datetime] = Field(
+        default=None, description="Parsed timestamp of most recent observation"
+    )
     ra_deg: Optional[float] = Field(
         default=None, description="Right ascension (degrees, 0-360)"
     )
@@ -84,7 +87,12 @@ class NeoObservationPayload(SQLModel, table=True):
 
 
 class NeoEphemeris(SQLModel, table=True):
-    """Cached MPC ephemeris samples for each candidate/night."""
+    """Cached ephemeris samples for each candidate/night.
+
+    Supports both MPC and JPL Horizons sources.
+    Horizons provides authoritative topocentric coordinates with
+    light-time correction, aberration, and parallax.
+    """
 
     __table_args__ = (
         UniqueConstraint(
@@ -105,6 +113,37 @@ class NeoEphemeris(SQLModel, table=True):
     rate_arcsec_per_min: Optional[float] = None
     position_angle_deg: Optional[float] = None
     magnitude: Optional[float] = None
+
+    # Horizons-specific fields (motion rates)
+    ra_rate_arcsec_min: Optional[float] = Field(
+        default=None, description="RA rate including cos(dec) factor (arcsec/min)"
+    )
+    dec_rate_arcsec_min: Optional[float] = Field(
+        default=None, description="Dec rate (arcsec/min)"
+    )
+
+    # Observing geometry (from Horizons)
+    azimuth_deg: Optional[float] = Field(default=None, description="Azimuth (0=N, 90=E)")
+    elevation_deg: Optional[float] = Field(default=None, description="Elevation above horizon")
+    airmass: Optional[float] = Field(default=None, description="Relative optical airmass")
+    solar_elongation_deg: Optional[float] = Field(
+        default=None, description="Solar elongation angle"
+    )
+    lunar_elongation_deg: Optional[float] = Field(
+        default=None, description="Lunar elongation angle"
+    )
+
+    # Predicted magnitude and uncertainty (from Horizons)
+    v_mag_predicted: Optional[float] = Field(
+        default=None, description="Predicted V magnitude from Horizons"
+    )
+    uncertainty_3sigma_arcsec: Optional[float] = Field(
+        default=None, description="3-sigma positional uncertainty (arcsec)"
+    )
+
+    # Source tracking
+    source: str = Field(default="MPC", max_length=16, description="Ephemeris source: MPC or HORIZONS")
+
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False, index=True)
 
 
@@ -123,6 +162,12 @@ class NeoObservabilityBase(SQLModel):
     score: float = 0.0
     score_breakdown: str | None = Field(
         default=None, description="JSON-encoded scoring components"
+    )
+    composite_score: float | None = Field(
+        default=None, description="Multi-factor composite score (0-100) for dynamic prioritization"
+    )
+    peak_altitude_deg: float | None = Field(
+        default=None, description="Peak altitude during observable window"
     )
     is_observable: bool = Field(default=False, description="True when window meets thresholds")
     limiting_factors: str | None = Field(

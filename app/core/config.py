@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     neocp_metrics_port: int = 9500
     mpc_ephemeris_url: str = "https://data.minorplanetcenter.net/api/get-ephemeris"
     mpc_ephemeris_timeout: float = 30.0
+    # JPL Horizons settings
+    use_horizons_ephemerides: bool = True
+    horizons_api_url: str = "https://ssd.jpl.nasa.gov/api/horizons.api"
+    horizons_timeout: float = 30.0
+    horizons_cache_hours: int = 6  # Re-fetch if older than this
+    horizons_step_minutes: int = 5  # Resolution for ephemeris queries
+    # Target scoring weights (must sum to ~1.0)
+    scoring_weight_mpc: float = 0.30
+    scoring_weight_altitude: float = 0.25
+    scoring_weight_time_to_set: float = 0.15
+    scoring_weight_motion_rate: float = 0.10
+    scoring_weight_uncertainty: float = 0.10
+    scoring_weight_arc_extension: float = 0.10
     observability_horizon_hours: int = 12
     observability_sample_minutes: int = 5
     observability_min_altitude_deg: float = 25.0
@@ -58,7 +71,7 @@ class Settings(BaseSettings):
     mpc_email: str = ""
     submission_channel: str = "email"  # email|api
     nina_bridge_url: str = "http://nina-bridge:8001/api"
-    nina_bridge_timeout: float = 15.0
+    nina_bridge_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
     data_root: str = "/data"
     fits_retention_days: int = 14
     astrometry_worker_url: str | None = "http://astrometry-worker:8100"

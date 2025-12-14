@@ -173,6 +173,7 @@ def start_exposure(
     if not isinstance(result, dict):
         raise HTTPException(status_code=502, detail={"reason": "invalid_capture_response"})
     plate_result = result.get("platesolve")
+    # Note: NINA API does not return file paths - will be None
     file_path = result.get("file")
     if plate_result:
         coords = plate_result.get("Coordinates") or {}

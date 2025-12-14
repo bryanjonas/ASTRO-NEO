@@ -77,8 +77,12 @@ class ObservingSession:
 class SessionState:
     """Database-backed tracker for the observing session."""
 
+    def __init__(self) -> None:
+        self._stop_auto_restart = False
+
     @property
     def current(self) -> ObservingSession | None:
+        self.clear_stop_auto_restart()
         with get_session() as session:
             # Find active session
             db_session = session.exec(
@@ -320,6 +324,15 @@ class SessionState:
             self.log_event(msg, "warn")
             
             return self._to_view(db_session)
+
+    def request_stop_auto_restart(self) -> None:
+        self._stop_auto_restart = True
+
+    def clear_stop_auto_restart(self) -> None:
+        self._stop_auto_restart = False
+
+    def stop_auto_restart_requested(self) -> bool:
+        return self._stop_auto_restart
 
     def record_calibration(self, cal_type: str, count: int = 1) -> ObservingSession | None:
         with get_session() as session:

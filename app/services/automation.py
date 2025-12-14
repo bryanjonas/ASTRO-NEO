@@ -25,6 +25,7 @@ from app.services.weather import WeatherService
 from app.services.task_queue import TASK_QUEUE, Task
 from app.db.session import get_session
 from app.services.prediction import EphemerisPredictionService
+from app.services.capture_loop import CaptureLoopResult, CaptureTargetDescriptor, run_capture_loop
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,8 @@ class AutomationService:
         )
         if not isinstance(result, dict):
             raise RuntimeError("NINA capture returned unexpected payload")
+        # Note: NINA API does not return file paths - will be None
+        # File path will be filled by file system monitoring service
         file_path = result.get("file")
         platesolve = result.get("platesolve")
         started_at = datetime.utcnow().isoformat()
@@ -206,7 +209,7 @@ class AutomationService:
                 "sequence": plan.target,
                 "index": index,
                 "started_at": started_at,
-                "path": file_path or "",
+                "path": file_path or "",  # Empty initially, filled by file monitor
                 "platesolve": platesolve,
             }
         )
@@ -263,25 +266,26 @@ class AutomationService:
                 ra_deg = predicted_coords[0] if predicted_coords else target["ra_deg"]
                 dec_deg = predicted_coords[1] if predicted_coords else target["dec_deg"]
 
-            target_name = (
-                target.get("name")
-                or target.get("target")
-                or target.get("trksub")
-                or target.get("sequence_name")
-            )
-            planned_target = {
-                "name": target_name or "Unknown",
-                "ra_deg": ra_deg,
-                "dec_deg": dec_deg,
-                "filter_name": preset.filter,
-                "binning": preset.binning,
-                "exposure_seconds": preset.exposure_seconds,
-                "count": preset.count,
-                "gain": preset.gain,
-                "offset": preset.offset,
-                "sequence_name": sequence_name,
-            }
-            planned_targets.append(planned_target)
+                target_name = (
+                    target.get("name")
+                    or target.get("target")
+                    or target.get("trksub")
+                    or target.get("sequence_name")
+                )
+                planned_target = {
+                    "name": target_name or "Unknown",
+                    "candidate_id": target.get("candidate_id"),
+                    "ra_deg": ra_deg,
+                    "dec_deg": dec_deg,
+                    "filter_name": preset.filter,
+                    "binning": preset.binning,
+                    "exposure_seconds": preset.exposure_seconds,
+                    "count": preset.count,
+                    "gain": preset.gain,
+                    "offset": preset.offset,
+                    "sequence_name": sequence_name,
+                }
+                planned_targets.append(planned_target)
 
         return SequentialTargetPlan(
             name=sequence_name,
@@ -307,6 +311,8 @@ class AutomationService:
 
         started_at = datetime.utcnow()
         guiding_started = False
+        target_names: list[str] = [t["name"] for t in plan.targets]
+        total_exposures = sum(t["count"] for t in plan.targets)
 
         try:
             try:
@@ -317,24 +323,18 @@ class AutomationService:
                 logger.warning("Automation: failed to start guiding: %s", exc)
                 SESSION_STATE.log_event("Guiding could not be enabled for sequence", "warn")
 
-            # Calculate sequence details for logging
-            total_exposures = sum(t["count"] for t in plan.targets)
-            target_names = [t["name"] for t in plan.targets]
-
             SESSION_STATE.log_event(
                 f"🎯 Starting sequential observation of {len(plan.targets)} targets, {total_exposures} total exposures",
                 "info"
             )
 
-            # Log target details
             for idx, target in enumerate(plan.targets, 1):
                 SESSION_STATE.log_event(
-                    f"  {idx}. {target['name']}: {target['count']}×{target['exposure_seconds']:.0f}s @ {target['filter_name']}, bin {target['binning']}×{target['binning']}",
+                    f"  {idx}. {target['name']}: {target['count']}×{target['exposure_seconds']:.0f}s @ {target['filter_name']}",
                     "info"
                 )
 
-            # Process each target sequentially
-            all_results = []
+            loop_results: list[CaptureLoopResult] = []
 
             for idx, target in enumerate(plan.targets, 1):
                 SESSION_STATE.log_event(
@@ -342,81 +342,41 @@ class AutomationService:
                     "info"
                 )
 
+                descriptor = CaptureTargetDescriptor(
+                    name=target["name"],
+                    candidate_id=target.get("candidate_id"),
+                    ra_deg=target["ra_deg"],
+                    dec_deg=target["dec_deg"],
+                    filter_name=target["filter_name"],
+                    binning=target["binning"],
+                    exposure_seconds=target["exposure_seconds"],
+                    count=target["count"],
+                    sequence_name=plan.name,
+                )
+
                 try:
-                    # Send single-target sequence to NINA
+                    result = run_capture_loop(descriptor, self.bridge)
+                    loop_results.append(result)
                     SESSION_STATE.log_event(
-                        f"📤 Sending {target['count']}-exposure sequence to NINA for {target['name']}...",
-                        "info"
-                    )
-
-                    response = self.bridge.start_sequence(
-                        {
-                            "name": f"{plan.name} - {target['name']}",
-                            "targets": [target],  # Single target only
-                        }
-                    )
-
-                    SESSION_STATE.log_event(
-                        f"✓ Sequence loaded - NINA will slew → center → expose {target['count']}× for {target['name']}",
+                        f"✓ Completed {descriptor.name} ({idx}/{len(plan.targets)})",
                         "good"
                     )
-
-                    # Process images for this target
-                    from app.services.sequence_processor import SequenceProcessor
-
-                    with get_session() as session:
-                        processor = SequenceProcessor(session)
-
-                        # Calculate timeout: exposure time × count + overhead per exposure
-                        timeout = target["count"] * (target["exposure_seconds"] + 120.0)  # 2 min overhead per exposure
-
-                        SESSION_STATE.log_event(
-                            f"👁 Monitoring for {target['count']} images from {target['name']} (timeout: {timeout/60:.1f}m)",
-                            "info"
-                        )
-
-                        result = processor.process_sequence(
-                            targets=[target],  # Single target
-                            timeout_seconds=timeout,
-                            poll_interval=3.0,
-                        )
-
-                        all_results.append({
-                            "target": target["name"],
-                            "result": result,
-                        })
-
-                    SESSION_STATE.log_event(
-                        f"✓ Completed {target['name']} ({idx}/{len(plan.targets)})",
-                        "good"
-                    )
-
                 except Exception as e:
                     logger.error(f"Error processing target {target['name']}: {e}", exc_info=True)
                     SESSION_STATE.log_event(
                         f"✗ Failed to process {target['name']}: {e}",
                         "error"
                     )
-                    # Continue with next target instead of failing entire sequence
                     continue
-                finally:
-                    try:
-                        self.bridge.stop_sequence()
-                        SESSION_STATE.log_event("Automation: Cleared sequence from NINA", "info")
-                    except Exception as exc:  # pragma: no cover - best effort
-                        logger.warning("Automation: failed to stop sequence after %s: %s", target["name"], exc)
-                        SESSION_STATE.log_event("Automation: Could not clear NINA sequence", "warn")
 
-            # Summary
-            total_solved = sum(r["result"].images_solved for r in all_results)
-            total_received = sum(r["result"].images_received for r in all_results)
+            total_attempted = sum(result.exposures_attempted for result in loop_results)
+            total_solved = sum(result.exposures_solved for result in loop_results)
 
             SESSION_STATE.log_event(
-                f"🏁 Sequential observation complete: {len(all_results)}/{len(plan.targets)} targets processed, {total_solved}/{total_received} images solved",
-                "good" if len(all_results) == len(plan.targets) else "warn"
+                f"🏁 Sequential observation complete: {len(loop_results)}/{len(plan.targets)} targets processed, {total_solved}/{total_attempted} exposures solved",
+                "good" if len(loop_results) == len(plan.targets) else "warn"
             )
 
-            # Optionally park after all targets complete
             if plan.park_after:
                 SESSION_STATE.log_event("🅿 Parking telescope...", "info")
                 try:
@@ -426,17 +386,16 @@ class AutomationService:
                     logger.warning(f"Failed to park telescope: {e}")
                     SESSION_STATE.log_event(f"✗ Park failed: {e}", "warn")
 
-            result = {
+            return {
                 "sequence_name": plan.name,
                 "targets": target_names,
                 "started_at": started_at.isoformat(),
                 "completed_at": datetime.utcnow().isoformat(),
-                "targets_processed": len(all_results),
-                "total_images_solved": total_solved,
-                "total_images_received": total_received,
+                "targets_processed": len(loop_results),
+                "total_exposures_attempted": total_attempted,
+                "total_exposures_solved": total_solved,
                 "park_after": plan.park_after,
             }
-            return result
         finally:
             if guiding_started:
                 try:

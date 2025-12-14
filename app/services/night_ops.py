@@ -90,7 +90,11 @@ def kickoff_imaging() -> dict[str, Any]:
         finally:
             _set_sequence_running(False)
 
-        if not exception_occurred and SESSION_STATE.target_mode == "auto":
+        if (
+            not exception_occurred
+            and SESSION_STATE.target_mode == "auto"
+            and not SESSION_STATE.stop_auto_restart_requested()
+        ):
             next_session = SESSION_STATE.current
             if not next_session or next_session.paused:
                 return

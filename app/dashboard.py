@@ -584,6 +584,61 @@ async def targets_refresh(
     return HTMLResponse(content=combined_content)
 
 
+@router.post("/dashboard/targets/clear", response_class=HTMLResponse)
+async def targets_clear(request: Request) -> Any:
+    """Clear all NEOCP data and reseed with synthetic targets."""
+    from sqlmodel import delete
+
+    try:
+        with get_session() as session:
+            # Delete all NEOCP-related data in correct order (respecting foreign keys)
+            logger.info("Clearing database: deleting NEOCP-related records")
+
+            # Delete dependent records first
+            session.exec(delete(Measurement))
+            session.exec(delete(AstrometricSolution))
+            session.exec(delete(CandidateAssociation))
+            session.exec(delete(SubmissionLog))
+            session.exec(delete(NeoObservability))
+            session.exec(delete(NeoEphemeris))
+            session.exec(delete(NeoCandidate))
+
+            session.commit()
+            logger.info("Database cleared successfully")
+
+        # Reseed synthetic targets
+        logger.info("Reseeding synthetic targets")
+        from app.services.synthetic_targets import SyntheticTargetService
+
+        service = SyntheticTargetService()
+        service.seed_targets()
+        logger.info("Synthetic targets seeded successfully")
+
+        # Render targets partial with success message
+        status_banner = {
+            "level": "good",
+            "message": "Database cleared and synthetic targets reseeded successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to clear database: {e}")
+        status_banner = {
+            "level": "error",
+            "message": f"Failed to clear database: {str(e)}"
+        }
+
+    # Render main targets partial
+    targets_response = _render_targets_partial(request)
+
+    # Render OOB status partial with banner
+    status_response = _render_status_panel(request, status_banner=status_banner, oob=True)
+
+    # Concatenate responses
+    combined_content = targets_response.body + status_response.body
+
+    return HTMLResponse(content=combined_content)
+
+
 @router.get("/dashboard/partials/targets", response_class=HTMLResponse)
 def targets_partial(request: Request) -> Any:
     """Render top observability-ranked targets."""

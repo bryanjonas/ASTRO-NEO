@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   api:
     build:
@@ -17,6 +15,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: 1
       # MOCK_NINA_URL: http://mock-nina:1888/api
+    restart: unless-stopped
     ports:
       - "18080:8000"
     volumes:
@@ -28,29 +27,29 @@ services:
       - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-  neocp-fetcher:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    pull_policy: build
-    depends_on:
-      - db
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      SERVICE_NAME: neocp-fetcher
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      RUN_MIGRATIONS: 0
-    command: ["python", "-m", "app.services.neocp_fetcher"]
-    restart: unless-stopped
-    ports:
-      - "19500:9500"
-    volumes:
-      - ./config:/app/config:ro
-      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
+  # neocp-fetcher:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   pull_policy: build
+  #   depends_on:
+  #     - db
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+  #     SERVICE_NAME: neocp-fetcher
+  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  #     RUN_MIGRATIONS: 0
+  #   command: ["python", "-m", "app.services.neocp_fetcher"]
+  #   restart: unless-stopped
+  #   ports:
+  #     - "19500:9500"
+  #   volumes:
+  #     - ./config:/app/config:ro
+  #     - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /etc/timezone:/etc/timezone:ro
   observability-engine:
     build:
       context: .
@@ -107,6 +106,7 @@ services:
       context: .
       dockerfile: docker/astrometry.Dockerfile
     pull_policy: build
+    restart: unless-stopped
     environment:
       ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
       ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
@@ -146,22 +146,22 @@ services:
       - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-  # synthetic-targets: #Turn off neocp-fetcher
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   pull_policy: build
-  #   depends_on:
-  #     - db
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-  #     SERVICE_NAME: synthetic-targets
-  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  #     RUN_MIGRATIONS: 0
-  #   command: ["python", "-m", "app.services.synthetic_targets"]
-  #   restart: unless-stopped
+  synthetic-targets: #Turn off neocp-fetcher
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      SERVICE_NAME: synthetic-targets
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: 0
+    command: ["python", "-m", "app.services.synthetic_targets"]
+    restart: unless-stopped
 
 
 #   mock-nina:
@@ -180,6 +180,7 @@ services:
   db:
     image: postgres:15
     pull_policy: always
+    restart: unless-stopped
     environment:
       POSTGRES_DB: astro
       POSTGRES_USER: astro
