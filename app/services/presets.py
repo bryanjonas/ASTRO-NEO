@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass
 from typing import Iterable
 
 from app.services.equipment import EquipmentProfile
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -79,9 +83,26 @@ def list_presets(profile: EquipmentProfile | None = None) -> Iterable[ExposurePr
 
 
 def select_preset(
-    vmag: float | None, profile: EquipmentProfile | None = None, urgency: float | None = None, default_name: str = "bright"
+    vmag: float | None,
+    profile: EquipmentProfile | None = None,
+    urgency: float | None = None,
+    default_name: str = "bright",
+    motion_rate_arcsec_min: float | None = None,
+    pixel_scale_arcsec_per_pixel: float = 1.5,
 ) -> ExposurePreset:
-    """Choose an exposure preset based on target magnitude and optional urgency."""
+    """Choose an exposure preset based on target magnitude, urgency, and motion rate.
+
+    Args:
+        vmag: Target V magnitude
+        profile: Equipment profile for overrides
+        urgency: Urgency factor (0-1)
+        default_name: Default preset name if vmag is None
+        motion_rate_arcsec_min: Target motion rate (arcsec/min) for fast-mover adaptation
+        pixel_scale_arcsec_per_pixel: Pixel scale for trailing calculations
+
+    Returns:
+        ExposurePreset adapted for target characteristics
+    """
     presets = list_presets(profile)
     chosen = None
     if vmag is None:
@@ -97,6 +118,7 @@ def select_preset(
         if chosen is None:
             chosen = presets[-1]
     chosen = _apply_urgency(chosen, urgency)
+    chosen = _apply_fast_mover_adaptation(chosen, motion_rate_arcsec_min, pixel_scale_arcsec_per_pixel)
     return _apply_profile_overrides(chosen, profile)
 
 
@@ -116,6 +138,82 @@ def _apply_urgency(preset: ExposurePreset, urgency: float | None) -> ExposurePre
         delay_seconds=preset.delay_seconds * 0.8,  # Tighter spacing for urgent targets
         tracking_mode=preset.tracking_mode,
         focus_offset=preset.focus_offset,
+        gain=preset.gain,
+        offset=preset.offset,
+    )
+
+
+def _apply_fast_mover_adaptation(
+    preset: ExposurePreset,
+    motion_rate_arcsec_min: float | None,
+    pixel_scale_arcsec_per_pixel: float,
+) -> ExposurePreset:
+    """Adapt preset for fast-moving targets to limit trailing.
+
+    Strategy:
+    - For motion > 30 "/min: Reduce exposure time to keep trailing < 5 pixels
+    - Increase count to maintain total integration time (SNR)
+    - Reduce delay between exposures for tighter temporal sampling
+
+    Args:
+        preset: Base exposure preset
+        motion_rate_arcsec_min: Apparent motion rate (arcsec/min)
+        pixel_scale_arcsec_per_pixel: Image scale for trailing calculation
+
+    Returns:
+        Adapted preset with shorter exposures and more frames
+    """
+    if not motion_rate_arcsec_min or motion_rate_arcsec_min < 30:
+        return preset  # No adaptation needed for slow movers
+
+    # Target: keep trailing < 5 pixels
+    max_trailing_pixels = 5.0
+    max_trailing_arcsec = max_trailing_pixels * pixel_scale_arcsec_per_pixel
+
+    # Calculate maximum exposure time to limit trailing
+    # trailing_arcsec = motion_rate_arcsec_min * exposure_seconds / 60
+    # Solve for exposure_seconds: exposure_seconds = (max_trailing_arcsec * 60) / motion_rate_arcsec_min
+    max_exposure_seconds = (max_trailing_arcsec * 60.0) / motion_rate_arcsec_min
+
+    if preset.exposure_seconds <= max_exposure_seconds:
+        return preset  # Already short enough
+
+    # Reduce exposure time
+    original_exposure = preset.exposure_seconds
+    adapted_exposure = max_exposure_seconds
+
+    # Increase count to maintain total integration time
+    # total_integration = count * exposure
+    # new_count = (original_count * original_exposure) / adapted_exposure
+    scale_factor = original_exposure / adapted_exposure
+    adapted_count = max(preset.count, int(math.ceil(preset.count * scale_factor)))
+
+    # Reduce delay for tighter temporal sampling
+    adapted_delay = max(30.0, preset.delay_seconds * 0.5)
+
+    logger.info(
+        "Fast mover detected (%.1f\"/min): reducing exposure from %.1fs to %.1fs, "
+        "increasing count from %d to %d, reducing delay to %.1fs",
+        motion_rate_arcsec_min,
+        original_exposure,
+        adapted_exposure,
+        preset.count,
+        adapted_count,
+        adapted_delay,
+    )
+
+    return ExposurePreset(
+        name=f"{preset.name}-fast",
+        max_vmag=preset.max_vmag,
+        exposure_seconds=adapted_exposure,
+        count=adapted_count,
+        filter=preset.filter,
+        binning=preset.binning,
+        delay_seconds=adapted_delay,
+        tracking_mode=preset.tracking_mode,
+        focus_offset=preset.focus_offset,
+        gain=preset.gain,
+        offset=preset.offset,
     )
 
 

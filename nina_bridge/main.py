@@ -5,9 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import base64
-from pathlib import Path
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -29,7 +26,6 @@ from nina_bridge.templates import select_template
 from app.core.logging_config import setup_logging
 from app.db.session import get_session
 from app.services.equipment import EquipmentProfile, get_active_equipment_profile
-from app.services.imaging import sanitize_target_name
 from app.services.weather import WeatherService, WeatherSummary
 
 setup_logging()
@@ -450,64 +446,121 @@ async def list_mount_devices(
     return await _forward_request(client, "GET", "/equipment/mount/list-devices")
 
 
+@app.get(f"{API_PREFIX}/equipment/mount/info")
+async def mount_info(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    return await _forward_request(client, "GET", "/equipment/mount/info")
+
+
 @app.get(f"{API_PREFIX}/equipment/camera/capture")
 async def camera_capture(
     duration: float = Query(..., alias="duration"),
     binning: int = Query(1, alias="binning"),
     solve: bool = Query(True, alias="solve"),
-    target: str | None = Query(None, alias="target"),
+    target: str | None = Query(None, alias="targetName"),  # Client sends targetName
+    wait_for_result: bool = Query(False, alias="waitForResult"),  # Wait for exposure completion
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     _enforce_safety(action="camera_capture")
 
-    await _forward_request(
-        client,
-        "GET",
-        "/equipment/camera/set-binning",
-        params={"binning": f"{binning}x{binning}"},
-    )
+    # Pre-capture validation: check camera is connected and not exposing
+    try:
+        camera_info = await _forward_request(client, "GET", "/equipment/camera/info", unwrap=True)
+        if not camera_info.get("Connected", False):
+            logger.error("Camera capture rejected: camera not connected")
+            raise HTTPException(status_code=409, detail={"reason": "camera_not_connected", "message": "Camera must be connected before capture"})
+        if camera_info.get("IsExposing", False):
+            logger.error("Camera capture rejected: camera is already exposing")
+            raise HTTPException(status_code=409, detail={"reason": "camera_busy", "message": "Camera is currently exposing"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to check camera status before capture: %s", exc)
+        raise HTTPException(status_code=502, detail={"reason": "camera_status_check_failed", "message": str(exc)})
 
+    # Set binning before capture
+    try:
+        await _forward_request(
+            client,
+            "GET",
+            "/equipment/camera/set-binning",
+            params={"binning": f"{binning}x{binning}"},
+        )
+    except Exception as exc:
+        logger.warning("Failed to set binning to %dx%d: %s", binning, binning, exc)
+        # Continue anyway - some cameras may not support set-binning endpoint
+
+    # Build capture parameters
+    # Note: NINA API does NOT return file paths regardless of parameters used.
+    # File system monitoring is REQUIRED to detect saved files.
+    # See: documentation/FILESYSTEM_MONITORING_VERIFICATION.md
     params = {
         "duration": duration,
         "save": "true",
         "solve": "true" if solve else "false",
-        "waitForResult": "true",
-        "getResult": "true",
-        "omitImage": "false",
     }
     if target:
         params["targetName"] = target
+    if wait_for_result:
+        params["waitForResult"] = "true"
 
-    payload = await _forward_request(
-        client, "GET", "/equipment/camera/capture", params=params, unwrap=True
-    )
-
-    if isinstance(payload, str):
-        raise HTTPException(status_code=409, detail={"reason": payload})
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=502, detail={"reason": "invalid_capture_response"})
-
-    image_b64 = payload.get("Image")
-    if not image_b64:
-        raise HTTPException(status_code=502, detail={"reason": "capture_missing_image"})
+    logger.info("Requesting camera capture: duration=%.1fs, binning=%d, solve=%s, target=%s, waitForResult=%s",
+                duration, binning, solve, target, wait_for_result)
 
     try:
-        image_bytes = base64.b64decode(image_b64)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Failed to decode capture image: %s", exc)
-        raise HTTPException(status_code=502, detail={"reason": "decode_failed"})
+        payload = await _forward_request(
+            client, "GET", "/equipment/camera/capture", params=params, unwrap=True
+        )
+    except HTTPException as exc:
+        # Enhanced error logging for capture failures
+        logger.error("NINA camera capture failed: status=%s, detail=%s", exc.status_code, exc.detail)
+        if exc.status_code == 502:
+            # Unwrap and re-raise with better context
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "reason": "nina_capture_failed",
+                    "message": "NINA rejected camera capture request - check camera connection and NINA GUI state",
+                    "original_error": str(exc.detail)
+                }
+            )
+        raise
 
-    safe_target = sanitize_target_name(target or "capture")
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    save_dir = Path("/data/images")
-    save_dir.mkdir(parents=True, exist_ok=True)
-    file_path = save_dir / f"{safe_target}_{timestamp}.fits"
-    file_path.write_bytes(image_bytes)
+    # Handle different response types based on waitForResult parameter
+    if isinstance(payload, str):
+        if wait_for_result:
+            # When waitForResult=true, string responses are unexpected
+            logger.error("NINA returned string instead of capture payload: %s", payload)
+            raise HTTPException(status_code=409, detail={"reason": "capture_rejected", "message": payload})
+        else:
+            # Without waitForResult, "Capture started" is expected - convert to dict
+            logger.info("NINA returned immediate response: %s", payload)
+            payload = {"Response": payload}
+
+    if not isinstance(payload, dict):
+        logger.error("NINA returned unexpected payload type: %s", type(payload))
+        raise HTTPException(status_code=502, detail={"reason": "invalid_capture_response", "message": "Expected dict payload from NINA"})
+
+    # Extract plate solve result if present
+    # Note: NINA API does NOT return file paths. File system monitoring is required.
+    if isinstance(payload, dict):
+        platesolve = payload.get("PlateSolveResult")
+        response_payload = payload
+    else:
+        # NINA sometimes returns raw strings in streaming/onlySaveRaw mode
+        platesolve = None
+        response_payload = {"Response": payload}
+
+    logger.info(
+        "Capture response received; platesolve=%s type=%s",
+        bool(platesolve),
+        "dict" if isinstance(payload, dict) else "raw",
+    )
 
     result_payload = {
-        "file": str(file_path),
-        "platesolve": payload.get("PlateSolveResult"),
-        "nina_response": payload,
+        "platesolve": platesolve,
+        "nina_response": response_payload,
     }
     return {"Success": True, "Response": result_payload}
 
@@ -517,6 +570,13 @@ async def camera_abort(
     client: httpx.AsyncClient = Depends(get_client),
 ) -> Any:
     return await _forward_request(client, "GET", "/equipment/camera/abort-exposure")
+
+
+@app.get(f"{API_PREFIX}/equipment/camera/info")
+async def camera_info(
+    client: httpx.AsyncClient = Depends(get_client),
+) -> Any:
+    return await _forward_request(client, "GET", "/equipment/camera/info")
 
 
 @app.get(f"{API_PREFIX}/equipment/focuser/move")

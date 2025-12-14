@@ -9,7 +9,7 @@ class BridgeSettings(BaseSettings):
     """Runtime configuration for the bridge service."""
 
     nina_base_url: str = "http://mock-nina:1888/api"
-    http_timeout: float = 15.0
+    http_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
     max_retries: int = 3
     require_weather_safe: bool = True
 

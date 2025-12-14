@@ -14,13 +14,18 @@
 
   <div class="targets-controls" style="margin-bottom: 1rem; gap: 0.5rem; align-items: center;">
     <form hx-post="/dashboard/targets/refresh" hx-target="#targets-content" hx-swap="outerHTML"
-      style="display: flex; gap: 0.5rem; align-items: center;">
+      style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
       <label class="tiny">Start: <input type="time" name="start_time" value="{{ start_time }}"
           class="input-tiny"></label>
       <label class="tiny">End: <input type="time" name="end_time" value="{{ end_time }}" class="input-tiny"></label>
       <button type="submit" class="ghost-small">Update Window</button>
       <button hx-post="/dashboard/targets/refresh" hx-include="closest form" hx-target="#targets-content"
         hx-swap="outerHTML" class="ghost-small" title="Re-run target selection logic">Refresh</button>
+      <button hx-post="/dashboard/targets/clear" hx-target="#targets-content" hx-swap="outerHTML"
+        hx-confirm="Clear all NEOCP data and reseed with synthetic targets?"
+        class="ghost-small"
+        style="background: var(--color-warn); color: white;"
+        title="Clear database and reseed with fresh synthetic targets">Clear & Reseed</button>
     </form>
   </div>
 

@@ -251,11 +251,18 @@ async def camera_connect(to: Optional[str] = None) -> NinaResponse[str]:
 @app.get(f"{API_PREFIX}/equipment/camera/capture")
 async def camera_capture(
     duration: float = 1.0,
-    binning: int = 1, # Note: NINA API doesn't pass binning here usually, it's set via set-binning, but for mock simplicity we accept it or ignore
+    binning: int = 1,
     save: bool = True,
-) -> NinaResponse[str]:
+    solve: bool = False,
+    waitForResult: bool = False,
+    targetName: str | None = None,
+) -> NinaResponse[dict[str, Any] | str]:
+    """Camera capture endpoint matching NINA Advanced API behavior.
+
+    When waitForResult=True, blocks until exposure completes and returns full result.
+    Otherwise returns "Capture started" immediately.
+    """
     try:
-        # NINA API capture endpoint returns "Capture started" immediately
         start_time = await _start_exposure(duration, binning)
     except ExposureRunningError:
         return _error("Camera currently exposing", 409)
@@ -264,11 +271,32 @@ async def camera_capture(
     except SequenceRunningError:
         return _error("Sequence running", 409)
 
-    async def runner() -> None:
-        await _complete_exposure(duration, binning)
+    if waitForResult:
+        # Wait for exposure to complete and return full result
+        filename = targetName or f"MOCK_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        await _complete_exposure(duration, binning, filename)
 
-    asyncio.create_task(runner())
-    return _success("Capture started")
+        # Build response matching NINA's structure
+        async with state_lock:
+            file_path = STATE.camera.last_image_path
+
+        result = {
+            "SavedFilePath": str(file_path) if file_path else None,
+            "PlateSolveResult": {
+                "Success": solve and random.random() > 0.3,  # 70% solve success when requested
+                "Coordinates": {
+                    "RADegrees": 180.0 + random.uniform(-1, 1),
+                    "DECDegrees": 45.0 + random.uniform(-1, 1),
+                } if solve and random.random() > 0.3 else None,
+            } if solve else None,
+        }
+        return _success(result)
+    else:
+        # Start exposure in background
+        async def runner() -> None:
+            await _complete_exposure(duration, binning)
+        asyncio.create_task(runner())
+        return _success("Capture started")
 
 
 @app.get(f"{API_PREFIX}/equipment/camera/abort-exposure")

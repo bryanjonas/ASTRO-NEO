@@ -106,21 +106,32 @@ class NinaBridgeService:
         if exposure_seconds:
             params["duration"] = exposure_seconds
         if target:
-            params["target"] = target
+            params["targetName"] = target
         return self._request("GET", "/equipment/camera/capture", params)
 
     def abort_exposure(self) -> str:
         return self._request("GET", "/equipment/camera/abort-exposure")
 
-    def wait_for_mount_ready(self, timeout: float = 180.0, poll_interval: float = 1.0) -> None:
-        """Poll mount info until slewing stops."""
+    def wait_for_mount_ready(
+        self,
+        timeout: float = 180.0,
+        poll_interval: float = 1.0,
+        settle_seconds: float = 3.0,
+    ) -> None:
+        """Poll mount info until slewing stops and the mount has settled."""
         deadline = time.time() + timeout
+        settle_deadline = 0.0
         while time.time() < deadline:
             status = self._request("GET", "/equipment/mount/info")
             if not status.get("Slewing", False):
-                return
+                if settle_deadline == 0.0:
+                    settle_deadline = time.time() + settle_seconds
+                elif time.time() >= settle_deadline:
+                    return
+            else:
+                settle_deadline = 0.0
             time.sleep(poll_interval)
-        raise Exception("Mount is still slewing after timeout")
+        raise Exception("Mount is still slewing or settling after timeout")
 
     def wait_for_camera_idle(self, timeout: float = 120.0, poll_interval: float = 0.5) -> None:
         """Ensure the camera is not currently exposing before starting a new capture."""
