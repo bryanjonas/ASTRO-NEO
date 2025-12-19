@@ -93,6 +93,7 @@ def test_confirmation_workflow():
             binning=1,
             exposure_seconds=science_exp,
             target=target_name,
+            request_solve=False,
         )
         end_time = datetime.utcnow()
         elapsed = (end_time - start_time).total_seconds()
@@ -102,21 +103,7 @@ def test_confirmation_workflow():
         print()
 
         # Check platesolve
-        platesolve = science_result.get("platesolve")
-        if platesolve:
-            success = platesolve.get("Success", False)
-            solve_time = platesolve.get("SolveTime", "N/A")
-            print(f"Plate solve: {'SUCCESS' if success else 'FAILED'}")
-            print(f"Solve time: {solve_time}")
-
-            if success:
-                coords = platesolve.get("Coordinates", {})
-                ra = coords.get("RADegrees")
-                dec = coords.get("DECDegrees")
-                if ra and dec:
-                    print(f"Solved position: RA {ra:.5f}°, Dec {dec:.5f}°")
-        else:
-            print("No plate solve result returned")
+        print("Science exposure queued; local solver should handle WCS.")
 
         print()
 

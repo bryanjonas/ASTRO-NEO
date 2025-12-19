@@ -44,7 +44,6 @@ from app.services.equipment import (
     save_profile,
 )
 from app.services.kpis import KPIService
-from app.services.presets import list_presets
 from app.services.session import SESSION_STATE
 from app.services.night_ops import NightSessionError, kickoff_imaging
 from app.services.weather import WeatherService
@@ -499,6 +498,7 @@ def _load_targets(limit: int = 20) -> list[dict[str, Any]]:
             "max_altitude_deg": obs.max_altitude_deg,
             "min_moon_separation_deg": obs.min_moon_separation_deg,
             "vmag": cand.vmag,
+            "candidate_id": cand.id,
         })
     if not results:
         logger.info(
@@ -586,7 +586,7 @@ async def targets_refresh(
 
 @router.post("/dashboard/targets/clear", response_class=HTMLResponse)
 async def targets_clear(request: Request) -> Any:
-    """Clear all NEOCP data and reseed with synthetic targets."""
+    """Clear all NEOCP data and re-fetch fresh targets."""
     from sqlmodel import delete
 
     try:
@@ -606,25 +606,34 @@ async def targets_clear(request: Request) -> Any:
             session.commit()
             logger.info("Database cleared successfully")
 
-        # Reseed synthetic targets
-        logger.info("Reseeding synthetic targets")
-        from app.services.synthetic_targets import SyntheticTargetService
+        # Re-fetch targets using the appropriate service
+        # Check if we're in synthetic mode or using real NEOCP data
+        logger.info("Re-fetching targets")
 
-        service = SyntheticTargetService()
-        service.seed_targets()
-        logger.info("Synthetic targets seeded successfully")
+        if settings.neocp_use_local_sample:
+            # Use synthetic targets for testing
+            from app.services.synthetic_targets import SyntheticTargetService
+            service = SyntheticTargetService()
+            service.seed_targets()
+            logger.info("Targets seeded successfully")
+        else:
+            # Fetch from real NEOCP feed
+            from app.services.neocp_fetcher import NeoCPFetcherService
+            service = NeoCPFetcherService()
+            service.run_cycle()
+            logger.info("NEOCP targets fetched successfully")
 
         # Render targets partial with success message
         status_banner = {
             "level": "good",
-            "message": "Database cleared and synthetic targets reseeded successfully"
+            "message": "Database cleared and targets re-fetched successfully"
         }
 
     except Exception as e:
-        logger.error(f"Failed to clear database: {e}")
+        logger.error(f"Failed to clear and reseed database: {e}")
         status_banner = {
             "level": "error",
-            "message": f"Failed to clear database: {str(e)}"
+            "message": f"Failed to clear and reseed: {str(e)}"
         }
 
     # Render main targets partial
@@ -704,15 +713,25 @@ def _render_targets_partial(
     if active_target_data:
         from app.services.presets import select_preset
         from app.services.equipment import get_active_equipment_profile
-        
+        from app.services.motion import estimate_motion_rate_arcsec_per_min
+
         profile = get_active_equipment_profile()
         score = active_target_data.get("score")
         urgency = max(0.0, min(1.0, score / 100.0)) if score is not None else None
-        
+        motion_rate = None
+        if active_target_data.get("candidate_id"):
+            with get_session() as motion_session:
+                motion_rate = estimate_motion_rate_arcsec_per_min(
+                    motion_session,
+                    active_target_data.get("candidate_id"),
+                )
+
         active_preset = select_preset(
             vmag=active_target_data.get("vmag"),
             profile=profile,
-            urgency=urgency
+            urgency=urgency,
+            motion_rate_arcsec_min=motion_rate,
+            pixel_scale_arcsec_per_pixel=settings.astrometry_pixel_scale_arcsec,
         )
 
     return templates.TemplateResponse(
@@ -771,33 +790,6 @@ def reports_partial(request: Request) -> Any:
         "dashboard/partials/reports.html",
         {"request": request, "submissions": submissions, "timezone": SESSION_STATE.timezone},
     )
-
-
-def _render_exposure_partial(
-    request: Request,
-    presets: list,
-    selected_preset: dict[str, Any] | None,
-    error: str | None = None,
-    status_code: int = 200,
-) -> HTMLResponse:
-    effective_selected = selected_preset
-    if effective_selected is None and presets:
-        default = _default_preset(presets)
-        if default:
-            effective_selected = SESSION_STATE.select_preset(default)
-    return templates.TemplateResponse(
-        "dashboard/partials/exposure_config.html",
-        {"request": request, "presets": presets, "selected_preset": effective_selected, "error": error},
-        status_code=status_code,
-    )
-
-
-@router.get("/dashboard/partials/exposure_config", response_class=HTMLResponse)
-def exposure_config_partial(request: Request) -> Any:
-    """Render exposure preset configuration."""
-    profile = get_active_equipment_profile()
-    presets = list(list_presets(profile))
-    return _render_exposure_partial(request, presets, SESSION_STATE.selected_preset)
 
 
 @router.get("/dashboard/partials/session_status", response_class=HTMLResponse)
@@ -1103,64 +1095,6 @@ async def masters_select(request: Request) -> Any:
     return masters_partial(request)
 
 
-@router.post("/dashboard/exposure/select", response_class=HTMLResponse)
-async def exposure_select(request: Request) -> Any:
-    """HTMX handler to mark a preset as active for the current session."""
-    form = await request.form()
-    preset_name = (form.get("preset_name") or "").strip().lower()
-    profile = get_active_equipment_profile()
-    presets = list(list_presets(profile))
-    if not preset_name:
-        return _render_exposure_partial(
-            request,
-            presets,
-            SESSION_STATE.selected_preset,
-            error="Select a preset to activate.",
-            status_code=400,
-        )
-    chosen = next((preset for preset in presets if preset.name.lower() == preset_name), None)
-    if not chosen:
-        return _render_exposure_partial(
-            request,
-            presets,
-            SESSION_STATE.selected_preset,
-            error="Preset not found or unavailable for the active equipment profile.",
-            status_code=404,
-        )
-    SESSION_STATE.select_preset(chosen)
-    return _render_exposure_partial(request, presets, SESSION_STATE.selected_preset)
-
-
-@router.post("/dashboard/exposure/config", response_class=HTMLResponse)
-async def exposure_config_update(request: Request) -> Any:
-    """Allow editing of the active imaging configuration."""
-    form = await request.form()
-    profile = get_active_equipment_profile()
-    presets = list(list_presets(profile))
-    error = None
-    try:
-        exposure_seconds = float(form.get("exposure_seconds") or 0)
-        count = int(form.get("count") or 0)
-        delay_seconds = float(form.get("delay_seconds") or 0)
-        binning = int(form.get("binning") or 1)
-        filter_name = (form.get("filter") or "").strip() or "L"
-        if exposure_seconds <= 0 or count <= 0 or delay_seconds < 0 or binning <= 0:
-            raise ValueError("invalid_range")
-        SESSION_STATE.update_preset_config(
-            exposure_seconds=exposure_seconds,
-            count=count,
-            delay_seconds=delay_seconds,
-            binning=binning,
-            filter_name=filter_name,
-        )
-    except ValueError as exc:
-        if str(exc) == "no_preset_selected":
-            error = "Select a preset before editing the imaging configuration."
-        else:
-            error = "Provide positive values for exposure, count, spacing, and binning."
-    return _render_exposure_partial(request, presets, SESSION_STATE.selected_preset, error=error)
-
-
 @router.post("/dashboard/night/start", response_class=HTMLResponse)
 def night_start(request: Request) -> Any:
     """Convenience button on Live tab to kick off nightly session prep."""
@@ -1268,14 +1202,6 @@ async def capture_delete(request: Request) -> Any:
         {"request": request, "captures": captures},
     )
 
-
-def _default_preset(presets: list) -> Any | None:
-    for preset in presets:
-        if getattr(preset, "name", "").lower() == "bright":
-            return preset
-    return presets[0] if presets else None
-
-
 @router.get("/dashboard/partials/capture_viewer", response_class=HTMLResponse)
 def capture_viewer_partial(request: Request, path: str | None = None, target: str | None = None, index: str | None = None, started_at: str | None = None) -> Any:
     """Render a lightweight FITS preview for the selected capture."""
@@ -1368,37 +1294,6 @@ def review_modal_partial(request: Request, path: str) -> Any:
             "association": existing_association,
         },
     )
-
-
-def _default_preset(presets: list) -> Any | None:
-    for preset in presets:
-        if getattr(preset, "name", "").lower() == "bright":
-            return preset
-    return presets[0] if presets else None
-
-
-@router.get("/dashboard/partials/capture_viewer", response_class=HTMLResponse)
-def capture_viewer_partial(request: Request, path: str | None = None, target: str | None = None, index: str | None = None, started_at: str | None = None) -> Any:
-    """Render a lightweight FITS preview for the selected capture."""
-    preview = None
-    error = None
-    meta = {"target": target, "index": index, "started_at": started_at, "path": path}
-    if path:
-        try:
-            preview = _generate_fits_preview(path)
-        except Exception as exc:  # noqa: BLE001
-            error = f"Unable to render FITS preview: {exc}"
-    return templates.TemplateResponse(
-        "dashboard/partials/capture_viewer.html",
-        {
-            "request": request,
-            "preview": preview,
-            "error": error,
-            "meta": meta,
-        },
-    )
-
-
 @router.post("/dashboard/targets/mode", response_class=HTMLResponse)
 async def targets_mode(request: Request) -> Any:
     """Toggle between auto and manual target selection."""

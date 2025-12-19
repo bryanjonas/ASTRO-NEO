@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -14,6 +16,9 @@ from photutils.detection import DAOStarFinder
 from sqlmodel import Session, select
 
 from app.models import CaptureLog, NeoEphemeris, CandidateAssociation
+from app.services.star_subtraction import CatalogStarSubtractor
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
@@ -26,24 +31,24 @@ class AnalysisService:
             data = fits.getdata(path)
         except Exception:
             return []
-            
+
         if data is None:
             return []
-            
+
         data = np.asarray(data, dtype=float)
         mean, median, std = sigma_clipped_stats(data, sigma=3.0)
         threshold = median + (5.0 * std)
-        
+
         try:
             # FWHM=4.0 is a reasonable default for typical seeing
             finder = DAOStarFinder(fwhm=4.0, threshold=threshold - median)
             sources = finder(data - median)
         except Exception:
             return []
-            
+
         if sources is None or len(sources) == 0:
             return []
-            
+
         results = []
         for source in sources:
             x = float(source["xcentroid"])
@@ -51,16 +56,16 @@ class AnalysisService:
             flux = float(source["flux"])
             peak = float(source["peak"])
             snr = float(peak / std) if std else 0.0
-            
+
             ra_deg = None
             dec_deg = None
-            
+
             if wcs:
                 # Convert pixel to sky coordinates
                 sky = wcs.pixel_to_world(x, y)
                 ra_deg = float(sky.ra.deg)
                 dec_deg = float(sky.dec.deg)
-                
+
             results.append({
                 "x": x,
                 "y": y,
@@ -70,8 +75,84 @@ class AnalysisService:
                 "ra_deg": ra_deg,
                 "dec_deg": dec_deg,
             })
-            
+
         return results
+
+    def detect_sources_with_star_subtraction(
+        self,
+        path: Path,
+        wcs: WCS,
+        target_ra: float,
+        target_dec: float,
+        exclusion_radius_arcsec: float = 20.0
+    ) -> Tuple[List[dict[str, Any]], int]:
+        """
+        Detect sources after subtracting field stars.
+
+        Uses astrometry.net .corr file to subtract catalog stars,
+        then detects remaining sources (like the asteroid).
+
+        Returns:
+            Tuple of (detected sources, number of stars subtracted)
+        """
+        try:
+            data = fits.getdata(path)
+        except Exception as e:
+            logger.error(f"Could not load FITS data from {path}: {e}")
+            return [], 0
+
+        if data is None:
+            return [], 0
+
+        data = np.asarray(data, dtype=float)
+
+        # Subtract catalog stars
+        subtractor = CatalogStarSubtractor(path)
+        cleaned_data, stars_subtracted = subtractor.subtract_stars(
+            data, target_ra, target_dec, exclusion_radius_arcsec
+        )
+
+        # Detect sources in cleaned image with lower threshold
+        mean, median, std = sigma_clipped_stats(cleaned_data, sigma=3.0)
+        threshold = median + (3.0 * std)  # Lower threshold after star removal
+
+        try:
+            finder = DAOStarFinder(fwhm=4.0, threshold=threshold - median)
+            sources = finder(cleaned_data - median)
+        except Exception as e:
+            logger.warning(f"Source detection failed: {e}")
+            return [], stars_subtracted
+
+        if sources is None or len(sources) == 0:
+            logger.debug("No sources detected after star subtraction")
+            return [], stars_subtracted
+
+        # Convert to results with WCS
+        results = []
+        for source in sources:
+            x = float(source["xcentroid"])
+            y = float(source["ycentroid"])
+            flux = float(source["flux"])
+            peak = float(source["peak"])
+            snr = float(peak / std) if std else 0.0
+
+            # Convert pixel to sky coordinates
+            sky = wcs.pixel_to_world(x, y)
+            ra_deg = float(sky.ra.deg)
+            dec_deg = float(sky.dec.deg)
+
+            results.append({
+                "x": x,
+                "y": y,
+                "flux": flux,
+                "peak": peak,
+                "snr": snr,
+                "ra_deg": ra_deg,
+                "dec_deg": dec_deg,
+            })
+
+        logger.info(f"Detected {len(results)} sources after subtracting {stars_subtracted} catalog stars")
+        return results, stars_subtracted
 
     def find_best_match(
         self, 
@@ -104,40 +185,38 @@ class AnalysisService:
                 
         return best_match
 
-    def auto_associate(self, db: Session, capture: CaptureLog, wcs: WCS) -> Optional[CandidateAssociation]:
-        """Attempt to automatically associate a capture with its target ephemeris."""
+    def auto_associate(
+        self,
+        db: Session,
+        capture: CaptureLog,
+        wcs: WCS,
+        use_star_subtraction: bool = True
+    ) -> Optional[CandidateAssociation]:
+        """
+        Attempt to automatically associate a capture with its target ephemeris.
+
+        Uses star subtraction for improved centroid accuracy when .corr file exists.
+
+        Args:
+            db: Database session
+            capture: Capture log entry
+            wcs: WCS solution
+            use_star_subtraction: If True, subtract catalog stars before detection
+
+        Returns:
+            CandidateAssociation if successful, None otherwise
+        """
         if not capture.target or capture.target == "unknown":
+            logger.debug("No target specified, cannot auto-associate")
             return None
-            
-        # 1. Find Ephemeris
-        # Look for ephemeris close to capture time
-        # This assumes we have ephemeris populated. 
-        # For now, we'll just look for ANY ephemeris for this target that is close in time.
-        # Ideally, we interpolate, but nearest neighbor is fine for this step.
-        
-        # We need to join with NeoCandidate to get the ID, but for now let's assume 
-        # we can find it via trksub if we had that link.
-        # Actually, CaptureLog.target is usually the trksub/designation.
-        # Let's try to find an ephemeris entry.
-        
-        # Find candidate first
-        # We don't have a direct link from CaptureLog to NeoCandidate easily without querying.
-        # Let's assume target name matches trksub.
-        
-        # Note: This query might be expensive if not indexed well, but for now it's okay.
-        # We need to find the ephemeris that corresponds to this capture time.
-        
-        # Simplified: Find nearest ephemeris within 5 minutes
-        stmt = select(NeoEphemeris).where(NeoEphemeris.trksub == capture.target).order_by(
-            (NeoEphemeris.epoch - capture.started_at)
-        ) # This sorting might not work directly in all SQL dialects with abs()
-        
-        # Better: fetch all for target and find nearest in python (dataset is small per target usually)
+
+        # 1. Find Ephemeris (nearest to capture time)
         ephems = db.exec(select(NeoEphemeris).where(NeoEphemeris.trksub == capture.target)).all()
-        
+
         if not ephems:
+            logger.warning(f"No ephemeris found for target {capture.target}")
             return None
-            
+
         best_eph = None
         min_diff = float("inf")
         for eph in ephems:
@@ -145,30 +224,93 @@ class AnalysisService:
             if diff < min_diff:
                 min_diff = diff
                 best_eph = eph
-                
-        if not best_eph or min_diff > 300: # > 5 mins
+
+        if not best_eph or min_diff > 300:  # > 5 mins
+            logger.warning(f"Nearest ephemeris is {min_diff:.0f}s away (> 300s limit)")
             return None
-            
-        # 2. Detect Sources
-        detections = self.detect_sources(Path(capture.path), wcs)
-        
-        # 3. Match
-        match = self.find_best_match(detections, best_eph.ra_deg, best_eph.dec_deg, tolerance_arcsec=10.0) # 10 arcsec tolerance
-        
-        if match:
-            # 4. Create Association
-            assoc = CandidateAssociation(
-                capture_id=capture.id,
-                ra_deg=match["ra_deg"],
-                dec_deg=match["dec_deg"],
-                # We could store residuals here if the model supported it
+
+        logger.info(f"Using ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
+
+        # 2. Detect Sources (with or without star subtraction)
+        stars_subtracted = 0
+        if use_star_subtraction:
+            detections, stars_subtracted = self.detect_sources_with_star_subtraction(
+                Path(capture.path),
+                wcs,
+                best_eph.ra_deg,
+                best_eph.dec_deg,
+                exclusion_radius_arcsec=20.0
             )
-            db.add(assoc)
-            db.commit()
-            db.refresh(assoc)
-            return assoc
-            
-        return None
+        else:
+            detections = self.detect_sources(Path(capture.path), wcs)
+
+        if not detections:
+            logger.warning(f"No sources detected in {capture.path}")
+            return None
+
+        logger.info(f"Detected {len(detections)} sources")
+
+        # 3. Find Best Match
+        tolerance_arcsec = 10.0
+        match = self.find_best_match(
+            detections,
+            best_eph.ra_deg,
+            best_eph.dec_deg,
+            tolerance_arcsec=tolerance_arcsec
+        )
+
+        if not match:
+            logger.warning(
+                f"No match within {tolerance_arcsec}\" of predicted position "
+                f"({best_eph.ra_deg:.5f}, {best_eph.dec_deg:.5f})"
+            )
+            return None
+
+        # 4. Calculate Residual
+        residual_arcsec = self._calculate_residual(
+            match["ra_deg"], match["dec_deg"],
+            best_eph.ra_deg, best_eph.dec_deg
+        )
+
+        logger.info(
+            f"Matched source at ({match['ra_deg']:.5f}, {match['dec_deg']:.5f}) "
+            f"with residual {residual_arcsec:.2f}\" (SNR={match.get('snr', 0):.1f})"
+        )
+
+        # 5. Create Association with quality metrics
+        assoc = CandidateAssociation(
+            capture_id=capture.id,
+            ra_deg=match["ra_deg"],
+            dec_deg=match["dec_deg"],
+            predicted_ra_deg=best_eph.ra_deg,
+            predicted_dec_deg=best_eph.dec_deg,
+            residual_arcsec=residual_arcsec,
+            snr=match.get("snr"),
+            peak_counts=match.get("peak"),
+            method="auto",
+            stars_subtracted=stars_subtracted if use_star_subtraction else None,
+            created_at=datetime.utcnow(),
+        )
+        db.add(assoc)
+        db.commit()
+        db.refresh(assoc)
+
+        return assoc
+
+    def _calculate_residual(
+        self,
+        ra1: float,
+        dec1: float,
+        ra2: float,
+        dec2: float
+    ) -> float:
+        """Calculate angular separation in arcseconds."""
+        # Simple Euclidean for small separations with cos(dec) correction
+        cos_dec = math.cos(math.radians((dec1 + dec2) / 2))
+        d_ra = (ra1 - ra2) * cos_dec
+        d_dec = dec1 - dec2
+        dist_deg = math.sqrt(d_ra**2 + d_dec**2)
+        return dist_deg * 3600.0
     def resolve_click(self, capture: CaptureLog, click_x: float | None = None, click_y: float | None = None, polygon: list[dict[str, float]] | None = None, crop_size: int = 20) -> dict[str, Any] | None:
         """Resolve a click or polygon on an image to a precise centroid and RA/Dec."""
         import logging

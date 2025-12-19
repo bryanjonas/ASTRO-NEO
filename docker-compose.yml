@@ -27,29 +27,29 @@ services:
       - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-  # neocp-fetcher:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   pull_policy: build
-  #   depends_on:
-  #     - db
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-  #     SERVICE_NAME: neocp-fetcher
-  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  #     RUN_MIGRATIONS: 0
-  #   command: ["python", "-m", "app.services.neocp_fetcher"]
-  #   restart: unless-stopped
-  #   ports:
-  #     - "19500:9500"
-  #   volumes:
-  #     - ./config:/app/config:ro
-  #     - ./data/neocp_snapshots:/data/neocp_snapshots:ro
-  #     - /etc/localtime:/etc/localtime:ro
-  #     - /etc/timezone:/etc/timezone:ro
+  neocp-fetcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      SERVICE_NAME: neocp-fetcher
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: 0
+    command: ["python", "-m", "app.services.neocp_fetcher"]
+    restart: unless-stopped
+    ports:
+      - "19500:9500"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
   observability-engine:
     build:
       context: .
@@ -69,6 +69,29 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+  image-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      SERVICE_NAME: image-monitor
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: 0
+    command: ["python", "-m", "app.services.image_monitor_service"]
+    restart: unless-stopped
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config:ro
+      - ./data:/data
+      - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
   # cron:
@@ -146,22 +169,22 @@ services:
       - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-  synthetic-targets: #Turn off neocp-fetcher
-    build:
-      context: .
-      dockerfile: Dockerfile
-    pull_policy: build
-    depends_on:
-      - db
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      SERVICE_NAME: synthetic-targets
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      RUN_MIGRATIONS: 0
-    command: ["python", "-m", "app.services.synthetic_targets"]
-    restart: unless-stopped
+  # synthetic-targets: #Turn off neocp-fetcher
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   pull_policy: build
+  #   depends_on:
+  #     - db
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+  #     SERVICE_NAME: synthetic-targets
+  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  #     RUN_MIGRATIONS: 0
+  #   command: ["python", "-m", "app.services.synthetic_targets"]
+  #   restart: unless-stopped
 
 
 #   mock-nina:
@@ -200,4 +223,4 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ${NINA_IMAGES_PATH:-./data/fits}
+      device: ${NINA_IMAGES_HOST_PATH:-./data/fits}

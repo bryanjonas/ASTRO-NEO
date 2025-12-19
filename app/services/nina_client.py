@@ -17,11 +17,24 @@ class NinaBridgeService:
         self.base_url = base_url or settings.nina_bridge_url.rstrip("/")
         self.timeout = timeout or settings.nina_bridge_timeout
 
-    def _request(self, method: str, path: str, params: dict[str, Any] | None = None, json: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
         url = f"{self.base_url}{path}"
         try:
             logger.debug("NINA Request: %s %s params=%s json=%s", method, url, params, json)
-            response = httpx.request(method, url, params=params, json=json, timeout=self.timeout)
+            response = httpx.request(
+                method,
+                url,
+                params=params,
+                json=json,
+                timeout=timeout or self.timeout,
+            )
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as exc:
@@ -94,11 +107,12 @@ class NinaBridgeService:
         binning: int,
         exposure_seconds: float | None = None,
         target: str | None = None,
+        request_solve: bool = True,
     ) -> Any:
         params: dict[str, Any] = {
             "binning": binning,
             "save": True,
-            "solve": True,
+            "solve": request_solve,
             "waitForResult": True,
             "getResult": True,
             "omitImage": False,
@@ -107,7 +121,12 @@ class NinaBridgeService:
             params["duration"] = exposure_seconds
         if target:
             params["targetName"] = target
-        return self._request("GET", "/equipment/camera/capture", params)
+
+        timeout = None
+        if exposure_seconds:
+            timeout = max(self.timeout, float(exposure_seconds) + 10.0)
+
+        return self._request("GET", "/equipment/camera/capture", params, timeout=timeout)
 
     def abort_exposure(self) -> str:
         return self._request("GET", "/equipment/camera/abort-exposure")

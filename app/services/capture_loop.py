@@ -96,6 +96,39 @@ def run_capture_loop(
             )
 
     for idx in range(1, descriptor.count + 1):
+        # Check if session was paused or ended
+        current_session = SESSION_STATE.current
+        if not current_session:
+            SESSION_STATE.log_event(
+                f"Session ended - stopping capture loop for {descriptor.name}",
+                "warn",
+            )
+            break
+
+        # Check session status via database to get real-time state
+        with get_session() as db_session:
+            from app.models.session import ObservingSession as DBObservingSession
+            from sqlmodel import select
+            db_obs_session = db_session.exec(
+                select(DBObservingSession)
+                .where(DBObservingSession.status != "ended")
+                .order_by(DBObservingSession.start_time.desc())
+            ).first()
+
+            if not db_obs_session:
+                SESSION_STATE.log_event(
+                    f"Session ended - stopping capture loop for {descriptor.name}",
+                    "warn",
+                )
+                break
+
+            if db_obs_session.status == "paused":
+                SESSION_STATE.log_event(
+                    f"Session paused - stopping capture loop for {descriptor.name}",
+                    "warn",
+                )
+                break
+
         attempt_time = datetime.utcnow()
         ra, dec = _predict_current_coords(
             descriptor.candidate_id,
@@ -129,11 +162,15 @@ def run_capture_loop(
         )
 
         try:
+            # Use bin1 and longer exposure for better plate solve reliability
+            confirm_exposure = min(15.0, max(10.0, descriptor.exposure_seconds * 0.5))
+
             confirmation_result = bridge.start_exposure(
                 filter_name=descriptor.filter_name,
-                binning=2,  # Use bin2 for faster confirmation
-                exposure_seconds=min(8.0, descriptor.exposure_seconds),  # Short exposure (max 8s)
+                binning=1,  # Always use bin1 for better star detection
+                exposure_seconds=confirm_exposure,
                 target=f"{descriptor.name}-CONFIRM",
+                request_solve=True,
             )
         except Exception as exc:
             logger.error("Confirmation exposure failed for %s (exposure %d/%d): %s", descriptor.name, idx, descriptor.count, exc)
@@ -176,11 +213,31 @@ def run_capture_loop(
                             except Exception as exc:
                                 logger.error("Re-slew failed for %s: %s", descriptor.name, exc)
                                 SESSION_STATE.log_event(f"Re-slew failed: {exc}", "warn")
-                else:
+                    else:
+                        # Plate solve succeeded but missing coordinates
+                        SESSION_STATE.log_event(
+                            f"Confirmation solve succeeded but missing coordinates - continuing with predicted position",
+                            "warn",
+                        )
+                elif confirm_platesolve:
+                    # Plate solve attempted but failed
+                    error_msg = confirm_platesolve.get("Error") or "Unknown error"
                     SESSION_STATE.log_event(
-                        f"Confirmation exposure did not solve - continuing with predicted position",
+                        f"Confirmation plate solve failed: {error_msg} - continuing with predicted position",
                         "warn",
                     )
+                else:
+                    # No plate solve data returned
+                    SESSION_STATE.log_event(
+                        f"Confirmation exposure returned no plate solve data - continuing with predicted position",
+                        "warn",
+                    )
+            else:
+                # Unexpected response type
+                SESSION_STATE.log_event(
+                    f"Confirmation exposure returned unexpected response type - continuing with predicted position",
+                    "warn",
+                )
 
         # Step 5: Take the actual science exposure
         attempted += 1
@@ -189,12 +246,14 @@ def run_capture_loop(
             "info",
         )
 
+        science_solve_requested = False
         try:
             result = bridge.start_exposure(
                 filter_name=descriptor.filter_name,
                 binning=descriptor.binning,
                 exposure_seconds=descriptor.exposure_seconds,
                 target=descriptor.name,
+                request_solve=science_solve_requested,
             )
         except Exception as exc:
             logger.error("Camera capture failed for %s (exposure %d/%d): %s", descriptor.name, idx, descriptor.count, exc)
@@ -219,7 +278,7 @@ def run_capture_loop(
         # Note: NINA API does not return file paths - will be None
         # File path will be filled by file system monitoring service
         file_path = result.get("file")
-        platesolve = result.get("platesolve")
+        platesolve = result.get("platesolve") if science_solve_requested else None
 
         started_at = datetime.utcnow().isoformat()
         capture_record: dict[str, Any] = {
@@ -232,8 +291,14 @@ def run_capture_loop(
             "predicted_ra_deg": ra,
             "predicted_dec_deg": dec,
             "platesolve": platesolve,
+            "exposure_seconds": descriptor.exposure_seconds,
+            "filter": descriptor.filter_name,
+            "binning": descriptor.binning,
         }
         SESSION_STATE.add_capture(capture_record)
+
+        # Treat successful capture as solved pending local WCS
+        solved += 1
 
         if platesolve:
             success = platesolve.get("Success")
@@ -244,22 +309,19 @@ def run_capture_loop(
             if isinstance(ra_header, (int, float)) and isinstance(dec_header, (int, float)):
                 coord_str = f" RA {ra_header:.3f}° Dec {dec_header:.3f}°"
             if success:
-                solved += 1
                 SESSION_STATE.log_event(
                     f"NINA solve succeeded for {descriptor.name}.{coord_str}",
                     "good",
                 )
             else:
-                failed += 1
                 SESSION_STATE.log_event(
                     f"NINA solve failed for {descriptor.name} (exposure {idx}/{descriptor.count}){coord_str}",
                     "warn",
                 )
         else:
-            failed += 1
             SESSION_STATE.log_event(
-                f"NINA did not return solve status for {descriptor.name} (exposure {idx}/{descriptor.count})",
-                "warn",
+                f"Local solver pending for {descriptor.name} (exposure {idx}/{descriptor.count})",
+                "info",
             )
 
     SESSION_STATE.log_event(

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .associations import router as associations_router
 from .bridge import router as bridge_router
 from .dashboard import router as dashboard_router
 from .astrometry import router as astrometry_router
@@ -21,6 +22,7 @@ api_router.include_router(equipment_router)
 api_router.include_router(session_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(astrometry_router)
+api_router.include_router(associations_router)
 api_router.include_router(monitor_router)
 
 __all__ = ["api_router"]

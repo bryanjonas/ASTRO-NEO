@@ -22,10 +22,10 @@
       <button hx-post="/dashboard/targets/refresh" hx-include="closest form" hx-target="#targets-content"
         hx-swap="outerHTML" class="ghost-small" title="Re-run target selection logic">Refresh</button>
       <button hx-post="/dashboard/targets/clear" hx-target="#targets-content" hx-swap="outerHTML"
-        hx-confirm="Clear all NEOCP data and reseed with synthetic targets?"
+        hx-confirm="Clear all NEOCP data and re-fetch fresh targets?"
         class="ghost-small"
         style="background: var(--color-warn); color: white;"
-        title="Clear database and reseed with fresh synthetic targets">Clear & Reseed</button>
+        title="Clear database and re-fetch fresh targets">Clear & Reseed</button>
     </form>
   </div>
 

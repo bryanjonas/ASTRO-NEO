@@ -7,6 +7,7 @@ import math
 from dataclasses import dataclass
 from typing import Iterable
 
+from app.core.config import settings
 from app.services.equipment import EquipmentProfile
 
 logger = logging.getLogger(__name__)
@@ -28,15 +29,14 @@ class ExposurePreset:
 
 
 DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
-    # NEOCP presets optimized for astrometry: 3-6 exposures, 60-120s each, 1-3 min spacing
     ExposurePreset(
         name="bright",
         max_vmag=16.0,
         exposure_seconds=60.0,
-        count=4,
+        count=6,
         filter="L",
         binning=1,
-        delay_seconds=90.0,  # 1.5 min spacing for motion detection
+        delay_seconds=90.0,
         gain=250,
         offset=20,
     ),
@@ -44,10 +44,10 @@ DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
         name="medium",
         max_vmag=18.0,
         exposure_seconds=90.0,
-        count=5,
+        count=8,
         filter="L",
         binning=1,
-        delay_seconds=120.0,  # 2 min spacing
+        delay_seconds=120.0,
         gain=250,
         offset=20,
     ),
@@ -55,10 +55,10 @@ DEFAULT_PRESETS: tuple[ExposurePreset, ...] = (
         name="faint",
         max_vmag=99.0,
         exposure_seconds=120.0,
-        count=6,
+        count=10,
         filter="L",
         binning=2,
-        delay_seconds=180.0,  # 3 min spacing for slower objects
+        delay_seconds=180.0,
         gain=250,
         offset=20,
     ),
@@ -88,7 +88,7 @@ def select_preset(
     urgency: float | None = None,
     default_name: str = "bright",
     motion_rate_arcsec_min: float | None = None,
-    pixel_scale_arcsec_per_pixel: float = 1.5,
+    pixel_scale_arcsec_per_pixel: float | None = None,
 ) -> ExposurePreset:
     """Choose an exposure preset based on target magnitude, urgency, and motion rate.
 
@@ -118,7 +118,13 @@ def select_preset(
         if chosen is None:
             chosen = presets[-1]
     chosen = _apply_urgency(chosen, urgency)
-    chosen = _apply_fast_mover_adaptation(chosen, motion_rate_arcsec_min, pixel_scale_arcsec_per_pixel)
+    pixel_scale = pixel_scale_arcsec_per_pixel or settings.astrometry_pixel_scale_arcsec
+    chosen = _apply_astrometric_rules(
+        chosen,
+        vmag=vmag,
+        motion_rate_arcsec_min=motion_rate_arcsec_min,
+        pixel_scale_arcsec_per_pixel=pixel_scale,
+    )
     return _apply_profile_overrides(chosen, profile)
 
 
@@ -143,73 +149,71 @@ def _apply_urgency(preset: ExposurePreset, urgency: float | None) -> ExposurePre
     )
 
 
-def _apply_fast_mover_adaptation(
+def _apply_astrometric_rules(
     preset: ExposurePreset,
+    *,
+    vmag: float | None,
     motion_rate_arcsec_min: float | None,
     pixel_scale_arcsec_per_pixel: float,
 ) -> ExposurePreset:
-    """Adapt preset for fast-moving targets to limit trailing.
+    """Apply motion/brightness rules to construct an astrometric imaging plan."""
 
-    Strategy:
-    - For motion > 30 "/min: Reduce exposure time to keep trailing < 5 pixels
-    - Increase count to maintain total integration time (SNR)
-    - Reduce delay between exposures for tighter temporal sampling
+    exposure = preset.exposure_seconds
+    count = preset.count
+    delay = preset.delay_seconds
+    binning = preset.binning
 
-    Args:
-        preset: Base exposure preset
-        motion_rate_arcsec_min: Apparent motion rate (arcsec/min)
-        pixel_scale_arcsec_per_pixel: Image scale for trailing calculation
+    if vmag is not None and vmag >= 19.0 and binning == 1:
+        binning = 2
 
-    Returns:
-        Adapted preset with shorter exposures and more frames
-    """
-    if not motion_rate_arcsec_min or motion_rate_arcsec_min < 30:
-        return preset  # No adaptation needed for slow movers
+    if motion_rate_arcsec_min and motion_rate_arcsec_min > 0:
+        motion_arcsec_per_sec = motion_rate_arcsec_min / 60.0
+        if motion_arcsec_per_sec > 0:
+            seeing_limit = settings.astrometry_default_seeing_arcsec / motion_arcsec_per_sec
+        else:
+            seeing_limit = settings.astrometry_max_exposure_seconds
+        trailing_arcsec = settings.astrometry_max_trailing_pixels * pixel_scale_arcsec_per_pixel
+        trailing_limit = (trailing_arcsec * 60.0) / motion_rate_arcsec_min
+        exposure = min(exposure, seeing_limit, trailing_limit)
 
-    # Target: keep trailing < 5 pixels
-    max_trailing_pixels = 5.0
-    max_trailing_arcsec = max_trailing_pixels * pixel_scale_arcsec_per_pixel
+        if motion_rate_arcsec_min >= 60:
+            delay = min(delay, 60.0)
+        elif motion_rate_arcsec_min >= 40:
+            delay = min(delay, 90.0)
+        elif motion_rate_arcsec_min >= 20:
+            delay = min(delay, 120.0)
 
-    # Calculate maximum exposure time to limit trailing
-    # trailing_arcsec = motion_rate_arcsec_min * exposure_seconds / 60
-    # Solve for exposure_seconds: exposure_seconds = (max_trailing_arcsec * 60) / motion_rate_arcsec_min
-    max_exposure_seconds = (max_trailing_arcsec * 60.0) / motion_rate_arcsec_min
-
-    if preset.exposure_seconds <= max_exposure_seconds:
-        return preset  # Already short enough
-
-    # Reduce exposure time
-    original_exposure = preset.exposure_seconds
-    adapted_exposure = max_exposure_seconds
-
-    # Increase count to maintain total integration time
-    # total_integration = count * exposure
-    # new_count = (original_count * original_exposure) / adapted_exposure
-    scale_factor = original_exposure / adapted_exposure
-    adapted_count = max(preset.count, int(math.ceil(preset.count * scale_factor)))
-
-    # Reduce delay for tighter temporal sampling
-    adapted_delay = max(30.0, preset.delay_seconds * 0.5)
-
-    logger.info(
-        "Fast mover detected (%.1f\"/min): reducing exposure from %.1fs to %.1fs, "
-        "increasing count from %d to %d, reducing delay to %.1fs",
-        motion_rate_arcsec_min,
-        original_exposure,
-        adapted_exposure,
-        preset.count,
-        adapted_count,
-        adapted_delay,
+    exposure = max(
+        settings.astrometry_min_exposure_seconds,
+        min(exposure, settings.astrometry_max_exposure_seconds),
     )
 
+    total_integration = preset.count * preset.exposure_seconds
+    if total_integration <= 0:
+        total_integration = exposure * max(1, preset.count)
+    count = max(
+        settings.astrometry_min_frames,
+        math.ceil(total_integration / exposure),
+    )
+    count = min(count, settings.astrometry_max_frames)
+
+    delay = max(settings.astrometry_min_delay_seconds, min(delay, settings.astrometry_max_delay_seconds))
+
+    if (
+        motion_rate_arcsec_min
+        and motion_rate_arcsec_min >= 50
+        and count < settings.astrometry_max_frames
+    ):
+        count = min(settings.astrometry_max_frames, count + 1)
+
     return ExposurePreset(
-        name=f"{preset.name}-fast",
+        name=f"{preset.name}-auto",
         max_vmag=preset.max_vmag,
-        exposure_seconds=adapted_exposure,
-        count=adapted_count,
+        exposure_seconds=exposure,
+        count=count,
         filter=preset.filter,
-        binning=preset.binning,
-        delay_seconds=adapted_delay,
+        binning=binning,
+        delay_seconds=delay,
         tracking_mode=preset.tracking_mode,
         focus_offset=preset.focus_offset,
         gain=preset.gain,

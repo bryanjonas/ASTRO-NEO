@@ -86,7 +86,12 @@ def run_calibration_plan(session_state: "SessionState", bridge: NinaBridgeServic
         for idx in range(1, remaining + 1):
             _wait_ready(svc, timeout=120)
             started_at = datetime.utcnow()
-            svc.start_exposure(filter_name=filt, binning=1, exposure_seconds=exposure_seconds)
+            svc.start_exposure(
+                filter_name=filt,
+                binning=1,
+                exposure_seconds=exposure_seconds,
+                request_solve=False,
+            )
             # wait for exposure to clear
             _wait_ready(svc, timeout=exposure_seconds + 30)
             cal.completed = min(cal.required, cal.completed + 1)

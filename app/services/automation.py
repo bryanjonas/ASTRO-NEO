@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.core.config import settings
 from app.services.nina_client import NinaBridgeService
 from app.services.session import SESSION_STATE
 from app.services.equipment import get_active_equipment_profile
@@ -26,6 +27,7 @@ from app.services.task_queue import TASK_QUEUE, Task
 from app.db.session import get_session
 from app.services.prediction import EphemerisPredictionService
 from app.services.capture_loop import CaptureLoopResult, CaptureTargetDescriptor, run_capture_loop
+from app.services.motion import estimate_motion_rate_arcsec_per_min
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,14 @@ class AutomationService:
 
         profile = None
         try:
+            # Guiding is optional; comment out the start/stop calls so we can re-enable later if needed.
+            # try:
+            #     self.bridge.start_guiding()
+            #     guiding_started = True
+            #     SESSION_STATE.log_event("Guiding started for sequential sequence", "info")
+            # except Exception as exc:  # pragma: no cover - best effort
+            #     logger.warning("Automation: failed to start guiding: %s", exc)
+            #     SESSION_STATE.log_event("Guiding could not be enabled for sequence", "warn")
             profile = get_active_equipment_profile()
         except Exception:  # pragma: no cover - best-effort lookup
             pass
@@ -109,14 +119,6 @@ class AutomationService:
         self._ensure_weather_safe()
         self._ensure_devices_ready()
         started_at = datetime.utcnow()
-        guiding_started = False
-        try:
-            self.bridge.start_guiding()
-            guiding_started = True
-            SESSION_STATE.log_event("Guiding started for sequential sequence", "info")
-        except Exception as exc:  # pragma: no cover - best effort
-            logger.warning("Automation: failed to start guiding: %s", exc)
-            SESSION_STATE.log_event("Guiding could not be enabled for sequence", "warn")
         SESSION_STATE.log_event(f"Automation: Starting run for {plan.target}", "info")
         # Queue retryable tasks so failures raise dashboard alerts
         if plan.focus_position is not None:
@@ -189,18 +191,20 @@ class AutomationService:
         )
         self.bridge.wait_for_mount_ready()
         self.bridge.wait_for_camera_idle()
+        request_solve = False
         result = self.bridge.start_exposure(
             filter_name=plan.filter,
             binning=plan.binning,
             exposure_seconds=plan.exposure_seconds,
             target=plan.target,
+            request_solve=request_solve,
         )
         if not isinstance(result, dict):
             raise RuntimeError("NINA capture returned unexpected payload")
         # Note: NINA API does not return file paths - will be None
         # File path will be filled by file system monitoring service
         file_path = result.get("file")
-        platesolve = result.get("platesolve")
+        platesolve = result.get("platesolve") if request_solve else None
         started_at = datetime.utcnow().isoformat()
         SESSION_STATE.add_capture(
             {
@@ -233,8 +237,8 @@ class AutomationService:
                 )
         else:
             SESSION_STATE.log_event(
-                f"NINA solve result unavailable for {plan.target}",
-                "warn",
+                f"Local solver pending for {plan.target} (exposure {index}/{plan.count})",
+                "info",
             )
 
     def build_sequential_target_plan(
@@ -261,11 +265,22 @@ class AutomationService:
         with get_session() as session:
             predictor = EphemerisPredictionService(session)
             for target in targets:
-                preset = select_preset(target.get("vmag"), profile=profile)
                 predicted_coords = predictor.predict(target.get("candidate_id"), now)
                 ra_deg = predicted_coords[0] if predicted_coords else target["ra_deg"]
                 dec_deg = predicted_coords[1] if predicted_coords else target["dec_deg"]
 
+                motion_rate = estimate_motion_rate_arcsec_per_min(session, target.get("candidate_id"))
+                score = target.get("score")
+                urgency = None
+                if score is not None:
+                    urgency = max(0.0, min(1.0, score / 100.0))
+                preset = select_preset(
+                    target.get("vmag"),
+                    profile=profile,
+                    urgency=urgency,
+                    motion_rate_arcsec_min=motion_rate,
+                    pixel_scale_arcsec_per_pixel=settings.astrometry_pixel_scale_arcsec,
+                )
                 target_name = (
                     target.get("name")
                     or target.get("target")
@@ -283,6 +298,8 @@ class AutomationService:
                     "count": preset.count,
                     "gain": preset.gain,
                     "offset": preset.offset,
+                    "delay_seconds": preset.delay_seconds,
+                    "motion_rate_arcsec_min": motion_rate,
                     "sequence_name": sequence_name,
                 }
                 planned_targets.append(planned_target)
@@ -310,19 +327,10 @@ class AutomationService:
         self._ensure_devices_ready()
 
         started_at = datetime.utcnow()
-        guiding_started = False
         target_names: list[str] = [t["name"] for t in plan.targets]
         total_exposures = sum(t["count"] for t in plan.targets)
 
         try:
-            try:
-                self.bridge.start_guiding()
-                guiding_started = True
-                SESSION_STATE.log_event("Guiding started for sequential sequence", "info")
-            except Exception as exc:  # pragma: no cover - best effort
-                logger.warning("Automation: failed to start guiding: %s", exc)
-                SESSION_STATE.log_event("Guiding could not be enabled for sequence", "warn")
-
             SESSION_STATE.log_event(
                 f"🎯 Starting sequential observation of {len(plan.targets)} targets, {total_exposures} total exposures",
                 "info"
@@ -397,13 +405,14 @@ class AutomationService:
                 "park_after": plan.park_after,
             }
         finally:
-            if guiding_started:
-                try:
-                    self.bridge.stop_guiding()
-                    SESSION_STATE.log_event("Guiding stopped after sequential sequence", "info")
-                except Exception as exc:  # pragma: no cover - best effort
-                    logger.warning("Automation: failed to stop guiding: %s", exc)
-                    SESSION_STATE.log_event("Guiding could not be stopped cleanly", "warn")
+            # if guiding_started:
+            #     try:
+            #         self.bridge.stop_guiding()
+            #         SESSION_STATE.log_event("Guiding stopped after sequential sequence", "info")
+            #     except Exception as exc:  # pragma: no cover - best effort
+            #         logger.warning("Automation: failed to stop guiding: %s", exc)
+            #         SESSION_STATE.log_event("Guiding could not be stopped cleanly", "warn")
+            pass
 
 
 __all__ = ["AutomationPlan", "SequentialTargetPlan", "AutomationService"]

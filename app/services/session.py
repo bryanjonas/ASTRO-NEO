@@ -82,7 +82,6 @@ class SessionState:
 
     @property
     def current(self) -> ObservingSession | None:
-        self.clear_stop_auto_restart()
         with get_session() as session:
             # Find active session
             db_session = session.exec(
@@ -302,6 +301,7 @@ class SessionState:
             session.refresh(new_session)
             
             self.log_event(f"Session started: {notes or 'No notes'}", "good")
+            self.clear_stop_auto_restart()
             return self._to_view(new_session)
 
     def end(self, reason: str | None = None) -> ObservingSession | None:

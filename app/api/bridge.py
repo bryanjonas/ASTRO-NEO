@@ -203,9 +203,13 @@ def start_exposure(
         {
             "kind": "exposure",
             "target": payload.target or "exposure",
+            "sequence": payload.target or "manual",
             "started_at": started_at.isoformat(),
             "path": str(file_path or ""),
             "platesolve": plate_result,
+            "exposure_seconds": payload.exposure_seconds,
+            "filter": payload.filter,
+            "binning": payload.binning,
         }
     )
     SESSION_STATE.log_event(f"Starting exposure: {payload.exposure_seconds}s {payload.filter} bin={payload.binning}", "info")

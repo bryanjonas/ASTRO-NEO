@@ -15,6 +15,7 @@ from app.models import NeoCandidate, NeoObservability
 from app.services.automation import AutomationService
 from app.services.session import SESSION_STATE
 from app.services.task_queue import TASK_QUEUE, Task
+from app.services.presets import ExposurePreset
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ def kickoff_imaging() -> dict[str, Any]:
             "dec_deg": target["dec_deg"],
             "vmag": target.get("vmag"),
             "candidate_id": target.get("candidate_id"),
+            "score": target.get("score"),
         }
     ]
     plan = automation.build_sequential_target_plan(
@@ -71,6 +73,21 @@ def kickoff_imaging() -> dict[str, Any]:
         name=None,
         park_after=False,
     )
+    if plan.targets:
+        first_target = plan.targets[0]
+        SESSION_STATE.select_preset(
+            ExposurePreset(
+                name="auto-plan",
+                max_vmag=target.get("vmag") or 99.0,
+                exposure_seconds=first_target.get("exposure_seconds", 0.0),
+                count=first_target.get("count", 0),
+                filter=first_target.get("filter_name", "L"),
+                binning=first_target.get("binning", 1),
+                delay_seconds=first_target.get("delay_seconds", 90.0),
+                gain=first_target.get("gain"),
+                offset=first_target.get("offset"),
+            )
+        )
 
     mode = "manual" if SESSION_STATE.target_mode == "manual" else "auto"
     SESSION_STATE.select_target(target["trksub"], mode=mode)

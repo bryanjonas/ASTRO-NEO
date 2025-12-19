@@ -16,7 +16,15 @@ This document is the canonical description for LLMs that need to understand ASTR
 5. **Processing**: Once the image monitor reports a FITS file, `sequence_processor` or local `astrometry-worker` runs (if NINA didn’t plate-solve). Final astrometric products drive ADES generation and MPC submission.
 
 ## 3. Automation Control Loop
-Describe the sequential target workflow in `app/services/automation.py` + `app/services/capture_loop.py`.
+The sequential target workflow is implemented in `app/services/automation.py` (plan orchestration) together with `app/services/capture_loop.py` (per-target capture flow). The loop proceeds as follows:
+
+1. `AutomationService` polls the highest-ranked `NeoObservability` entries, builds a sequence plan, and hands each target descriptor to `CaptureLoop`.
+2. `CaptureLoop` optionally runs `TwoStageAcquisition` (app/services/acquisition.py) for the first exposure, ensuring Horizons ephemerides and mount readiness plus a short confirmation exposure before the main loop.
+3. For each science frame, the loop predicts the current coordinates, slews via `NinaBridgeService`, and takes a confirmation exposure that re-solves the field before the primary capture.
+4. If the confirmation solve reports an offset exceeding 120″ the loop re-slews, else it proceeds to the main exposure configured with the target’s preferred binning/filter/exposure time.
+5. Each capture result is recorded into `SESSION_STATE`, including predicted coordinates, platesolve status, and placeholders for the file path; downstream services later fill the complete metadata.
+
+This structured control loop ensures that automation never stalls on plate solve failures—confirmation failures only log warnings and the science exposure still runs—while maintaining traceability through `SESSION_STATE` events.
 
 ### 3.1 Two-Stage Acquisition
 - `TwoStageAcquisition` (app/services/acquisition.py) fetches fresh JPL Horizons ephemerides (force horizon refresh around slew time) and performs:
@@ -30,21 +38,24 @@ Describe the sequential target workflow in `app/services/automation.py` + `app/s
 - Each science exposure re-runs prediction → slew → confirm → re-slew → science capture.
 - Confirmation exposures are always short with bin2 and max 8 s; they may fail gracefully (logging warns but science exposure still runs).
 - Re-slew occurs only for offsets >120″; failures log warnings but continue, ensuring automation never stalls.
-- Science exposures follow through `NinaBridgeService.start_exposure()` with target-specific duration/binning. Plate solves provided by NINA are recorded and, if missing, the local pipeline solves later.
+- **Confirmation vs. science solving**: confirmation shots still set `solve=true` so NINA can report immediate offsets, but *science* exposures now set `solve=false` and rely entirely on the local astrometry pipeline (see Sections 4 and 5) for post-capture WCS generation.
 
 ## 4. NINA Bridge Contract
 - The bridge (`nina_bridge/main.py`) exposes `/capture` endpoints and strictly forwards only **minimal parameters**: `duration`, `save=true`, `solve=true/false`, and `targetName`.
+- Science exposures now call the bridge with `solve=false`, `waitForResult=true`, `getResult=true`, `omitImage=false`. Confirmations still request solves so offsets can be measured without waiting for the local solver.
 - Target parameter alias now matches the client (`Query(alias="targetName")`), avoiding dropped names.
 - NINA does **not** return file paths; the bridge returns `{"Success": true, "Response": {"platesolve": ..., "file": None, "nina_response": ...}}`.
 - Downstream services (`capture_loop`, `acquisition`, `automation`, `app/services/bridge.py`) treat `file` as optional and rely on filesystem monitoring to fill real paths.
 - Bridge response includes plate solve metadata when available but still leaves file metadata empty, encouraging defensive programming.
 
-## 5. Filesystem Monitoring & File Correlation
-- `app/services/image_monitor.py` watches `/data/fits` recursively for new `.fits` files, parsing filenames with the pattern: `{TARGET}_{YYYY-MM-DD}_{HH-MM-SS}__{EXPOSURE}s_{FRAME}.fits`.
-- Incoming files are correlated against `SESSION_STATE` capture records by target name, timestamp tolerance (±30 s), exposure time tolerance (±0.5 s), and optional frame number.
-- Once matched, the monitor updates the capture record’s `path`, `status`, and triggers downstream processing (plate solving, ADES generation, MPC submission).
-- Confirmation exposures use the `-CONFIRM` suffix and are excluded from science processing.
-- The monitor is the **only source** of truth for file paths—bridge responses remain `None`.
+## 5. Filesystem Monitoring & Plate-Solve Backlog
+- `app/services/image_monitor.py` watches `/data/fits` recursively for new `.fits` files, parsing filenames with the pattern `{TARGET}_{YYYY-MM-DD}_{HH-MM-SS}__{EXPOSURE}s_{FRAME}.fits`.
+- On startup the monitor now indexes *all* existing FITS files (last-scan time starts at 0) and keeps a cache so previously-missed captures can be matched later. Every scan runs two extra passes:
+  1. **Backfill**: for any `SESSION_STATE` capture without a `path`, the monitor searches cached files (matching by target, exposure, timestamp tolerance) and retroactively links the FITS, enabling the solver tab to show frames that existed before the service booted.
+  2. **Pending-solve queue**: unsolved files (no WCS) are enqueued with solver status `pending`. The monitor retries each pending entry until `solve_fits` succeeds or the max retry count (currently 3) is exceeded, spacing attempts by 30 s to avoid thrashing.
+- When local solving succeeds the monitor updates `solver_status=solved`, triggers `_trigger_processing()` (ADES/association), and logs a success event. Repeated failures mark the capture as `solver_status=error` with the recorded message so the UI and DB can surface the failure explicitly.
+- Confirmation exposures (suffix `-CONFIRM`) still get skipped for downstream science processing; only LIGHT frames without the confirmation suffix enter the queue.
+- The monitor remains the single source of file paths—bridge responses stay `None`—and all automated solving now originates from this backlog-aware worker.
 
 ## 6. Target Selection, Scoring, & Presets
 - Scoring resides in `app/services/target_scoring.py`. Each component returns 0–100:
@@ -75,7 +86,11 @@ Describe the sequential target workflow in `app/services/automation.py` + `app/s
 - `scripts/nina_api_monitor.py` exercises status, slew, and capture endpoints while logging errors such as “No capture processed” (to keep automation aware of transient rejects).
 
 ## 10. Remaining Work & Operators’ Hooks
-- Finish file-monitor → capture correlation (matching exposures with the predicted metadata) as outlined above; currently `image_monitor` needs the enhanced matching logic.
-- Expand processing pipeline to trigger plate solving/ADES generation once the monitor fills `path`.
-- Monitor `SESSION_STATE` for new capture entries to keep the dashboard’s “Exposure X/Y solved/failed” summary accurate and for front-end events to surface per-exposure banners.
+- Tune the new backlog correlation heuristics (target/exposure/timestamp tolerances) to handle edge cases such as multi-night sessions or renamed folders, and surface diagnostics if multiple FITS candidates match a single capture.
+- Monitor the pending-solve queue health: if solves repeatedly fail after the configured retries, the UI now shows `solver_status=error`, but operators still need to investigate hardware/seeing issues or rerun solves manually.
+- Verify plate solving for confirmation images: ensure the `-CONFIRM` frames continue to request `solve=true` and that NINA/automation still report offsets correctly; add regression tests if necessary.
+- Verify timing between science exposures: confirm the bridge/UI resumes the capture loop promptly after `exposure_seconds + readout` instead of waiting excessively long before the next slew/verification.
+- Image monitor still fails to assign some previously uncataloged FITS files to their session captures; refine the backfill matching logic until every on-disk frame resolves to a `SESSION_STATE` entry.
+- Pending images are never plate solved; investigate why the retry queue isn’t driving `solve_fits` to completion and ensure solved FITS propagate to `AstrometricSolution`.
+- Ensure `SESSION_STATE` continues recording solver status transitions so the dashboard’s “Exposure X/Y solved/failed” summary stays accurate and front-end events can surface per-exposure banners.
 - Use this document as the single source for LLM reasoning; all prior design notes have been archived to `documentation/archive` for historical reference.

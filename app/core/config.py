@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     synthetic_target_interval_minutes: int = 10
     synthetic_target_prefix: str = "FAKE"
     nina_images_path: str = "/data/fits"
+    astrometry_default_seeing_arcsec: float = 2.5
+    astrometry_pixel_scale_arcsec: float = 1.5
+    astrometry_min_exposure_seconds: float = 5.0
+    astrometry_max_exposure_seconds: float = 180.0
+    astrometry_min_frames: int = 4
+    astrometry_max_frames: int = 10
+    astrometry_min_delay_seconds: float = 30.0
+    astrometry_max_delay_seconds: float = 180.0
+    astrometry_max_trailing_pixels: float = 3.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
