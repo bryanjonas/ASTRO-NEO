@@ -102,3 +102,4 @@ This structured control loop ensures that automation never stalls on plate solve
 - **Solver status tracking**: Image monitor now updates `has_wcs` flag and `solver_status` field immediately after successful solve, before triggering processing.
 - **Fixed confirmation exposure timing**: Reduced confirmation exposures from 10-15s to exactly 5s with bin2 for faster plate solving and reduced overhead between science exposures.
 - **Improved timeout handling**: Increased plate-solve timeout from exposure + 10s to exposure + 90s for `waitForResult=true` with `solve=true`, preventing premature timeouts during plate solving.
+- **Fixed filename pattern parsing**: Updated NINA filename regex to handle optional filter field and multiple underscores (e.g., `TARGET_DATETIME__EXPOSURE.fits` when filter is omitted), preventing correlation failures for images without filter names.

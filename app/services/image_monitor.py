@@ -19,12 +19,14 @@ from app.services.session import SESSION_STATE
 logger = logging.getLogger(__name__)
 
 # NINA filename template: $$DATEMINUS12$$\$$TARGETNAME$$\$$IMAGETYPE$$\$$TARGETNAME$$_$$DATETIME$$_$$FILTER$$_$$EXPOSURETIME$$s_$$FRAMENR$$
-# Example: 20251207\A11wdXf\LIGHT\A11wdXf_2025-12-07_23-45-12_L_60.0s_001.fits
+# Examples:
+#   A11wdXf_2025-12-07_23-45-12_L_60.0s_001.fits (with filter)
+#   ZTF109i_2025-12-19_20-28-04__102.00s_0000.fits (no filter, double underscore)
 
 NINA_FILENAME_PATTERN = re.compile(
     r"^(?P<target>[^_]+)_"  # Target name (required)
-    r"(?P<datetime>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})_"  # DateTime
-    r"(?P<filter>[^_]+)_"  # Filter
+    r"(?P<datetime>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})"  # DateTime
+    r"(?:_(?P<filter>[^_]+))?_+"  # Optional filter (non-capturing group for the first underscore)
     r"(?P<exposure>[\d.]+)s_"  # Exposure time
     r"(?P<frame>\d+)"  # Frame number
     r"\.fits?$",  # Extension
