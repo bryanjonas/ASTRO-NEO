@@ -162,12 +162,12 @@ def run_capture_loop(
         )
 
         try:
-            # Use bin1 and longer exposure for better plate solve reliability
-            confirm_exposure = min(15.0, max(10.0, descriptor.exposure_seconds * 0.5))
+            # Short confirmation exposure (5s, bin2) for fast plate solving
+            confirm_exposure = 5.0
 
             confirmation_result = bridge.start_exposure(
                 filter_name=descriptor.filter_name,
-                binning=1,  # Always use bin1 for better star detection
+                binning=2,  # Use bin2 for faster download and plate solve
                 exposure_seconds=confirm_exposure,
                 target=f"{descriptor.name}-CONFIRM",
                 request_solve=True,

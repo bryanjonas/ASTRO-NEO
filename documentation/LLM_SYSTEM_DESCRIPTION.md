@@ -36,9 +36,10 @@ This structured control loop ensures that automation never stalls on plate solve
 
 ### 3.2 Per-Exposure Confirmation Loop
 - Each science exposure re-runs prediction → slew → confirm → re-slew → science capture.
-- Confirmation exposures are always short with bin2 and max 8 s; they may fail gracefully (logging warns but science exposure still runs).
+- Confirmation exposures are exactly 5 seconds with bin2 for fast plate solving; they may fail gracefully (logging warns but science exposure still runs).
 - Re-slew occurs only for offsets >120″; failures log warnings but continue, ensuring automation never stalls.
 - **Confirmation vs. science solving**: confirmation shots still set `solve=true` so NINA can report immediate offsets, but *science* exposures now set `solve=false` and rely entirely on the local astrometry pipeline (see Sections 4 and 5) for post-capture WCS generation.
+- **Timeout handling**: Confirmation exposures with waitForResult=true and solve=true get exposure + 90s timeout to allow for plate solving; non-solving exposures get exposure + 30s.
 
 ## 4. NINA Bridge Contract
 - The bridge (`nina_bridge/main.py`) exposes `/capture` endpoints and strictly forwards only **minimal parameters**: `duration`, `save=true`, `solve=true/false`, and `targetName`.
@@ -99,3 +100,5 @@ This structured control loop ensures that automation never stalls on plate solve
 - **Enhanced error logging**: Plate solve failures now include full exception type, message, and traceback in logs; retry queue status logged with attempt counts and remaining queue size.
 - **WCS propagation**: Added `_copy_wcs_to_fits()` function that copies all WCS keywords from `.wcs` file back to original FITS header, making solved images compatible with downstream processing.
 - **Solver status tracking**: Image monitor now updates `has_wcs` flag and `solver_status` field immediately after successful solve, before triggering processing.
+- **Fixed confirmation exposure timing**: Reduced confirmation exposures from 10-15s to exactly 5s with bin2 for faster plate solving and reduced overhead between science exposures.
+- **Improved timeout handling**: Increased plate-solve timeout from exposure + 10s to exposure + 90s for `waitForResult=true` with `solve=true`, preventing premature timeouts during plate solving.
