@@ -291,15 +291,28 @@ class ImageMonitor:
     def _process_pending_solves(self, max_per_cycle: int = 2) -> None:
         if not self.pending_solves:
             return
+
+        total_pending = len(self.pending_solves)
+        logger.debug(f"Processing pending solves: {total_pending} in queue")
+
         now = time.time()
         processed = 0
         for path, payload in list(self.pending_solves.items()):
             if processed >= max_per_cycle:
                 break
             if payload["next_attempt"] > now:
+                wait_time = int(payload["next_attempt"] - now)
+                logger.debug(f"Skipping {path}: retry in {wait_time}s")
                 continue
+
+            attempt_num = payload["attempts"] + 1
+            logger.info(
+                f"Attempting plate solve ({attempt_num}/{self.max_retry_attempts}) for {path}"
+            )
+
             success, error_msg = self._trigger_plate_solving(payload["image_info"], payload["capture"])
             if success:
+                logger.info(f"Plate solve succeeded for {path} after {attempt_num} attempt(s)")
                 del self.pending_solves[path]
                 payload["capture"]["solver_status"] = "solved"
                 self._update_capture_solver_status(payload["capture"], status="solved", error=None)
@@ -308,11 +321,24 @@ class ImageMonitor:
                 payload["next_attempt"] = now + self.retry_delay_seconds
                 if error_msg:
                     payload["last_error"] = error_msg
+
                 if payload["attempts"] >= self.max_retry_attempts:
                     final_error = payload.get("last_error") or "Plate solve failed"
+                    logger.warning(
+                        f"Plate solve failed for {path} after {self.max_retry_attempts} attempts: {final_error}"
+                    )
                     self._record_solver_failure(payload["capture"], final_error)
                     del self.pending_solves[path]
+                else:
+                    logger.info(
+                        f"Plate solve attempt {payload['attempts']}/{self.max_retry_attempts} failed for {path}, "
+                        f"will retry in {self.retry_delay_seconds}s: {error_msg}"
+                    )
             processed += 1
+
+        if total_pending > 0:
+            remaining = len(self.pending_solves)
+            logger.info(f"Pending solve queue: {remaining} remaining (processed {processed} this cycle)")
 
     def _record_solver_failure(self, capture_record: dict[str, Any], message: str) -> None:
         capture_record["solver_status"] = "error"
@@ -471,6 +497,14 @@ class ImageMonitor:
                     "good"
                 )
                 logger.info(f"Plate solve succeeded for {image_info.path.name}")
+
+                # Re-check WCS in original FITS (solver should have written it back)
+                image_info.has_wcs = self._check_wcs(image_info.path)
+
+                # Update capture record with solver success
+                capture_record["solver_status"] = "solved"
+                capture_record.pop("solver_error", None)
+
                 self._trigger_processing(image_info, capture_record)
                 return True, None
             else:
@@ -481,12 +515,16 @@ class ImageMonitor:
                 logger.error(f"Plate solve failed for {image_info.path.name}")
                 return False, "Plate solve returned no solution"
         except Exception as exc:
+            error_msg = f"{type(exc).__name__}: {exc}"
             SESSION_STATE.log_event(
-                f"Plate solve error for {image_info.target}: {exc}",
+                f"Plate solve error for {image_info.target}: {error_msg}",
                 "error"
             )
-            logger.error(f"Plate solve error for {image_info.path.name}: {exc}")
-            return False, str(exc)
+            logger.error(
+                f"Plate solve error for {image_info.path.name}: {error_msg}",
+                exc_info=True  # Include full traceback in logs
+            )
+            return False, error_msg
 
     def _update_capture_path(self, capture_record: dict[str, Any], path: str) -> None:
         """Persist the file path update to the SESSION_STATE database."""

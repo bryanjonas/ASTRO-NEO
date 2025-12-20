@@ -153,7 +153,10 @@ def _solve_local(
         logging.info("solve-field stderr: %s", res.stderr)
         
         solution = _parse_wcs_solution(path)
-        
+
+        # Copy WCS headers from .wcs file back to original FITS
+        _copy_wcs_to_fits(path)
+
         # Try to extract RMS from stdout
         import re
         match = re.search(r"RMS:\s+([0-9]*\.?[0-9]+)\s+arcsec", res.stdout)
@@ -166,7 +169,7 @@ def _solve_local(
                 solution["solution"]["rms"] = rms
             else:
                 logging.warning("Could not extract RMS from solve-field output or .corr file")
-            
+
         return solution
 
 
@@ -205,6 +208,48 @@ def _calculate_rms_from_corr(fits_path: Path) -> float | None:
         import logging
         logging.warning("Failed to calculate RMS from .corr: %s", exc)
         return None
+
+
+def _copy_wcs_to_fits(fits_path: Path) -> None:
+    """Copy WCS headers from .wcs file into the original FITS file."""
+    import logging
+    wcs_path = fits_path.with_suffix(".wcs")
+    if not wcs_path.exists():
+        logging.warning(f"No .wcs file to copy from: {wcs_path}")
+        return
+
+    try:
+        # Read WCS headers
+        wcs_hdr = fits.getheader(wcs_path)
+
+        # Open original FITS and update header
+        with fits.open(fits_path, mode='update') as hdul:
+            # WCS keywords to copy
+            wcs_keywords = [
+                'WCSAXES', 'CTYPE1', 'CTYPE2', 'EQUINOX', 'LONPOLE', 'LATPOLE',
+                'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2', 'CUNIT1', 'CUNIT2',
+                'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
+                'CDELT1', 'CDELT2', 'CROTA1', 'CROTA2',
+                'IMAGEW', 'IMAGEH', 'A_ORDER', 'B_ORDER', 'A_0_0', 'A_0_1',
+                'A_0_2', 'A_1_0', 'A_1_1', 'A_2_0', 'B_0_0', 'B_0_1',
+                'B_0_2', 'B_1_0', 'B_1_1', 'B_2_0', 'AP_ORDER', 'BP_ORDER',
+                'AP_0_0', 'AP_0_1', 'AP_0_2', 'AP_1_0', 'AP_1_1', 'AP_2_0',
+                'BP_0_0', 'BP_0_1', 'BP_0_2', 'BP_1_0', 'BP_1_1', 'BP_2_0',
+            ]
+
+            # Copy WCS keywords
+            for keyword in wcs_keywords:
+                if keyword in wcs_hdr:
+                    hdul[0].header[keyword] = wcs_hdr[keyword]
+
+            # Also copy COMMENT cards related to astrometry.net
+            for card in wcs_hdr.cards:
+                if card.keyword == 'COMMENT' and 'astrometry.net' in str(card.value).lower():
+                    hdul[0].header.add_comment(card.value)
+
+        logging.info(f"Copied WCS headers to {fits_path.name}")
+    except Exception as exc:
+        logging.error(f"Failed to copy WCS headers to {fits_path}: {exc}")
 
 
 def _parse_wcs_solution(fits_path: Path) -> dict[str, Any]:

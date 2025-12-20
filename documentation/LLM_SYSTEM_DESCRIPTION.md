@@ -85,12 +85,17 @@ This structured control loop ensures that automation never stalls on plate solve
 - File monitor tests confirm detection patterns and correlation logic works with target-named filenames (`MINIMAL-TEST_2025-12-13_19-19-15__2.00s_0000.fits`).
 - `scripts/nina_api_monitor.py` exercises status, slew, and capture endpoints while logging errors such as “No capture processed” (to keep automation aware of transient rejects).
 
-## 10. Remaining Work & Operators’ Hooks
+## 10. Remaining Work & Operators' Hooks
 - Tune the new backlog correlation heuristics (target/exposure/timestamp tolerances) to handle edge cases such as multi-night sessions or renamed folders, and surface diagnostics if multiple FITS candidates match a single capture.
 - Monitor the pending-solve queue health: if solves repeatedly fail after the configured retries, the UI now shows `solver_status=error`, but operators still need to investigate hardware/seeing issues or rerun solves manually.
 - Verify plate solving for confirmation images: ensure the `-CONFIRM` frames continue to request `solve=true` and that NINA/automation still report offsets correctly; add regression tests if necessary.
 - Verify timing between science exposures: confirm the bridge/UI resumes the capture loop promptly after `exposure_seconds + readout` instead of waiting excessively long before the next slew/verification.
 - Image monitor still fails to assign some previously uncataloged FITS files to their session captures; refine the backfill matching logic until every on-disk frame resolves to a `SESSION_STATE` entry.
-- Pending images are never plate solved; investigate why the retry queue isn’t driving `solve_fits` to completion and ensure solved FITS propagate to `AstrometricSolution`.
-- Ensure `SESSION_STATE` continues recording solver status transitions so the dashboard’s “Exposure X/Y solved/failed” summary stays accurate and front-end events can surface per-exposure banners.
+- Ensure `SESSION_STATE` continues recording solver status transitions so the dashboard's "Exposure X/Y solved/failed" summary stays accurate and front-end events can surface per-exposure banners.
 - Use this document as the single source for LLM reasoning; all prior design notes have been archived to `documentation/archive` for historical reference.
+
+### 10.1 Recent Fixes (2025-12-19)
+- **Fixed plate-solve backlog**: The solver now writes WCS headers back to the original FITS file (not just `.wcs` sidecar), ensuring `has_wcs` detection works correctly and solved files propagate to `AstrometricSolution`.
+- **Enhanced error logging**: Plate solve failures now include full exception type, message, and traceback in logs; retry queue status logged with attempt counts and remaining queue size.
+- **WCS propagation**: Added `_copy_wcs_to_fits()` function that copies all WCS keywords from `.wcs` file back to original FITS header, making solved images compatible with downstream processing.
+- **Solver status tracking**: Image monitor now updates `has_wcs` flag and `solver_status` field immediately after successful solve, before triggering processing.
