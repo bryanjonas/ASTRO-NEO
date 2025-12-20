@@ -165,11 +165,13 @@ class ImageMonitor:
         )
 
     def _guess_target(self, path: Path, parsed_target: str | None) -> str:
-        if parsed_target:
-            return parsed_target
+        # Always try FITS header first (most reliable)
         target = self._read_header_field(path, ("OBJECT", "TARGET", "OBJECT-NAME", "OBJECT_NAME"))
         if target:
             return target
+        # Fall back to parsed target from filename (if valid)
+        if parsed_target and not parsed_target.startswith("_") and parsed_target not in ("Unknown", "LIGHT", "DARK", "BIAS", "FLAT", "SNAPSHOT"):
+            return parsed_target
         return "Unknown"
 
     def _guess_filter(self, path: Path, parsed_filter: str | None) -> str:
@@ -244,8 +246,9 @@ class ImageMonitor:
             logger.warning(
                 f"No matching capture record for {image_info.path.name} "
                 f"(target: {image_info.target}, exposure: {image_info.exposure_seconds}s, "
-                f"timestamp: {image_info.timestamp})"
+                f"timestamp: {image_info.timestamp}) - creating orphaned capture entry"
             )
+            self._handle_orphaned_image(image_info)
 
     def _handle_matched_capture(self, image_info: ImageFileInfo, capture_record: dict[str, Any]) -> None:
         capture_record["path"] = str(image_info.path)
@@ -275,6 +278,44 @@ class ImageMonitor:
                 "warn"
             )
             self._queue_pending_solve(image_info, capture_record)
+
+    def _handle_orphaned_image(self, image_info: ImageFileInfo) -> None:
+        """Handle FITS files that have no corresponding capture record (e.g., manual captures)."""
+        from app.services.captures import record_capture
+
+        # Create a minimal capture record for this orphaned file
+        orphan_capture = {
+            "kind": "exposure",
+            "target": image_info.target,
+            "sequence": None,
+            "index": 0,
+            "path": str(image_info.path),
+            "started_at": image_info.timestamp,
+        }
+
+        # Persist to database
+        try:
+            record_capture(orphan_capture)
+            logger.info(f"Created orphaned capture record for {image_info.path.name}")
+        except Exception as exc:
+            logger.error(f"Failed to create orphaned capture record: {exc}")
+            return
+
+        # Add to session state
+        self.seen_files.add(image_info.path)
+        SESSION_STATE.log_event(
+            f"Orphaned file detected: {image_info.target}",
+            "warn"
+        )
+
+        # Queue for solving if needed
+        if not image_info.has_wcs:
+            logger.info(f"Orphaned image {image_info.path.name} queued for plate solving")
+            SESSION_STATE.log_event(
+                f"Orphaned image {image_info.target} needs plate solving",
+                "warn"
+            )
+            self._queue_pending_solve(image_info, orphan_capture)
 
     def _queue_pending_solve(self, image_info: ImageFileInfo, capture_record: dict[str, Any]) -> None:
         key = str(image_info.path)

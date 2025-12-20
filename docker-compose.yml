@@ -135,6 +135,7 @@ services:
       ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
     volumes:
       - ./data:/data
+      - nina_images:/data/fits
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     ports:

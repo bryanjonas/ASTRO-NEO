@@ -39,7 +39,7 @@ This structured control loop ensures that automation never stalls on plate solve
 - Confirmation exposures are exactly 5 seconds with bin2 for fast plate solving; they may fail gracefully (logging warns but science exposure still runs).
 - Re-slew occurs only for offsets >120″; failures log warnings but continue, ensuring automation never stalls.
 - **Confirmation vs. science solving**: confirmation shots still set `solve=true` so NINA can report immediate offsets, but *science* exposures now set `solve=false` and rely entirely on the local astrometry pipeline (see Sections 4 and 5) for post-capture WCS generation.
-- **Timeout handling**: Confirmation exposures with waitForResult=true and solve=true get exposure + 90s timeout to allow for plate solving; non-solving exposures get exposure + 30s.
+- **Timeout handling**: All exposures with waitForResult=true get exposure + 30s timeout to allow for readout and plate solving.
 
 ## 4. NINA Bridge Contract
 - The bridge (`nina_bridge/main.py`) exposes `/capture` endpoints and strictly forwards only **minimal parameters**: `duration`, `save=true`, `solve=true/false`, and `targetName`.
@@ -50,6 +50,7 @@ This structured control loop ensures that automation never stalls on plate solve
 - Bridge response includes plate solve metadata when available but still leaves file metadata empty, encouraging defensive programming.
 
 ## 5. Filesystem Monitoring & Plate-Solve Backlog
+- **IMPORTANT: Docker volume architecture**: FITS files are stored in a Docker named volume `nina_images` that is bind-mounted to the host path `${NINA_IMAGES_HOST_PATH:-./data/fits}`. Inside containers, this volume is mounted at `/data/fits`. When searching for FITS files or verifying their existence, always use Docker commands (`docker compose exec`) to access container filesystems—files may not be directly visible on the host at the expected paths. All services that need to access FITS files (api, image-monitor, astrometry-worker, nina-bridge) must have the `nina_images:/data/fits` volume mount configured in docker-compose.yml.
 - `app/services/image_monitor.py` watches `/data/fits` recursively for new `.fits` files, parsing filenames with the pattern `{TARGET}_{YYYY-MM-DD}_{HH-MM-SS}__{EXPOSURE}s_{FRAME}.fits`.
 - On startup the monitor now indexes *all* existing FITS files (last-scan time starts at 0) and keeps a cache so previously-missed captures can be matched later. Every scan runs two extra passes:
   1. **Backfill**: for any `SESSION_STATE` capture without a `path`, the monitor searches cached files (matching by target, exposure, timestamp tolerance) and retroactively links the FITS, enabling the solver tab to show frames that existed before the service booted.
@@ -101,5 +102,9 @@ This structured control loop ensures that automation never stalls on plate solve
 - **WCS propagation**: Added `_copy_wcs_to_fits()` function that copies all WCS keywords from `.wcs` file back to original FITS header, making solved images compatible with downstream processing.
 - **Solver status tracking**: Image monitor now updates `has_wcs` flag and `solver_status` field immediately after successful solve, before triggering processing.
 - **Fixed confirmation exposure timing**: Reduced confirmation exposures from 10-15s to exactly 5s with bin2 for faster plate solving and reduced overhead between science exposures.
-- **Improved timeout handling**: Increased plate-solve timeout from exposure + 10s to exposure + 90s for `waitForResult=true` with `solve=true`, preventing premature timeouts during plate solving.
+- **Improved timeout handling**: Increased timeout from exposure + 10s to exposure + 30s for all `waitForResult=true` captures, allowing sufficient time for readout and plate solving without excessive delays.
 - **Fixed filename pattern parsing**: Updated NINA filename regex to handle optional filter field and multiple underscores (e.g., `TARGET_DATETIME__EXPOSURE.fits` when filter is omitted), preventing correlation failures for images without filter names.
+- **Fixed orphaned image handling**: Image monitor now creates database capture records for orphaned FITS files (files without corresponding automation captures) and automatically queues them for plate solving.
+- **Fixed astrometry worker volume mount**: Added `nina_images:/data/fits` volume mount to astrometry-worker service in docker-compose.yml, allowing the worker to access FITS files that were previously inaccessible, which was causing all plate solve requests to fail with "FITS not found" errors.
+- **Fixed duplicate capture bug**: Modified `record_capture()` in app/services/captures.py to only check for duplicates when path is non-empty, preventing rejection of multiple captures with empty path placeholders.
+- **Fixed target name extraction**: Modified `_guess_target()` in app/services/image_monitor.py to always check FITS header for OBJECT field first before falling back to filename parsing, preventing directory names and dates from being used as target names. Added filter to dashboard solver tab to exclude invalid target names (dates, directory names) from the target selector dropdown.
