@@ -24,10 +24,12 @@ coverage.xml
 # Environment / secrets
 .env
 config/site.yml
+config/site_local.yml  # CRITICAL: Contains observatory location
 config/horizon/
 
 # Data artifacts
 /data/
+/data_local/  # Local data directory (may contain sensitive info)
 mock_nina_data/
 postgres_data/
 
