@@ -5,7 +5,8 @@ import json
 PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_2/printhorizon"
 
 async def fetch_horizon():
-    lat = 51.4769
+    # TODO: Read from config/site_local.yml instead of hardcoding
+    lat = 51.4769  # Example: Greenwich Observatory
     lon = -0.0005
     params = {
         "lat": lat,

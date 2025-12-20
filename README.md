@@ -149,9 +149,9 @@ docker compose run --rm api python scripts/nina_bridge_smoke.py
   ```yaml
   site:
     name: home-observatory
-    latitude: 51.4769
+    latitude: 51.4769  # Example: Greenwich Observatory
     longitude: -0.0005
-    altitude_m: 25
+    altitude_m: 47
     weather_sensors:
       - name: Open-Meteo
         type: open-meteo
