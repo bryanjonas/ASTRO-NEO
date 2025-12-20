@@ -197,9 +197,9 @@ User clicks "Start Session" → API selects highest-ranked visible target
 
 site:
   name: "home-observatory"
-  latitude: 51.4769
-  longitude: -0.0005
-  altitude_m: 25
+  latitude: 51.4769  # REPLACE with your observatory latitude
+  longitude: -0.0005  # REPLACE with your observatory longitude
+  altitude_m: 47  # REPLACE with your altitude in meters
   timezone: "America/New_York"
   bortle: 6
 
