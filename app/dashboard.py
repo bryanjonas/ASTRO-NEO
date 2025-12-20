@@ -128,13 +128,18 @@ def solutions_partial(request: Request) -> Any:
     """Render solver view with target selector and per-frame solve status."""
     selected_target = request.query_params.get("target")
     with get_session() as session:
+        # Fetch all targets, then filter out invalid ones (dates, directory names, etc.)
         target_rows = session.exec(
             select(CaptureLog.target, func.count().label("count"), func.max(CaptureLog.started_at).label("latest"))
+            .where(CaptureLog.target.notin_(["Unknown", "LIGHT", "DARK", "BIAS", "FLAT", "SNAPSHOT", "Snapshot"]))
             .group_by(CaptureLog.target)
             .order_by(func.max(CaptureLog.started_at).desc())
             .limit(30)
         ).all()
-        targets = [{"name": row[0], "count": row[1], "latest": row[2]} for row in target_rows]
+        # Filter out targets that look like dates (YYYY-MM-DD pattern)
+        import re
+        date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+        targets = [{"name": row[0], "count": row[1], "latest": row[2]} for row in target_rows if not date_pattern.match(row[0])]
         if not selected_target and targets:
             selected_target = targets[0]["name"]
         captures = []

@@ -124,14 +124,11 @@ class NinaBridgeService:
 
         timeout = None
         if exposure_seconds:
-            # For waitForResult=True with solve=True, allow extra time for:
+            # For waitForResult=True, allow extra time for:
             # - Exposure time
             # - Readout/download (~5-10s)
-            # - Plate solving (~30-60s depending on image complexity)
-            if request_solve:
-                timeout = max(self.timeout, float(exposure_seconds) + 90.0)
-            else:
-                timeout = max(self.timeout, float(exposure_seconds) + 30.0)
+            # - Plate solving (~10-20s for confirmation shots)
+            timeout = max(self.timeout, float(exposure_seconds) + 30.0)
 
         return self._request("GET", "/equipment/camera/capture", params, timeout=timeout)
 

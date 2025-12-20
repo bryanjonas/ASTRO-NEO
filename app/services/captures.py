@@ -24,12 +24,13 @@ def record_capture(entry: dict[str, Any], session: Optional[Session] = None) -> 
     )
 
     def _save(db: Session) -> None:
-        # Check for existing capture by path
-        existing = db.exec(select(CaptureLog).where(CaptureLog.path == model.path)).first()
-        if existing:
-            # Update existing? Or just skip?
-            # For now, let's just skip adding if it exists to prevent duplicates
-            return
+        # Check for existing capture by path (only if path is non-empty)
+        if model.path:
+            existing = db.exec(select(CaptureLog).where(CaptureLog.path == model.path)).first()
+            if existing:
+                # Update existing? Or just skip?
+                # For now, let's just skip adding if it exists to prevent duplicates
+                return
         db.add(model)
         db.commit()
 
