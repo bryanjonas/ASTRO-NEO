@@ -8,7 +8,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import httpx
 import numpy as np
 from astropy.io import fits
 
@@ -27,17 +26,7 @@ def solve_fits(
     downsample: int | None = None,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    """Run solve-field locally or via the astrometry worker."""
-
-    if settings.astrometry_worker_url:
-        return _solve_remote(
-            fits_path,
-            radius_deg=radius_deg,
-            ra_hint=ra_hint,
-            dec_hint=dec_hint,
-            downsample=downsample,
-            timeout=timeout or settings.astrometry_worker_timeout,
-        )
+    """Run solve-field locally (synchronous subprocess)."""
 
     return _solve_local(
         fits_path,
@@ -45,33 +34,8 @@ def solve_fits(
         ra_hint=ra_hint,
         dec_hint=dec_hint,
         downsample=downsample,
-        timeout=timeout or settings.astrometry_worker_timeout,
+        timeout=timeout or settings.astrometry_solve_timeout,
     )
-
-
-def _solve_remote(
-    fits_path: str | Path,
-    *,
-    radius_deg: float | None,
-    ra_hint: float | None,
-    dec_hint: float | None,
-    downsample: int | None,
-    timeout: int,
-) -> dict[str, Any]:
-    url = f"{settings.astrometry_worker_url.rstrip('/')}/solve"
-    payload = {
-        "path": str(fits_path),
-        "radius_deg": radius_deg,
-        "ra_hint": ra_hint,
-        "dec_hint": dec_hint,
-        "downsample": downsample,
-    }
-    try:
-        resp = httpx.post(url, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        raise SolveError(f"Remote solve failed: {exc}") from exc
 
 
 def _solve_local(

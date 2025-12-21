@@ -418,17 +418,21 @@ def capture_with_confirmation_and_processing(
    - Copy `nina_bridge/` code into `app/services/nina_client.py`
    - Remove separate nina-bridge container from docker-compose.yml
    - NINA calls now happen directly from API server (inline function calls)
+   - ✅ DONE: Removed `nina_bridge/` folder and `/api/bridge/*` endpoints
 
 3. **Remove image-monitor service**
    - Delete `app/services/image_monitor_service.py` runner
    - Keep `ImageMonitor` class for polling FITS files synchronously
    - Remove `image-monitor` container from docker-compose.yml
+   - ✅ DONE: service container removed; polling is synchronous
 
 4. **Remove astrometry-worker service**
    - Modify `app/services/solver.py` to ONLY use local solving
    - Remove HTTP client code (`_solve_remote`), keep `_solve_local` only
    - Remove `astrometry-worker` container from docker-compose.yml
    - Install astrometry.net in API container instead
+   - ✅ DONE: solver uses local subprocess only; worker removed
+   - ✅ DONE: `documentation/LLM_SYSTEM_DESCRIPTION.md` updated to reflect local-only solver
 
 5. **Keep essential background workers**
    - **KEEP** `neocp-fetcher` (retrieve and store targets)
@@ -447,6 +451,7 @@ def capture_with_confirmation_and_processing(
      observability-engine:
        # Background worker - score targets by visibility
    ```
+   - ✅ DONE: docker-compose.yml now contains only api/db/neocp-fetcher/observability-engine
 
 ### Phase 2: Synchronous Capture Flow with Confirmation Loop
 
@@ -484,6 +489,7 @@ def capture_with_confirmation_and_processing(
    - Use NINA filename pattern: `{TARGET}_{DATETIME}__{EXPOSURE}s_{FRAME}.fits`
    - Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s...
    - Clear timeout error if file doesn't appear
+   - ✅ DONE: `app/services/file_poller.py` implements strict name matching + exponential backoff
 
 5. **Remove complex correlation:**
    - No SESSION_STATE in-memory cache
@@ -505,12 +511,14 @@ def capture_with_confirmation_and_processing(
    - Delete `app/services/capture_loop.py` (replace with new sequential service)
    - Delete `app/services/acquisition.py` (replace with inline confirmation loop)
    - Consolidate into single `SequentialCaptureService`
+   - ✅ DONE: legacy capture modules removed
 
 3. **Remove SESSION_STATE in-memory cache**
    - Delete `app/services/session.py` in-memory cache
    - Use database `ObservingSession` as single source of truth
    - All status updates write directly to DB
    - Read from DB for UI status queries
+   - ✅ DONE: session state is DB-backed only
 
 4. **Preset-only imaging parameters**
    - Remove UI controls for exposure/filter/binning
@@ -525,6 +533,7 @@ def capture_with_confirmation_and_processing(
 1. **Remove unnecessary tabs:**
    - Keep ONLY: Main observing pane
    - Remove: Solver tab, Planning tab, Equipment tab, Weather tab, etc.
+   - ✅ DONE: legacy HTMX dashboard routes/templates removed; minimal dashboard in use
 
 2. **Single pane layout:**
    ```
@@ -641,6 +650,7 @@ def capture_with_confirmation_and_processing(
    - Update README.md to use placeholder coordinates (e.g., 40.7128, -74.0060 for NYC)
    - Update scripts/debug_horizon.py to read from config file or use env vars
    - These changes MUST be made before pushing to GitHub
+   - ✅ DONE: `scripts/debug_horizon.py` loads site config
 
 4. **Verify nothing sensitive will be pushed:**
    ```bash
@@ -714,6 +724,7 @@ volumes:
       o: bind
       device: ${NINA_IMAGES_HOST_PATH:-./data/fits}
 ```
+✅ **DONE:** `docker-compose.yml` now contains only the 4 core services.
 
 ### Step 3: Code Consolidation
 
@@ -723,7 +734,9 @@ volumes:
 - `app/services/acquisition.py` (old two-stage - replaced by confirmation loop)
 - `app/services/session.py` (SESSION_STATE in-memory cache)
 - `app/worker/astrometry_server.py` (HTTP wrapper - replaced by local subprocess)
+- `app/api/bridge.py` and `nina_bridge/` (bridge endpoints/service removed)
 - Docker service runners: Remove `nina-bridge`, `image-monitor`, `astrometry-worker` from docker-compose.yml
+✅ **DONE:** Legacy services removed and worker deleted.
 
 **Files to KEEP (Background workers still needed):**
 - `app/services/neocp_fetcher.py` (fetch targets from MPC)

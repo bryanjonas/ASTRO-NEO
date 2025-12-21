@@ -51,12 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--api-base",
         default="http://localhost:18080/api",
-        help="FastAPI base URL; set to '' to skip API calls (e.g., when calling worker directly).",
-    )
-    parser.add_argument(
-        "--worker-base",
-        default="http://astrometry-worker:8100",
-        help="Astrometry worker base URL (used when api-base is empty).",
+        help="FastAPI base URL for invoking the local solve endpoint.",
     )
     parser.add_argument(
         "--cadence",
@@ -284,62 +279,6 @@ def solve_via_api(api_base: str, capture_ids: Sequence[int]) -> None:
     time.sleep(0.5)
 
 
-def solve_via_worker(worker_base: str, entries: Sequence[dict]) -> None:
-    if not worker_base:
-        return
-    url = f"{worker_base.rstrip('/')}/solve"
-    with httpx.Client(timeout=300) as client:
-        for entry in entries:
-            try:
-                payload = {"path": entry["path"], "timeout": 300}
-                resp = client.post(url, json=payload)
-                if resp.status_code >= 300:
-                    print(f"worker solve {entry['path']} -> {resp.status_code} {resp.text}")
-                else:
-                    msg = f"worker solve {entry['path']} -> ok"
-                    info = resp.json()
-                    solver_info = info.get("solver_info")
-                    if solver_info:
-                        msg += f" solver_info={str(solver_info)[:200]}"
-                    print(msg)
-            except Exception as exc:
-                print(f"worker solve {entry['path']} -> request failed: {exc}")
-    time.sleep(0.5)
-
-
-def push_captures_to_session(
-    api_base: str, entries: Sequence[dict], predictions: dict[str, tuple[float, float]] | None = None
-) -> None:
-    """Send captures into the in-memory session so Association UI can see them."""
-    if not api_base:
-        return
-    url = f"{api_base.rstrip('/')}/session/ingest_captures"
-    payload = []
-    for entry in entries:
-        item = {
-            "kind": entry.get("kind", "synthetic"),
-            "target": entry.get("target") or "synthetic",
-            "sequence": entry.get("sequence"),
-            "index": entry.get("index"),
-            "path": entry.get("path"),
-            "started_at": entry.get("started_at").isoformat()
-            if hasattr(entry.get("started_at"), "isoformat")
-            else datetime.utcnow().isoformat(),
-        }
-        if predictions:
-            pred = predictions.get(entry["path"])
-            if pred:
-                item["predicted_ra_deg"] = pred[0]
-                item["predicted_dec_deg"] = pred[1]
-        payload.append(item)
-    try:
-        resp = httpx.post(url, json=payload, timeout=60)
-        if resp.status_code >= 300:
-            print(f"session ingest -> {resp.status_code} {resp.text}")
-        else:
-            print(f"session ingest -> ok ({len(payload)} captures)")
-    except Exception as exc:
-        print(f"session ingest -> request failed: {exc}")
 
 
 def purge_ephemeris(trksub: str) -> None:
@@ -470,11 +409,8 @@ def main() -> int:
 
     captures = persist_captures(capture_entries, target=args.target, sequence="synthetic")
     print(f"Persisted {len(captures)} capture logs.")
-    # Prefer API solves (which delegate to the worker); fall back to direct worker calls when api-base is empty
     if args.api_base:
         solve_via_api(args.api_base, [c.id for c in captures if c.id is not None])
-    else:
-        solve_via_worker(args.worker_base, capture_entries)
     # Recompute host paths in case caller pointed host_data_root somewhere else
     for entry in capture_entries:
         entry["host_path"] = str(_host_path_for_container(entry["path"]))
@@ -508,7 +444,6 @@ def main() -> int:
         for entry, item in zip(capture_entries, ra_dec_series):
             _, (ra_val, dec_val) = item
             predictions[entry["path"]] = (ra_val, dec_val)
-    push_captures_to_session(args.api_base, capture_entries, predictions=predictions or None)
     return 0
 
 

@@ -150,6 +150,28 @@ class HorizonsClient:
 
         return rows
 
+    def get_current_position(
+        self,
+        target_designation: str,
+        when: datetime | None = None,
+        window_minutes: int = 10,
+        step_minutes: int = 1,
+    ) -> dict[str, Any]:
+        """Return the ephemeris row closest to the requested time."""
+        moment = when or datetime.utcnow()
+        start_time = moment - timedelta(minutes=window_minutes)
+        stop_time = moment + timedelta(minutes=window_minutes)
+        rows = self.fetch_ephemeris(
+            target_designation=target_designation,
+            start_time=start_time,
+            stop_time=stop_time,
+            step_minutes=step_minutes,
+        )
+        if not rows:
+            raise Exception(f"Horizons returned no ephemeris data for {target_designation}")
+        closest = min(rows, key=lambda row: abs((row["epoch"] - moment).total_seconds()))
+        return closest
+
     def _parse_observer_table(self, result_text: str) -> list[dict[str, Any]]:
         """Parse Horizons observer table from text output.
 

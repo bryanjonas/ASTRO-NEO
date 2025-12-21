@@ -24,6 +24,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.site_config import load_site_config
 from app.models.analysis import CandidateAssociation
 from app.models.capture import CaptureLog
 from app.services.analysis import AnalysisService
@@ -49,7 +50,19 @@ class SequentialCaptureService:
     ):
         self.db = db
         self.nina = nina_client or NinaBridgeService()
-        self.horizons = horizons_client or HorizonsClient()
+
+        # Initialize Horizons client with site configuration
+        if horizons_client:
+            self.horizons = horizons_client
+        else:
+            site_config = load_site_config()
+            self.horizons = HorizonsClient(
+                site_lat=site_config.latitude,
+                site_lon=site_config.longitude,
+                site_alt_m=site_config.altitude_m,
+                timeout=settings.horizons_timeout,
+            )
+
         self.analysis = analysis or AnalysisService(db)
 
     def capture_with_confirmation(

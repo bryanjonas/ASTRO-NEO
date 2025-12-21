@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     site_longitude: float = 0.0
     site_altitude_m: float = 0.0
     site_bortle: int | None = None
-    site_config_path: str = "config/site.yml"
+    site_config_path: str = "config/site_local.yml"
     neocp_html_url: str = "https://minorplanetcenter.net/iau/NEO/toconfirm_tabular.html"
     neocp_local_html: str = "/data/neocp_snapshots/toconfirm.html"
     neocp_text_url: str = "https://minorplanetcenter.net/iau/NEO/neocp.txt"
@@ -74,14 +74,10 @@ class Settings(BaseSettings):
     nina_url: str = "http://host.docker.internal:1888/api"
     nina_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
 
-    # Legacy settings (deprecated - bridge removed)
-    nina_bridge_url: str = "http://host.docker.internal:1888/api"  # Points to NINA directly now
-    nina_bridge_timeout: float = 300.0
     data_root: str = "/data"
     fits_retention_days: int = 14
-    # astrometry_worker removed - now using local subprocess solving only
-    astrometry_worker_url: str | None = None  # Disabled - local solving only
-    astrometry_worker_timeout: float = 300.0
+    # Local astrometry solve configuration (synchronous subprocess)
+    astrometry_solve_timeout: float = 300.0
     astrometry_config_path: str = "/app/astrometry.cfg"
     astrometry_scale_low_arcsec: float | None = None
     astrometry_scale_high_arcsec: float | None = None

@@ -120,7 +120,7 @@ class EphemerisPredictionService:
         rows_data = self.horizons_client.fetch_ephemeris(
             target_designation=candidate.trksub,
             start_time=start_fetch,
-            end_time=end_fetch,
+            stop_time=end_fetch,
             step_minutes=self.sample_minutes,
         )
 

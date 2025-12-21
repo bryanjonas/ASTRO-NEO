@@ -1,290 +1,239 @@
-"""Session and calibration tracking endpoints (ephemeral)."""
+"""Session management API.
+
+Database-backed session management using the observing_sessions table.
+"""
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from sqlmodel import select
 
-from app.services.nina_client import NinaBridgeService
-from app.services.night_ops import NightSessionError, kickoff_imaging
-from app.services.session import SESSION_STATE
-from datetime import datetime
+from app.db.session import get_session_dep
+from app.models.neocp import NeoCandidate, NeoObservability
+from app.models.session import ObservingSession
+from app.services.automation import AutomationService
 
 router = APIRouter(prefix="/session", tags=["session"])
+logger = logging.getLogger(__name__)
 
 
-class SessionStartPayload(BaseModel):
-    notes: str | None = Field(default=None, max_length=500)
-    calibration_filter: str | None = Field(default=None, max_length=16)
-    calibration_exposure_seconds: float | None = Field(default=None, gt=0)
+class SessionStartRequest(BaseModel):
+    """Request to start an observing session."""
+    manual_target_override: str | None = Field(
+        default=None,
+        description="Optional target ID to observe. If null, auto-selects highest-ranked visible target"
+    )
 
 
-class CalibrationRecordPayload(BaseModel):
-    type: str = Field(..., min_length=1, max_length=16)
-    count: int = Field(default=1, ge=1, le=50)
-
-
-class CalibrationResetPayload(BaseModel):
-    type: str | None = Field(default=None, min_length=1, max_length=16, description="Reset a single type or all when omitted.")
-
-
-class SessionPausePayload(BaseModel):
-    pause: bool = Field(default=True)
-
-
-class CaptureIn(BaseModel):
-    kind: str = Field(default="synthetic", max_length=32)
-    target: str = Field(..., max_length=128)
-    sequence: str | None = Field(default=None, max_length=128)
-    index: int | None = Field(default=None)
-    path: str = Field(..., max_length=512)
-    started_at: datetime = Field(...)
-    predicted_ra_deg: float | None = Field(default=None)
-    predicted_dec_deg: float | None = Field(default=None)
-
-
-class TargetSequencePayload(BaseModel):
-    """Payload for starting a sequential target sequence."""
-    name: str | None = Field(default=None, max_length=128)
-    target_ids: list[str] = Field(..., min_items=1, max_items=20, description="List of NEOCP target IDs")
-    park_after: bool = Field(default=False)
-
-
-@router.post("/calibration/run")
-def calibration_run() -> Any:
-    if not SESSION_STATE.current:
-        SESSION_STATE.start(notes="auto-calibration")
-    result = SESSION_STATE.run_calibrations()
-    return {"active": True, "session": result.get("session"), "captures": result.get("captures")}
-
-
-@router.get("/status")
-def session_status() -> Any:
-    if not SESSION_STATE.current:
-        return {"active": False}
-    return {"active": True, "session": SESSION_STATE.current.to_dict()}
+class SessionStatusResponse(BaseModel):
+    """Response with current session status."""
+    active: bool
+    session_id: int | None = None
+    target_name: str | None = None
+    started_at: str | None = None
+    status: str | None = None
+    total_captures: int = 0
+    successful_captures: int = 0
+    successful_associations: int = 0
 
 
 @router.post("/start")
-def session_start(payload: SessionStartPayload | None = Body(None)) -> Any:
-    if payload:
-        session = SESSION_STATE.start(
-            notes=payload.notes,
-            calibration_filter=payload.calibration_filter,
-            calibration_exposure_seconds=payload.calibration_exposure_seconds,
-        )
+def start_session(
+    request: SessionStartRequest,
+    db: Session = Depends(get_session_dep)
+) -> dict[str, Any]:
+    """Start a new observing session.
+
+    If manual_target_override is provided, uses that target.
+    Otherwise, auto-selects the highest-ranked visible target from observability scores.
+    """
+    # Check if there's already an active session
+    existing = db.exec(
+        select(ObservingSession)
+        .where(ObservingSession.status == "active")
+    ).first()
+
+    if existing:
+        return {
+            "success": False,
+            "error": "An active session already exists. Stop it first.",
+            "session_id": existing.id
+        }
+
+    # Determine target
+    if request.manual_target_override:
+        target_id = request.manual_target_override
+        target_name = request.manual_target_override
     else:
-        session = SESSION_STATE.start()
-    try:
-        automation = kickoff_imaging()
-    except NightSessionError as exc:
-        SESSION_STATE.end(reason=exc.message)
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
-    return {"active": True, "session": session.to_dict(), "automation": automation}
+        # Auto-select highest-ranked visible target
+        visible_targets = db.exec(
+            select(NeoObservability)
+            .where(NeoObservability.is_observable == True)
+            .order_by(NeoObservability.score.desc())
+        ).all()
 
-
-@router.post("/end")
-def session_end() -> Any:
-    SESSION_STATE.request_stop_auto_restart()
-    session = SESSION_STATE.end()
-    if not session:
-        raise HTTPException(status_code=404, detail="no_active_session")
-    return {"active": False, "session": session.to_dict()}
-
-
-@router.post("/calibration/record")
-def calibration_record(payload: CalibrationRecordPayload) -> Any:
-    session = SESSION_STATE.record_calibration(payload.type, payload.count)
-    if not session:
-        raise HTTPException(status_code=404, detail="no_active_session")
-    return {"active": True, "session": session.to_dict()}
-
-
-@router.post("/calibration/reset")
-def calibration_reset(payload: CalibrationResetPayload | None = Body(None)) -> Any:
-    if not SESSION_STATE.current:
-        raise HTTPException(status_code=404, detail="no_active_session")
-    reset_type = payload.type if payload else None
-    SESSION_STATE.reset_calibrations(reset_type)
-    return {"active": True, "session": SESSION_STATE.current.to_dict()}
-
-
-@router.post("/pause")
-def session_pause(payload: SessionPausePayload | None = Body(None)) -> Any:
-    if not SESSION_STATE.current:
-        raise HTTPException(status_code=404, detail="no_active_session")
-    pause = True if payload is None else payload.pause
-    session = SESSION_STATE.pause() if pause else SESSION_STATE.resume()
-    return {"active": True, "session": session.to_dict()}
-
-
-@router.post("/ingest_captures")
-def ingest_captures(captures: list[CaptureIn]) -> Any:
-    """Inject captures into the in-memory session for association/solver workflows."""
-    if not SESSION_STATE.current:
-        SESSION_STATE.start(notes="synthetic-ingest")
-    payloads: list[dict[str, Any]] = []
-    for cap in captures:
-        payloads.append(
-            {
-                "kind": cap.kind,
-                "target": cap.target,
-                "sequence": cap.sequence,
-                "index": cap.index,
-                "path": cap.path,
-                "started_at": cap.started_at.isoformat(),
+        if not visible_targets:
+            return {
+                "success": False,
+                "error": "No visible targets available"
             }
-        )
-        if cap.predicted_ra_deg is not None and cap.predicted_dec_deg is not None:
-            SESSION_STATE.set_prediction(cap.path, cap.predicted_ra_deg, cap.predicted_dec_deg)
-    SESSION_STATE.add_captures(payloads)
-    return {"active": True, "session": SESSION_STATE.current.to_dict(), "count": len(payloads)}
 
+        best_target = visible_targets[0]
+        target_id = best_target.candidate_id
+        target_name = best_target.trksub
 
-@router.post("/sequence")
-def start_sequence(payload: TargetSequencePayload) -> Any:
-    """
-    Start sequential observations of the requested targets.
-
-    This endpoint processes targets ONE AT A TIME:
-    1. Fetches target data from the database
-    2. Builds a sequential plan with presets for each target
-    3. For each target sequentially:
-       a. Sends single-target sequence to NINA
-       b. Waits for all images from that target
-       c. Plate-solves any images NINA didn't solve
-       d. Moves to next target
-    4. Optionally parks telescope when all targets complete
-    """
-    from app.db.session import get_session
-    from app.models import NeoCandidate
-    from app.services.automation import AutomationService
-    from sqlmodel import select
-
-    # Start a session if not already active
-    if not SESSION_STATE.current:
-        SESSION_STATE.start(notes="sequential-target-sequence")
-
-    # Fetch target data from database
-    targets_data = []
-    with get_session() as session:
-        for target_id in payload.target_ids:
-            candidate = session.exec(
-                select(NeoCandidate).where(NeoCandidate.id == target_id)
-            ).first()
-
-            if not candidate:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Target not found: {target_id}"
-                )
-
-            targets_data.append({
-                "name": candidate.id,
-                "ra_deg": candidate.ra_deg,
-                "dec_deg": candidate.dec_deg,
-                "vmag": candidate.vmag,
-                "candidate_id": candidate.id,
-            })
-
-    if not targets_data:
-        raise HTTPException(
-            status_code=400,
-            detail="No valid targets found"
+        logger.info(
+            f"Auto-selected target: {target_name} "
+            f"(score={best_target.score}, alt={best_target.max_altitude_deg:.1f}°)"
         )
 
-    # Build and execute sequential plan
-    automation = AutomationService()
-    plan = automation.build_sequential_target_plan(
-        targets=targets_data,
-        name=payload.name,
-        park_after=payload.park_after,
+    # Create session record
+    session = ObservingSession(
+        start_time=datetime.utcnow(),
+        status="active",
+        target_mode="auto",
+        selected_target=target_id,
+        stats={}
     )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
 
+    logger.info(f"Created session {session.id} for target {target_name}")
+
+    # Build target plan and execute
     try:
-        result = automation.run_sequential_target_sequence(plan)
+        automation = AutomationService(db_session=db)
+
+        # Get candidate data for plan building (need RA/Dec/Vmag)
+        candidate = db.exec(
+            select(NeoCandidate)
+            .where(NeoCandidate.id == target_id)
+        ).first()
+
+        if not candidate:
+            session.status = "error"
+            session.end_time = datetime.utcnow()
+            db.commit()
+            return {
+                "success": False,
+                "error": f"Target {target_id} not found in candidate table",
+                "session_id": session.id
+            }
+
+        # Get observability for score
+        observability = db.exec(
+            select(NeoObservability)
+            .where(NeoObservability.candidate_id == target_id)
+            .order_by(NeoObservability.score.desc())
+        ).first()
+
+        target_dict = {
+            "name": target_name,
+            "candidate_id": target_id,
+            "ra_deg": candidate.ra_deg or 0.0,
+            "dec_deg": candidate.dec_deg or 0.0,
+            "vmag": candidate.vmag,
+            "score": observability.score if observability else 0.0
+        }
+
+        plan = automation.build_target_plan(target_dict)
+
+        logger.info(
+            f"Executing plan for {plan.name}: {plan.count}x{plan.exposure_seconds}s "
+            f"@ {plan.filter_name}, binning {plan.binning}"
+        )
+
+        # Execute the plan (this runs synchronously)
+        result = automation.execute_target_plan(plan)
+
+        # Update session stats
+        session.stats = {
+            "total_attempts": result["total_attempts"],
+            "successful_captures": result["successful_captures"],
+            "successful_associations": result["successful_associations"],
+            "started_at": result["started_at"],
+            "completed_at": result["completed_at"]
+        }
+        session.status = "completed"
+        session.end_time = datetime.utcnow()
+        db.commit()
+
         return {
             "success": True,
-            "sequence": result,
-            "targets_count": len(targets_data),
+            "session_id": session.id,
+            "target_name": target_name,
+            "result": result
         }
+
     except Exception as e:
-        SESSION_STATE.log_event(f"Failed to start sequence: {e}", "error")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start sequence: {str(e)}"
-        )
+        logger.error(f"Session execution failed: {e}", exc_info=True)
+        session.status = "error"
+        session.end_time = datetime.utcnow()
+        session.stats = {"error": str(e)}
+        db.commit()
+
+        return {
+            "success": False,
+            "error": str(e),
+            "session_id": session.id
+        }
 
 
-@router.get("/dashboard/status")
-def dashboard_status() -> Any:
-    """Bundle bridge + session info for a lightweight dashboard poll."""
+@router.post("/stop")
+def stop_session(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
+    """Stop the currently active session."""
+    session = db.exec(
+        select(ObservingSession)
+        .where(ObservingSession.status == "active")
+    ).first()
 
-    bridge = NinaBridgeService()
-    bridge_status = bridge.get_status()
-    session_info = SESSION_STATE.current.to_dict() if SESSION_STATE.current else None
+    if not session:
+        raise HTTPException(status_code=404, detail="No active session found")
 
-    # Fetch local weather status
-    from app.services.weather import WeatherService
-    from app.db.session import get_session
-    weather_summary = None
-    with get_session() as session:
-        weather_service = WeatherService(session)
-        weather_summary = weather_service.get_status()
+    session.status = "stopped"
+    session.end_time = datetime.utcnow()
+    db.commit()
+
+    logger.info(f"Stopped session {session.id}")
 
     return {
-        "bridge_blockers": bridge_status.get("blockers"),
-        "bridge_ready": bridge_status.get("ready"),
-        "bridge_status": bridge_status.get("nina_status"),
-        "ignore_weather": bridge_status.get("ignore_weather"),
-        "session": session_info,
-        "notifications": SESSION_STATE.log,
-        "weather_summary": weather_summary,
-        "target_available": _check_target_availability(),
+        "success": True,
+        "session_id": session.id,
+        "message": "Session stopped"
     }
 
 
-def _check_target_availability() -> str | None:
-    from app.services.night_ops import _fetch_target_internal
-    try:
-        # Check availability ignoring the 'current time' constraint, 
-        # so the indicator reflects if there are ANY valid targets for the configured window.
-        target_now = _fetch_target_internal(ignore_time=False)
-        if target_now:
-            return "Available"
-            
-        target_any = _fetch_target_internal(ignore_time=True)
-        if target_any:
-            # If we found a target but it's not available NOW, then we are waiting.
-            # However, _fetch_target_internal(ignore_time=True) returns the BEST target in the window.
-            # If that target is also available now, target_now would have caught it.
-            # So if we are here, target_now is None, meaning the best target is NOT available now.
-            start_dt = target_any.get("window_start")
-            if start_dt:
-                from datetime import timezone
-                import zoneinfo
-                if not start_dt.tzinfo:
-                    start_dt = start_dt.replace(tzinfo=timezone.utc)
-                try:
-                    tz = zoneinfo.ZoneInfo(SESSION_STATE.timezone)
-                    start_dt = start_dt.astimezone(tz)
-                except Exception:
-                    pass
-                start_str = start_dt.strftime("%H:%M")
-            else:
-                start_str = "window"
-            return f"Waiting for {start_str}"
-            
-        return "None (No observable targets)"
-    except Exception as exc:
-        import logging
-        logging.getLogger("uvicorn").error(f"Target availability check failed: {exc}")
-        # Extract message from exception if possible, or generic error
-        msg = str(exc)
-        if "No visible targets available" in msg:
-             return "None (No visible targets)"
-        if "No targets are currently observable" in msg:
-             return "None (Check window/weather)"
-        return "None (Error)"
+@router.get("/status")
+def get_status(db: Session = Depends(get_session_dep)) -> SessionStatusResponse:
+    """Get current session status."""
+    session = db.exec(
+        select(ObservingSession)
+        .where(ObservingSession.status == "active")
+        .order_by(ObservingSession.start_time.desc())
+    ).first()
+
+    if not session:
+        return SessionStatusResponse(active=False)
+
+    stats = session.stats or {}
+
+    return SessionStatusResponse(
+        active=True,
+        session_id=session.id,
+        target_name=session.selected_target,
+        started_at=session.start_time.isoformat() if session.start_time else None,
+        status=session.status,
+        total_captures=stats.get("total_attempts", 0),
+        successful_captures=stats.get("successful_captures", 0),
+        successful_associations=stats.get("successful_associations", 0)
+    )
+
+
+__all__ = ["router"]

@@ -1,13 +1,21 @@
 import asyncio
+import sys
+from pathlib import Path
+
 import httpx
-import json
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app.core.site_config import load_site_config  # noqa: E402
 
 PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_2/printhorizon"
 
 async def fetch_horizon():
-    # TODO: Read from config/site_local.yml instead of hardcoding
-    lat = 51.4769  # Example: Greenwich Observatory
-    lon = -0.0005
+    site = load_site_config()
+    lat = site.latitude
+    lon = site.longitude
     params = {
         "lat": lat,
         "lon": lon,

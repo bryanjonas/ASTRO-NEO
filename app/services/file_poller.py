@@ -17,7 +17,7 @@ def poll_for_fits_file(
     target_name: str,
     fits_directory: Path | str = "/data/fits",
     timeout: float = 60.0,
-    poll_interval: float = 0.5,
+    poll_interval: float = 0.1,
 ) -> Optional[Path]:
     """
     Poll for a FITS file matching the target name.
@@ -56,9 +56,9 @@ def poll_for_fits_file(
             logger.info(f"Found FITS file: {newest_file}")
             return newest_file
 
-        # Exponential backoff with max interval of 2 seconds
+        # Exponential backoff with max interval of 3.2 seconds
         time.sleep(current_interval)
-        current_interval = min(current_interval * 1.5, 2.0)
+        current_interval = min(current_interval * 2.0, 3.2)
 
     logger.error(f"Timeout waiting for FITS file with target '{target_name}' after {timeout}s")
     return None

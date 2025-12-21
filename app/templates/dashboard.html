@@ -1,0 +1,504 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="dashboard" x-data="dashboard()">
+  <!-- Header -->
+  <div class="dashboard-header">
+    <div class="header-left">
+      <img src="/static/logo.png" alt="ASTRO-NEO Logo" class="logo" />
+      <h1>ASTRO-NEO</h1>
+    </div>
+  <div class="session-controls">
+    <template x-if="!sessionStatus.active">
+      <button
+        class="btn btn-primary"
+        @click="startSession()"
+        :disabled="starting">
+        <span x-show="!starting">Start Session</span>
+        <span x-show="starting">Starting...</span>
+      </button>
+    </template>
+    <template x-if="sessionStatus.active">
+      <button
+        class="btn btn-danger"
+        @click="stopSession()"
+        :disabled="stopping">
+        <span x-show="!stopping">End Session</span>
+        <span x-show="stopping">Stopping...</span>
+      </button>
+    </template>
+  </div>
+</div>
+
+  <!-- Current Session Status -->
+  <div class="status-card" x-show="sessionStatus.active">
+    <h2>Current Session</h2>
+    <div class="status-grid">
+      <div class="status-item">
+        <span class="status-label">Target:</span>
+        <span class="status-value" x-text="sessionStatus.target_name || 'N/A'"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Status:</span>
+        <span class="status-value" x-text="sessionStatus.status || 'N/A'"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Captures:</span>
+        <span class="status-value">
+          <span x-text="sessionStatus.successful_captures || 0"></span> /
+          <span x-text="sessionStatus.total_captures || 0"></span>
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Associations:</span>
+        <span class="status-value" x-text="sessionStatus.successful_associations || 0"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Captures -->
+  <div class="captures-card">
+    <h2>Recent Captures</h2>
+    <div class="captures-list">
+      <template x-if="recentCaptures.length === 0">
+        <p class="empty-state">No captures yet</p>
+      </template>
+      <template x-for="capture in recentCaptures" :key="capture.id">
+        <div class="capture-item">
+          <span class="capture-icon" x-text="capture.has_wcs ? '✓' : '✗'"></span>
+          <span class="capture-target" x-text="capture.target"></span>
+          <span class="capture-info">
+            <template x-if="capture.has_wcs">
+              Solved
+              <template x-if="capture.association">
+                , Associated (residual <span x-text="capture.association.residual_arcsec.toFixed(1)"></span>")
+              </template>
+              <template x-if="!capture.association">
+                , No association
+              </template>
+            </template>
+            <template x-if="!capture.has_wcs">
+              Not solved
+            </template>
+          </span>
+          <span class="capture-time" x-text="formatTime(capture.started_at)"></span>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Activity Log -->
+  <div class="log-card">
+    <h2>Activity Log</h2>
+    <div class="log-list">
+      <template x-if="logs.length === 0">
+        <p class="empty-state">No log entries yet</p>
+      </template>
+      <template x-for="entry in logs" :key="entry.time + entry.name + entry.message">
+        <div class="log-entry">
+          <span class="log-time" x-text="formatLogTime(entry.time)"></span>
+          <span class="log-level" x-text="entry.level"></span>
+          <span class="log-message" x-text="entry.name + ': ' + entry.message"></span>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Available Targets -->
+  <div class="targets-card">
+    <h2>Available Targets (Top 10)</h2>
+    <div class="targets-list">
+      <template x-if="availableTargets.length === 0">
+        <p class="empty-state">No targets available</p>
+      </template>
+      <template x-for="(target, index) in availableTargets" :key="target.id">
+        <div class="target-item">
+          <span class="target-rank" x-text="index + 1"></span>
+          <span class="target-name" x-text="target.trksub || target.candidate_id"></span>
+          <span class="target-score">Score: <span x-text="target.score ? target.score.toFixed(1) : 'N/A'"></span></span>
+          <span class="target-alt">
+            Max Alt: <span x-text="target.max_altitude_deg ? target.max_altitude_deg.toFixed(1) + '°' : 'N/A'"></span>
+          </span>
+          <span class="target-visibility" :class="target.is_observable ? 'visible' : 'not-visible'">
+            <span x-text="target.is_observable ? 'Visible' : 'Not visible'"></span>
+          </span>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<style>
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.logo {
+  height: 80px;
+  width: auto;
+}
+
+.dashboard-header h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1f2937;
+  letter-spacing: -0.025em;
+}
+
+.session-controls {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.btn-danger {
+  background-color: #ef4444;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #dc2626;
+}
+
+.status-card,
+.captures-card,
+.log-card,
+.targets-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.status-card h2,
+.captures-card h2,
+.log-card h2,
+.targets-card h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.status-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.status-value {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.captures-list,
+.targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.empty-state {
+  color: #9ca3af;
+  font-style: italic;
+  text-align: center;
+  padding: 2rem;
+}
+
+.capture-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 0.375rem;
+}
+
+.capture-icon {
+  font-size: 1.25rem;
+}
+
+.capture-target {
+  font-weight: 600;
+  min-width: 100px;
+}
+
+.capture-info {
+  flex: 1;
+  color: #6b7280;
+}
+
+.capture-time {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.log-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.875rem;
+}
+
+.log-entry {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.25rem 0.5rem;
+  background: #f3f4f6;
+  border-radius: 0.375rem;
+}
+
+.log-time {
+  color: #6b7280;
+  min-width: 72px;
+}
+
+.log-level {
+  color: #374151;
+  font-weight: 600;
+  min-width: 52px;
+  text-transform: uppercase;
+}
+
+.log-message {
+  color: #111827;
+  flex: 1;
+}
+
+.target-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 0.375rem;
+}
+
+.target-rank {
+  font-weight: 600;
+  min-width: 2rem;
+}
+
+.target-name {
+  font-weight: 600;
+  min-width: 120px;
+}
+
+.target-score,
+.target-alt {
+  color: #6b7280;
+  min-width: 100px;
+}
+
+.target-visibility {
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.target-visibility.visible {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.target-visibility.not-visible {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+</style>
+
+<script>
+function dashboard() {
+  return {
+    sessionStatus: {
+      active: false,
+      session_id: null,
+      target_name: null,
+      started_at: null,
+      status: null,
+      total_captures: 0,
+      successful_captures: 0,
+      successful_associations: 0
+    },
+    recentCaptures: [],
+    logs: [],
+    availableTargets: [],
+    starting: false,
+    stopping: false,
+
+    init() {
+      this.loadStatus();
+      this.loadRecentCaptures();
+      this.loadLogs();
+      this.loadAvailableTargets();
+
+      // Poll for updates every 5 seconds
+      setInterval(() => {
+        this.loadStatus();
+        this.loadRecentCaptures();
+        this.loadLogs();
+        this.loadAvailableTargets();
+      }, 5000);
+    },
+
+    async loadStatus() {
+      try {
+        const response = await fetch('/api/session/status');
+        const data = await response.json();
+        this.sessionStatus = data;
+      } catch (error) {
+        console.error('Failed to load status:', error);
+      }
+    },
+
+    async loadRecentCaptures() {
+      try {
+        const sessionId = this.sessionStatus.session_id;
+        if (!sessionId) {
+          this.recentCaptures = [];
+          return;
+        }
+        const response = await fetch(`/api/captures?limit=10&session_id=${sessionId}`);
+        const data = await response.json();
+        this.recentCaptures = data.captures || [];
+      } catch (error) {
+        console.error('Failed to load captures:', error);
+      }
+    },
+
+    async loadLogs() {
+      try {
+        const response = await fetch('/api/logs?limit=80');
+        const data = await response.json();
+        this.logs = data.logs || [];
+      } catch (error) {
+        console.error('Failed to load logs:', error);
+      }
+    },
+
+    async loadAvailableTargets() {
+      try {
+        const response = await fetch('/api/observability/');
+        const data = await response.json();
+        // API returns array directly, limit to top 10
+        this.availableTargets = (Array.isArray(data) ? data : []).slice(0, 10);
+      } catch (error) {
+        console.error('Failed to load targets:', error);
+      }
+    },
+
+    async startSession() {
+      this.starting = true;
+      try {
+        const response = await fetch('/api/session/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ manual_target_override: null })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+          await this.loadStatus();
+        } else {
+          alert('Failed to start session: ' + (data.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Failed to start session:', error);
+        alert('Failed to start session: ' + error.message);
+      } finally {
+        this.starting = false;
+      }
+    },
+
+    async stopSession() {
+      this.stopping = true;
+      try {
+        const response = await fetch('/api/session/stop', {
+          method: 'POST'
+        });
+        const data = await response.json();
+
+        if (data.success) {
+          await this.loadStatus();
+        } else {
+          alert('Failed to stop session: ' + (data.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Failed to stop session:', error);
+        alert('Failed to stop session: ' + error.message);
+      } finally {
+        this.stopping = false;
+      }
+    },
+
+    formatTime(isoString) {
+      if (!isoString) return 'N/A';
+      const date = new Date(isoString);
+      return date.toLocaleTimeString();
+    },
+
+    formatLogTime(isoString) {
+      if (!isoString) return '--:--:--';
+      const date = new Date(isoString);
+      return date.toLocaleTimeString();
+    }
+  };
+}
+</script>
+{% endblock %}

@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.site_config import SiteFileConfig, load_site_config
 from app.models import NeoCandidate, NeoObservability, NeoEphemeris
 from app.services.ephemeris import MpcEphemerisClient
+from app.services.horizons_client import HorizonsClient
 from app.services.weather import WeatherService, WeatherSummary
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,13 @@ class ObservabilityService:
             self.site_config.horizon_mask.source if self.site_config.horizon_mask else None
         )
         self.ephemeris_client = MpcEphemerisClient(session, self.site_config)
+        self.horizons_client = HorizonsClient(
+            site_lat=self.site_config.latitude,
+            site_lon=self.site_config.longitude,
+            site_alt_m=self.site_config.altitude_m,
+            timeout=settings.horizons_timeout,
+        )
+        self._horizons_availability_cache: dict[str, bool] = {}
         self.weather_service = WeatherService(session, self.site_config)
         self.weather_summary: WeatherSummary | None = None
 
@@ -260,6 +268,10 @@ class ObservabilityService:
         if duration_minutes < self.min_window_minutes:
             reasons.append("window_too_short")
 
+        horizons_available = self._has_horizons_data(candidate)
+        if not horizons_available:
+            reasons.append("no_horizons")
+
         max_altitude = float(np.max(altitudes[best_mask]))
         min_moon_sep = float(np.min(moon_separation[best_mask]))
         max_sun_alt = float(np.max(self.sun_altitudes[best_mask]))
@@ -279,6 +291,7 @@ class ObservabilityService:
             "duration_score": duration_score,
             "altitude_score": altitude_score,
             "urgency_score": urgency_score,
+            "horizons_available": horizons_available,
         }
 
         return self._persist_result(
@@ -297,6 +310,40 @@ class ObservabilityService:
             },
             reasons,
         )
+
+    def _has_horizons_data(self, candidate: NeoCandidate) -> bool:
+        if not candidate.trksub:
+            return False
+        cached = self._horizons_availability_cache.get(candidate.trksub)
+        if cached is not None:
+            return cached
+        if candidate.id is not None:
+            existing = self.session.exec(
+                select(NeoEphemeris)
+                .where(NeoEphemeris.candidate_id == candidate.id)
+                .where(NeoEphemeris.source == "HORIZONS")
+                .where(NeoEphemeris.epoch >= self.night_start)
+                .where(NeoEphemeris.epoch <= self.night_end)
+            ).first()
+            if existing:
+                self._horizons_availability_cache[candidate.trksub] = True
+                return True
+
+        now = datetime.utcnow().replace(second=0, microsecond=0)
+        try:
+            rows = self.horizons_client.fetch_ephemeris(
+                target_designation=candidate.trksub,
+                start_time=now - timedelta(minutes=10),
+                stop_time=now + timedelta(minutes=10),
+                step_minutes=5,
+            )
+            available = bool(rows)
+        except Exception as exc:
+            logger.warning("Horizons availability check failed for %s: %s", candidate.trksub, exc)
+            available = False
+
+        self._horizons_availability_cache[candidate.trksub] = available
+        return available
 
     def _find_visibility_windows(self, mask: np.ndarray) -> list[tuple[int, int]]:
         windows: list[tuple[int, int]] = []
