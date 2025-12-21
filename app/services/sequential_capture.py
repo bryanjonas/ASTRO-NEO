@@ -30,7 +30,7 @@ from app.services.analysis import AnalysisService
 from app.services.file_poller import poll_for_fits_file, wait_for_file_size_stable
 from app.services.horizons_client import HorizonsClient
 from app.services.nina_client import NinaBridgeService
-from app.services.solver import SolverService
+from app.services.solver import solve_fits
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +45,11 @@ class SequentialCaptureService:
         db: Session,
         nina_client: Optional[NinaBridgeService] = None,
         horizons_client: Optional[HorizonsClient] = None,
-        solver: Optional[SolverService] = None,
         analysis: Optional[AnalysisService] = None,
     ):
         self.db = db
         self.nina = nina_client or NinaBridgeService()
         self.horizons = horizons_client or HorizonsClient()
-        self.solver = solver or SolverService(db)
         self.analysis = analysis or AnalysisService(db)
 
     def capture_with_confirmation(
@@ -181,10 +179,10 @@ class SequentialCaptureService:
             # Solve confirmation image
             try:
                 logger.info(f"Solving confirmation image: {confirm_path}")
-                solve_result = self.solver.solve_field(
+                solve_result = solve_fits(
                     fits_path=confirm_path,
-                    ra_hint_deg=final_ra,
-                    dec_hint_deg=final_dec,
+                    ra_hint=final_ra,
+                    dec_hint=final_dec,
                 )
                 solved_ra = solve_result["solution"]["ra_deg"]
                 solved_dec = solve_result["solution"]["dec_deg"]
@@ -299,10 +297,10 @@ class SequentialCaptureService:
         # Step 6: Plate solve main image
         try:
             logger.info(f"Solving main science image: {fits_path}")
-            solve_result = self.solver.solve_field(
+            solve_result = solve_fits(
                 fits_path=fits_path,
-                ra_hint_deg=final_ra,
-                dec_hint_deg=final_dec,
+                ra_hint=final_ra,
+                dec_hint=final_dec,
             )
             capture.has_wcs = True
             capture.solved_ra_deg = solve_result["solution"]["ra_deg"]
