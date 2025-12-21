@@ -14,7 +14,11 @@ services:
       SERVICE_NAME: api
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: 1
+      # Direct NINA connection (bridge removed)
+      NINA_URL: ${NINA_URL:-http://host.docker.internal:1888/api}
       # MOCK_NINA_URL: http://mock-nina:1888/api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     ports:
       - "18080:8000"
@@ -107,36 +111,9 @@ services:
 # astrometry-worker: REMOVED - astrometry.net installed directly in api container
   # The astrometry-worker service has been removed as part of simplification.
   # Plate solving is now done locally via subprocess in the api service.
-  nina-bridge:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    pull_policy: build
-    depends_on:
-      - db
-      # - mock-nina
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      SERVICE_NAME: nina-bridge
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      RUN_MIGRATIONS: 0
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    command: ["uvicorn", "nina_bridge.main:app", "--host", "0.0.0.0", "--port", "8001"]
-    restart: unless-stopped
-    ports:
-      - "1889:8001"
-    volumes:
-      - ./nina_bridge:/app/nina_bridge
-      - ./app:/app/app
-      - ./config:/app/config:ro
-      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
-      - ./data:/data
-      - nina_images:/data/fits
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
+# nina-bridge: REMOVED - API now calls NINA directly
+  # The nina-bridge service has been removed as part of simplification.
+  # The API service now communicates directly with NINA using host.docker.internal.
   # synthetic-targets: #Turn off neocp-fetcher
   #   build:
   #     context: .

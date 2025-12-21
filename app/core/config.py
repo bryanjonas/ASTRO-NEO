@@ -70,8 +70,13 @@ class Settings(BaseSettings):
     mag_uncert_floor: float = 0.05
     mpc_email: str = ""
     submission_channel: str = "email"  # email|api
-    nina_bridge_url: str = "http://nina-bridge:8001/api"
-    nina_bridge_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
+    # Direct NINA connection (nina-bridge service removed)
+    nina_url: str = "http://host.docker.internal:1888/api"
+    nina_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
+
+    # Legacy settings (deprecated - bridge removed)
+    nina_bridge_url: str = "http://host.docker.internal:1888/api"  # Points to NINA directly now
+    nina_bridge_timeout: float = 300.0
     data_root: str = "/data"
     fits_retention_days: int = 14
     # astrometry_worker removed - now using local subprocess solving only

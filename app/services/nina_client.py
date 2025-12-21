@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class NinaBridgeService:
-    """Thin wrapper around the bridge HTTP API."""
+    """Direct NINA API client (bridge removed - now calls NINA directly)."""
 
     def __init__(self, base_url: str | None = None, timeout: float | None = None) -> None:
-        self.base_url = base_url or settings.nina_bridge_url.rstrip("/")
-        self.timeout = timeout or settings.nina_bridge_timeout
+        # Call NINA directly - bridge service has been removed
+        self.base_url = base_url or settings.nina_url
+        self.timeout = timeout or settings.nina_timeout
 
     def _request(
         self,
