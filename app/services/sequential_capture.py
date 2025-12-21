@@ -24,12 +24,13 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import CaptureLog, CandidateAssociation
+from app.models.analysis import CandidateAssociation
+from app.models.capture import CaptureLog
+from app.services.analysis import AnalysisService
 from app.services.file_poller import poll_for_fits_file, wait_for_file_size_stable
 from app.services.horizons_client import HorizonsClient
 from app.services.nina_client import NinaBridgeService
 from app.services.solver import SolverService
-from app.services.analysis import AnalysisService
 
 logger = logging.getLogger(__name__)
 
