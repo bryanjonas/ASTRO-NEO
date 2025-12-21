@@ -71,29 +71,9 @@ services:
       - ./data/neocp_snapshots:/data/neocp_snapshots:ro
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-  image-monitor:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    pull_policy: build
-    depends_on:
-      - db
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
-      SERVICE_NAME: image-monitor
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      RUN_MIGRATIONS: 0
-    command: ["python", "-m", "app.services.image_monitor_service"]
-    restart: unless-stopped
-    volumes:
-      - ./app:/app/app
-      - ./config:/app/config:ro
-      - ./data:/data
-      - nina_images:/data/fits
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
+# image-monitor: REMOVED - functionality moved to inline synchronous processing in api service
+  # The image-monitor service has been removed as part of simplification.
+  # File monitoring is now done synchronously during capture operations.
   # cron:
   #   image: postgres:15-alpine
   #   container_name: astro-neo-cron
@@ -124,22 +104,9 @@ services:
   #              echo 'Sleeping for 24 hours...';
   #              sleep 86400;
   #            done"
-  astrometry-worker:
-    build:
-      context: .
-      dockerfile: docker/astrometry.Dockerfile
-    pull_policy: build
-    restart: unless-stopped
-    environment:
-      ASTROMETRY_WORKER_URL: ""  # prevent recursive remote calls
-      ASTROMETRY_CONFIG_FILE: /etc/astrometry.cfg
-    volumes:
-      - ./data:/data
-      - nina_images:/data/fits
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    ports:
-      - "18100:8100"
+# astrometry-worker: REMOVED - astrometry.net installed directly in api container
+  # The astrometry-worker service has been removed as part of simplification.
+  # Plate solving is now done locally via subprocess in the api service.
   nina-bridge:
     build:
       context: .

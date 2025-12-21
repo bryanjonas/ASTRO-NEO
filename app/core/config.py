@@ -74,7 +74,8 @@ class Settings(BaseSettings):
     nina_bridge_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
     data_root: str = "/data"
     fits_retention_days: int = 14
-    astrometry_worker_url: str | None = "http://astrometry-worker:8100"
+    # astrometry_worker removed - now using local subprocess solving only
+    astrometry_worker_url: str | None = None  # Disabled - local solving only
     astrometry_worker_timeout: float = 300.0
     astrometry_config_path: str = "/app/astrometry.cfg"
     astrometry_scale_low_arcsec: float | None = None
