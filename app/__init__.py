@@ -8,7 +8,8 @@ from .core.config import settings
 from .core.logging_config import setup_logging
 from .core.site_config import bootstrap_site_config
 from .db.session import init_db
-from .dashboard import router as dashboard_router
+# Temporarily disabled - requires SESSION_STATE refactoring
+# from .dashboard import router as dashboard_router
 from .services.captures import prune_missing_captures
 
 
@@ -21,7 +22,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     app.include_router(api_router, prefix=settings.api_prefix)
-    app.include_router(dashboard_router)
+    # app.include_router(dashboard_router)  # Temporarily disabled
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
     @app.get("/", include_in_schema=False)
