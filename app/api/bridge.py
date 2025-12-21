@@ -9,9 +9,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.automation import AutomationPlan, AutomationService
+from app.services.automation import AutomationService, TargetPlan
 from app.services.nina_client import NinaBridgeService
-from app.services.session import SESSION_STATE
 
 router = APIRouter(prefix="/bridge", tags=["bridge"])
 
@@ -97,13 +96,11 @@ def equipment_profile(bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
 def set_override(
     payload: OverridePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Manual override {'enabled' if payload.manual_override else 'disabled'}", "warn" if payload.manual_override else "info")
     return bridge.set_override(payload.manual_override)
 
 
 @router.post("/dome")
 def set_dome(payload: DomePayload, bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
-    SESSION_STATE.log_event(f"Dome {'closed' if payload.closed else 'opened'} (manual)", "info")
     return bridge.set_dome(payload.closed)
 
 
@@ -115,7 +112,6 @@ class IgnoreWeatherPayload(BaseModel):
 def set_ignore_weather(
     payload: IgnoreWeatherPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Weather check {'ignored' if payload.ignore_weather else 'active'}", "warn" if payload.ignore_weather else "good")
     return bridge.set_ignore_weather(payload.ignore_weather)
 
 
@@ -123,7 +119,6 @@ def set_ignore_weather(
 def telescope_connect(
     payload: ConnectPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Telescope {'connecting' if payload.connect else 'disconnecting'}", "info")
     return bridge.connect_telescope(payload.connect)
 
 
@@ -131,7 +126,6 @@ def telescope_connect(
 def telescope_park(
     payload: ParkPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Telescope {'parking' if payload.park else 'unparking'}", "info")
     return bridge.park_telescope(payload.park)
 
 
@@ -139,7 +133,6 @@ def telescope_park(
 def telescope_slew(
     payload: SlewPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Slewing to RA={payload.ra_deg:.4f} Dec={payload.dec_deg:.4f}", "info")
     return bridge.slew(payload.ra_deg, payload.dec_deg)
 
 
@@ -152,7 +145,6 @@ def list_telescopes(bridge: NinaBridgeService = Depends(get_bridge)) -> Any:
 def connect_telescope_device(
     device_id: str = Form(...), bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Connecting to telescope {device_id}", "info")
     return bridge.connect_telescope(connect=True, device_id=device_id)
 
 
@@ -160,7 +152,6 @@ def connect_telescope_device(
 def focuser_move(
     payload: FocuserMovePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Moving focuser to {payload.position}", "info")
     return bridge.focuser_move(payload.position, payload.speed)
 
 
@@ -168,51 +159,9 @@ def focuser_move(
 def start_exposure(
     payload: ExposurePayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    started_at = datetime.utcnow()
     result = bridge.start_exposure(payload.filter, payload.binning, payload.exposure_seconds, target=payload.target)
     if not isinstance(result, dict):
         raise HTTPException(status_code=502, detail={"reason": "invalid_capture_response"})
-    plate_result = result.get("platesolve")
-    # Note: NINA API does not return file paths - will be None
-    file_path = result.get("file")
-    if plate_result:
-        coords = plate_result.get("Coordinates") or {}
-        ra_deg = coords.get("RADegrees")
-        dec_deg = coords.get("DECDegrees")
-        coord_str = (
-            f"RA {ra_deg:.3f}° Dec {dec_deg:.3f}°"
-            if isinstance(ra_deg, (int, float)) and isinstance(dec_deg, (int, float))
-            else ""
-        )
-        if plate_result.get("Success"):
-            SESSION_STATE.log_event(
-                f"NINA solve succeeded for {payload.target or 'exposure'} {coord_str}".strip(),
-                "good",
-            )
-        else:
-            SESSION_STATE.log_event(
-                f"NINA solve failed for {payload.target or 'exposure'} – local solver will retry",
-                "warn",
-            )
-    else:
-        SESSION_STATE.log_event(
-            f"NINA solve result unavailable for {payload.target or 'exposure'}",
-            "warn",
-        )
-    SESSION_STATE.add_capture(
-        {
-            "kind": "exposure",
-            "target": payload.target or "exposure",
-            "sequence": payload.target or "manual",
-            "started_at": started_at.isoformat(),
-            "path": str(file_path or ""),
-            "platesolve": plate_result,
-            "exposure_seconds": payload.exposure_seconds,
-            "filter": payload.filter,
-            "binning": payload.binning,
-        }
-    )
-    SESSION_STATE.log_event(f"Starting exposure: {payload.exposure_seconds}s {payload.filter} bin={payload.binning}", "info")
     return {"result": result}
 
 
@@ -229,7 +178,6 @@ class CameraConnectPayload(BaseModel):
 def connect_camera(
     device_id: str = Form(...), bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event(f"Connecting to camera {device_id}", "info")
     return bridge.connect_camera(device_id)
 
 
@@ -237,7 +185,6 @@ def connect_camera(
 def plan_sequence(
     payload: SequencePlanPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    SESSION_STATE.log_event("Planning sequence", "info")
     return bridge.plan_sequence(payload.model_dump(exclude_none=True))
 
 
@@ -245,49 +192,20 @@ def plan_sequence(
 def start_sequence(
     payload: SequenceStartPayload, bridge: NinaBridgeService = Depends(get_bridge)
 ) -> Any:
-    started_at = datetime.utcnow()
-    captures: list[dict] = []
-    for idx in range(1, payload.count + 1):
-        path = build_fits_path(
-            target_name=payload.target or payload.name,
-            start_time=started_at,
-            sequence_name=payload.name,
-            index=idx,
-        )
-        captures.append(
-            {
-                "kind": "sequence",
-                "target": payload.target or payload.name,
-                "sequence": payload.name,
-                "index": idx,
-                "started_at": started_at.isoformat(),
-                "path": str(path),
-            }
-        )
-
-    SESSION_STATE.log_event(f"Starting sequence '{payload.name}': {payload.count} frames", "info")
     result = bridge.start_sequence(payload.model_dump(exclude_none=True))
-    SESSION_STATE.add_captures(captures)
-    return {"expected_paths": captures, "result": result}
+    return {"result": result}
 
 
 @router.post("/automation/run")
 def automation_run(payload: AutomationPayload) -> Any:
     automation = AutomationService()
-    plan = automation.build_plan(
-        target=payload.target,
-        ra_deg=payload.ra_deg,
-        dec_deg=payload.dec_deg,
-        vmag=payload.vmag,
-        urgency=payload.urgency,
-        focus_position=payload.focus_position,
-        park_after=payload.park_after,
-        override_filter=payload.filter,
-        override_binning=payload.binning,
-        override_exposure_seconds=payload.exposure_seconds,
-        override_count=payload.count,
-    )
-    return automation.run_plan(plan)
-
-
-    return automation.run_plan(plan)
+    # build_target_plan expects a dictionary with: name, candidate_id, ra_deg, dec_deg, vmag (optional)
+    target_dict = {
+        "name": payload.target,
+        "candidate_id": payload.target,  # Use target name as candidate_id
+        "ra_deg": payload.ra_deg,
+        "dec_deg": payload.dec_deg,
+        "vmag": payload.vmag,
+    }
+    plan = automation.build_target_plan(target_dict)
+    return automation.execute_target_plan(plan)
