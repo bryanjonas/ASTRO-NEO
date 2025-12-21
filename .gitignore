@@ -24,7 +24,8 @@ coverage.xml
 # Environment / secrets
 .env
 config/site.yml
-config/site_local.yml  # CRITICAL: Contains observatory location
+# CRITICAL: Contains observatory location
+config/site_local.yml
 config/horizon/
 
 # Data artifacts
