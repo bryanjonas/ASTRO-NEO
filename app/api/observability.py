@@ -6,6 +6,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from app.api.deps import get_db
 from app.models import NeoObservability, NeoObservabilityRead
@@ -16,7 +17,30 @@ router = APIRouter(prefix="/observability", tags=["observability"])
 
 @router.get("/", response_model=List[NeoObservabilityRead])
 def list_observability(session: Session = Depends(get_db)) -> list[NeoObservability]:
-    stmt = select(NeoObservability).order_by(NeoObservability.score.desc())
+    night_key = session.exec(
+        select(NeoObservability.night_key).order_by(NeoObservability.night_key.desc())
+    ).first()
+    if night_key is None:
+        return []
+    latest = (
+        select(
+            NeoObservability.candidate_id,
+            func.max(NeoObservability.computed_at).label("max_computed_at"),
+        )
+        .where(NeoObservability.night_key == night_key)
+        .group_by(NeoObservability.candidate_id)
+        .subquery()
+    )
+    stmt = (
+        select(NeoObservability)
+        .join(
+            latest,
+            (NeoObservability.candidate_id == latest.c.candidate_id)
+            & (NeoObservability.computed_at == latest.c.max_computed_at),
+        )
+        .where(NeoObservability.night_key == night_key)
+        .order_by(NeoObservability.score.desc())
+    )
     return session.exec(stmt).all()
 
 

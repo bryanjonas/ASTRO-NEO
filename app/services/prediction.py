@@ -1,4 +1,4 @@
-"""Utilities for predicting NEO positions using JPL Horizons ephemerides."""
+"""Utilities for predicting NEO positions using JPL Scout ephemerides."""
 
 from __future__ import annotations
 
@@ -11,34 +11,31 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.site_config import load_site_config
 from app.models import NeoCandidate, NeoEphemeris
-from app.services.horizons_client import HorizonsClient
+from app.services.scout_client import ScoutClient
 from app.services.ephemeris import MpcEphemerisClient
 
 logger = logging.getLogger(__name__)
 
 
 class EphemerisPredictionService:
-    """Predict RA/Dec for a candidate using JPL Horizons ephemerides.
+    """Predict RA/Dec for a candidate using JPL Scout ephemerides.
 
     Strategy:
-    - Always use Horizons for authoritative topocentric coordinates
-    - Cache Horizons ephemerides in database
+    - Always use Scout for authoritative NEOCP tracklet coordinates
+    - Cache Scout ephemerides in database
     - Re-fetch if cache is stale (> horizons_cache_hours old)
-    - Fallback to MPC only if Horizons fails
+    - Fallback to MPC only if Scout fails
     """
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.site_config = load_site_config()
         self.mpc_client = MpcEphemerisClient(session, self.site_config)
-        self.horizons_client = None
-        if settings.use_horizons_ephemerides:
-            self.horizons_client = HorizonsClient(
-                site_lat=self.site_config.latitude,
-                site_lon=self.site_config.longitude,
-                site_alt_m=self.site_config.altitude_m,
-                timeout=settings.horizons_timeout,
-            )
+        self.scout_client = ScoutClient(
+            obs_code=self.site_config.station_code,
+            timeout=settings.scout_timeout,
+            base_url=settings.scout_api_url,
+        )
         self.sample_minutes = max(1, settings.horizons_step_minutes)
         self.margin_minutes = 60  # Fetch ±1 hour window for interpolation
         self.cache_hours = settings.horizons_cache_hours
@@ -65,95 +62,34 @@ class EphemerisPredictionService:
         if not candidate or candidate.ra_deg is None or candidate.dec_deg is None:
             return None
 
-        # Always use Horizons when enabled
-        if self.horizons_client:
-            try:
-                return self._predict_from_horizons(candidate, when)
-            except Exception as exc:
-                logger.warning(
-                    "Horizons prediction failed for %s at %s: %s",
-                    candidate.trksub,
-                    when.isoformat(),
-                    exc,
-                )
-                # Fallback to MPC
-                logger.info("Falling back to MPC ephemerides for %s", candidate.trksub)
+        try:
+            return self._predict_from_scout(candidate, when)
+        except Exception as exc:
+            logger.warning(
+                "Scout prediction failed for %s at %s: %s",
+                candidate.trksub,
+                when.isoformat(),
+                exc,
+            )
+            # Fallback to MPC
+            logger.info("Falling back to MPC ephemerides for %s", candidate.trksub)
 
         # Fallback: use MPC ephemerides
         return self._predict_from_mpc(candidate, when)
 
-    def _predict_from_horizons(
+    def _predict_from_scout(
         self, candidate: NeoCandidate, when: datetime
     ) -> tuple[float, float] | None:
-        """Fetch/use Horizons ephemeris for prediction."""
+        """Fetch/use Scout current position for prediction."""
 
-        # Check if we have fresh cached Horizons data
-        cache_cutoff = datetime.utcnow() - timedelta(hours=self.cache_hours)
-        start_window = when - timedelta(minutes=self.margin_minutes)
-        end_window = when + timedelta(minutes=self.margin_minutes)
-
-        cached_rows = self.session.exec(
-            select(NeoEphemeris)
-            .where(NeoEphemeris.candidate_id == candidate.id)
-            .where(NeoEphemeris.source == "HORIZONS")
-            .where(NeoEphemeris.epoch >= start_window)
-            .where(NeoEphemeris.epoch <= end_window)
-            .where(NeoEphemeris.created_at >= cache_cutoff)
-            .order_by(NeoEphemeris.epoch)
-        ).all()
-
-        # If we have enough fresh cache data, use it
-        if len(cached_rows) >= 5:  # Need at least 5 points for good interpolation
-            logger.debug(
-                "Using %d cached Horizons ephemeris points for %s",
-                len(cached_rows),
-                candidate.trksub,
-            )
-            return self._interpolate(cached_rows, when)
-
-        # Otherwise, fetch fresh Horizons data
-        logger.info("Fetching fresh Horizons ephemeris for %s", candidate.trksub)
-
-        start_fetch = when - timedelta(minutes=self.margin_minutes)
-        end_fetch = when + timedelta(minutes=self.margin_minutes)
-
-        rows_data = self.horizons_client.fetch_ephemeris(
-            target_designation=candidate.trksub,
-            start_time=start_fetch,
-            stop_time=end_fetch,
-            step_minutes=self.sample_minutes,
-        )
-
-        if not rows_data:
-            logger.warning("Horizons returned no ephemeris data for %s", candidate.trksub)
+        logger.info("Fetching Scout current position for %s", candidate.trksub)
+        row = self.scout_client.get_current_position(candidate.trksub)
+        ra = row.get("ra_deg")
+        dec = row.get("dec_deg")
+        if ra is None or dec is None:
+            logger.warning("Scout current position missing RA/Dec for %s", candidate.trksub)
             return None
-
-        # Cache Horizons data in database
-        self._cache_horizons_ephemerides(candidate.id, candidate.trksub, rows_data)
-
-        # Convert to NeoEphemeris objects for interpolation
-        ephemeris_rows = []
-        for row_data in rows_data:
-            eph = NeoEphemeris(
-                candidate_id=candidate.id,
-                trksub=candidate.trksub,
-                epoch=row_data["epoch"],
-                ra_deg=row_data["ra_deg"],
-                dec_deg=row_data["dec_deg"],
-                ra_rate_arcsec_min=row_data.get("ra_rate_arcsec_min"),
-                dec_rate_arcsec_min=row_data.get("dec_rate_arcsec_min"),
-                azimuth_deg=row_data.get("azimuth_deg"),
-                elevation_deg=row_data.get("elevation_deg"),
-                airmass=row_data.get("airmass"),
-                v_mag_predicted=row_data.get("v_mag"),
-                solar_elongation_deg=row_data.get("solar_elongation_deg"),
-                lunar_elongation_deg=row_data.get("lunar_elongation_deg"),
-                uncertainty_3sigma_arcsec=row_data.get("uncertainty_3sigma_arcsec"),
-                source="HORIZONS",
-            )
-            ephemeris_rows.append(eph)
-
-        return self._interpolate(ephemeris_rows, when)
+        return float(ra), float(dec)
 
     def _cache_horizons_ephemerides(
         self, candidate_id: str, trksub: str, rows_data: list[dict]
@@ -181,7 +117,7 @@ class EphemerisPredictionService:
                 existing.solar_elongation_deg = row_data.get("solar_elongation_deg")
                 existing.lunar_elongation_deg = row_data.get("lunar_elongation_deg")
                 existing.uncertainty_3sigma_arcsec = row_data.get("uncertainty_3sigma_arcsec")
-                existing.source = "HORIZONS"
+                existing.source = "SCOUT"
                 existing.created_at = datetime.utcnow()  # Update timestamp
                 self.session.add(existing)
             else:
@@ -197,11 +133,11 @@ class EphemerisPredictionService:
                     azimuth_deg=row_data.get("azimuth_deg"),
                     elevation_deg=row_data.get("elevation_deg"),
                     airmass=row_data.get("airmass"),
-                    v_mag_predicted=row_data.get("v_mag"),
+                    v_mag_predicted=row_data.get("v_mag") or row_data.get("mag") or row_data.get("v"),
                     solar_elongation_deg=row_data.get("solar_elongation_deg"),
                     lunar_elongation_deg=row_data.get("lunar_elongation_deg"),
-                    uncertainty_3sigma_arcsec=row_data.get("uncertainty_3sigma_arcsec"),
-                    source="HORIZONS",
+                    uncertainty_3sigma_arcsec=row_data.get("uncertainty_3sigma_arcsec") or row_data.get("sigma_pos"),
+                    source="SCOUT",
                 )
                 self.session.add(eph)
 

@@ -10,17 +10,18 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
+from sqlalchemy.dialects.postgresql import insert
 from astropy.coordinates import AltAz, SkyCoord, get_body
 from astropy.time import Time
 import astropy.units as u
 from astroplan import FixedTarget, Observer
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.core.config import settings
 from app.core.site_config import SiteFileConfig, load_site_config
 from app.models import NeoCandidate, NeoObservability, NeoEphemeris
 from app.services.ephemeris import MpcEphemerisClient
-from app.services.horizons_client import HorizonsClient
+from app.services.scout_client import ScoutClient
 from app.services.weather import WeatherService, WeatherSummary
 
 logger = logging.getLogger(__name__)
@@ -107,17 +108,18 @@ class ObservabilityService:
         self.max_vmag = settings.observability_max_vmag
         self.min_window_minutes = settings.observability_min_window_minutes
         self.target_window_minutes = settings.observability_target_window_minutes
+        self.top_n = max(0, settings.observability_top_n)
+        self.prefetch_top_n = max(0, settings.neocp_prefetch_top_n)
         self.horizon_mask = HorizonMask.from_path(
             self.site_config.horizon_mask.source if self.site_config.horizon_mask else None
         )
         self.ephemeris_client = MpcEphemerisClient(session, self.site_config)
-        self.horizons_client = HorizonsClient(
-            site_lat=self.site_config.latitude,
-            site_lon=self.site_config.longitude,
-            site_alt_m=self.site_config.altitude_m,
-            timeout=settings.horizons_timeout,
+        self.scout_client = ScoutClient(
+            obs_code=self.site_config.station_code,
+            timeout=settings.scout_timeout,
+            base_url=settings.scout_api_url,
         )
-        self._horizons_availability_cache: dict[str, bool] = {}
+        self._scout_availability_cache: dict[str, bool] = {}
         self.weather_service = WeatherService(session, self.site_config)
         self.weather_summary: WeatherSummary | None = None
 
@@ -151,13 +153,63 @@ class ObservabilityService:
         stmt = select(NeoCandidate)
         if trksubs:
             stmt = stmt.where(NeoCandidate.trksub.in_(list(trksubs)))
-        candidates = self.session.exec(stmt).all()
+        candidates = list(self.session.exec(stmt).all())
+        if candidates:
+            unique: dict[str, NeoCandidate] = {}
+            for candidate in candidates:
+                candidate_id = candidate.id or candidate.trksub
+                if not candidate_id:
+                    continue
+                if candidate_id not in unique:
+                    unique[candidate_id] = candidate
+            candidates = list(unique.values())
+        logger.info(
+            "Observability refresh: fetched %d candidates%s",
+            len(candidates),
+            f" (filtered={len(trksubs)})" if trksubs else "",
+        )
+        if not trksubs:
+            candidates.sort(key=lambda cand: cand.score or 0, reverse=True)
+            if self.prefetch_top_n:
+                top_candidates = candidates[: self.prefetch_top_n]
+                logger.info(
+                    "Initial ranking (top %d): %s",
+                    self.prefetch_top_n,
+                    [
+                        {
+                            "id": cand.trksub or cand.id,
+                            "score": cand.score or 0,
+                        }
+                        for cand in top_candidates
+                    ],
+                )
+                candidates = candidates[: self.prefetch_top_n]
+                self._prefetch_scout_ephemeris(candidates)
+                candidates = [
+                    cand for cand in candidates if self._has_recent_scout_data(cand)
+                ]
+            elif self.top_n:
+                candidates = candidates[: self.top_n]
         results: list[NeoObservability] = []
-        for candidate in candidates:
-            result = self._evaluate_candidate(candidate)
-            if result:
-                results.append(result)
+        with self.session.no_autoflush:
+            for candidate in candidates:
+                result = self._evaluate_candidate(candidate)
+                if result:
+                    results.append(result)
         self.session.commit()
+        if results:
+            ranked = sorted(results, key=lambda item: item.score or 0, reverse=True)
+            logger.info(
+                "Final ranking (top 5): %s",
+                [
+                    {
+                        "id": item.trksub or item.candidate_id,
+                        "score": item.score,
+                        "observable": item.is_observable,
+                    }
+                    for item in ranked[:5]
+                ],
+            )
         return results
 
     def _build_time_grid(self) -> Time:
@@ -177,6 +229,11 @@ class ObservabilityService:
     ) -> tuple[SkyCoord | None, list[NeoEphemeris]]:
         if candidate.id is None:
             return None, []
+        scout_rows = self._get_scout_rows(candidate.id)
+        coords = self._coords_from_rows(scout_rows) if scout_rows else None
+        if coords is not None:
+            return coords, scout_rows
+
         rows = self.ephemeris_client.get_or_fetch(
             candidate=candidate,
             start_utc=self.night_start,
@@ -184,20 +241,7 @@ class ObservabilityService:
             expected_count=self.expected_samples,
             sample_minutes=self.sample_minutes,
         )
-        if len(rows) < self.expected_samples:
-            return None, rows
-
-        lookup = {row.epoch.replace(second=0, microsecond=0): row for row in rows}
-        ra_series: list[float] = []
-        dec_series: list[float] = []
-        for timestamp in self.datetime_grid:
-            row = lookup.get(timestamp)
-            if not row:
-                return None, rows
-            ra_series.append(row.ra_deg)
-            dec_series.append(row.dec_deg)
-
-        coords = SkyCoord(ra=np.array(ra_series) * u.deg, dec=np.array(dec_series) * u.deg)
+        coords = self._coords_from_rows(rows) if rows else None
         return coords, rows
 
     def _evaluate_candidate(self, candidate: NeoCandidate) -> NeoObservability | None:
@@ -267,10 +311,7 @@ class ObservabilityService:
 
         if duration_minutes < self.min_window_minutes:
             reasons.append("window_too_short")
-
-        horizons_available = self._has_horizons_data(candidate)
-        if not horizons_available:
-            reasons.append("no_horizons")
+        scout_available = False
 
         max_altitude = float(np.max(altitudes[best_mask]))
         min_moon_sep = float(np.min(moon_separation[best_mask]))
@@ -291,7 +332,7 @@ class ObservabilityService:
             "duration_score": duration_score,
             "altitude_score": altitude_score,
             "urgency_score": urgency_score,
-            "horizons_available": horizons_available,
+            "scout_available": scout_available,
         }
 
         return self._persist_result(
@@ -311,39 +352,115 @@ class ObservabilityService:
             reasons,
         )
 
-    def _has_horizons_data(self, candidate: NeoCandidate) -> bool:
+    def _has_scout_data(self, candidate: NeoCandidate) -> bool:
         if not candidate.trksub:
             return False
-        cached = self._horizons_availability_cache.get(candidate.trksub)
+        cached = self._scout_availability_cache.get(candidate.trksub)
         if cached is not None:
             return cached
         if candidate.id is not None:
             existing = self.session.exec(
                 select(NeoEphemeris)
                 .where(NeoEphemeris.candidate_id == candidate.id)
-                .where(NeoEphemeris.source == "HORIZONS")
+                .where(NeoEphemeris.source == "SCOUT")
                 .where(NeoEphemeris.epoch >= self.night_start)
                 .where(NeoEphemeris.epoch <= self.night_end)
             ).first()
             if existing:
-                self._horizons_availability_cache[candidate.trksub] = True
+                self._scout_availability_cache[candidate.trksub] = True
                 return True
 
-        now = datetime.utcnow().replace(second=0, microsecond=0)
         try:
-            rows = self.horizons_client.fetch_ephemeris(
-                target_designation=candidate.trksub,
-                start_time=now - timedelta(minutes=10),
-                stop_time=now + timedelta(minutes=10),
-                step_minutes=5,
-            )
-            available = bool(rows)
+            row = self.scout_client.get_current_position(candidate.trksub)
+            available = bool(row.get("ra_deg") is not None and row.get("dec_deg") is not None)
         except Exception as exc:
-            logger.warning("Horizons availability check failed for %s: %s", candidate.trksub, exc)
+            logger.warning("Scout availability check failed for %s: %s", candidate.trksub, exc)
             available = False
 
-        self._horizons_availability_cache[candidate.trksub] = available
+        self._scout_availability_cache[candidate.trksub] = available
         return available
+
+    def _has_recent_scout_data(self, candidate: NeoCandidate, minutes: int = 10) -> bool:
+        if candidate.id is None:
+            return False
+        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        existing = self.session.exec(
+            select(NeoEphemeris)
+            .where(NeoEphemeris.candidate_id == candidate.id)
+            .where(NeoEphemeris.source == "SCOUT")
+            .where(NeoEphemeris.epoch >= cutoff)
+        ).first()
+        return existing is not None
+
+    def _prefetch_scout_ephemeris(self, candidates: Sequence[NeoCandidate]) -> None:
+        freshness_cutoff = datetime.utcnow() - timedelta(minutes=10)
+        for candidate in candidates:
+            if not candidate.id or not candidate.trksub:
+                continue
+            existing = self.session.exec(
+                select(NeoEphemeris)
+                .where(NeoEphemeris.candidate_id == candidate.id)
+                .where(NeoEphemeris.source == "SCOUT")
+                .where(NeoEphemeris.epoch >= freshness_cutoff)
+                .order_by(NeoEphemeris.epoch.desc())
+            ).first()
+            if existing:
+                continue
+            try:
+                logger.info("Fetching Scout current position for %s", candidate.trksub)
+                row = self.scout_client.get_current_position(candidate.trksub)
+            except Exception as exc:
+                logger.warning("Scout ephemeris fetch failed for %s: %s", candidate.trksub, exc)
+                continue
+            if not row:
+                continue
+            try:
+                epoch = row.get("epoch") or datetime.utcnow()
+                ra_deg = row.get("ra_deg")
+                dec_deg = row.get("dec_deg")
+            except Exception:
+                continue
+            model = NeoEphemeris(
+                candidate_id=candidate.id,
+                trksub=candidate.trksub,
+                epoch=epoch,
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+                ra_rate_arcsec_min=row.get("ra_rate_arcsec_min"),
+                dec_rate_arcsec_min=row.get("dec_rate_arcsec_min"),
+                v_mag_predicted=row.get("v_mag"),
+                uncertainty_3sigma_arcsec=row.get("uncertainty_3sigma_arcsec"),
+                source="SCOUT",
+            )
+            self.session.add(model)
+        self.session.flush()
+
+    def _get_scout_rows(self, candidate_id: str) -> list[NeoEphemeris]:
+        with self.session.no_autoflush:
+            rows = self.session.exec(
+                select(NeoEphemeris)
+                .where(NeoEphemeris.candidate_id == candidate_id)
+                .where(NeoEphemeris.source == "SCOUT")
+                .where(NeoEphemeris.epoch >= self.night_start)
+                .where(NeoEphemeris.epoch <= self.night_end)
+                .order_by(NeoEphemeris.epoch)
+            ).all()
+        return list(rows)
+
+    def _coords_from_rows(self, rows: Sequence[NeoEphemeris]) -> SkyCoord | None:
+        if len(rows) < self.expected_samples:
+            return None
+        lookup = {row.epoch.replace(second=0, microsecond=0): row for row in rows}
+        ra_series: list[float] = []
+        dec_series: list[float] = []
+        for timestamp in self.datetime_grid:
+            row = lookup.get(timestamp)
+            if not row:
+                return None
+            ra_series.append(row.ra_deg)
+            dec_series.append(row.dec_deg)
+        coords = SkyCoord(ra=np.array(ra_series) * u.deg, dec=np.array(dec_series) * u.deg)
+        return coords
 
     def _find_visibility_windows(self, mask: np.ndarray) -> list[tuple[int, int]]:
         windows: list[tuple[int, int]] = []
@@ -371,7 +488,6 @@ class ObservabilityService:
             NeoObservability.candidate_id == candidate.id,
             NeoObservability.night_key == self.night_key,
         )
-        existing = self.session.exec(stmt).first()
         base_fields = {
             "candidate_id": candidate.id,
             "trksub": candidate.trksub,
@@ -385,15 +501,16 @@ class ObservabilityService:
         if payload:
             base_fields.update(payload)
 
-        if existing:
-            for field, value in base_fields.items():
-                setattr(existing, field, value)
-            self.session.add(existing)
-            return existing
-
-        model = NeoObservability(**base_fields)
-        self.session.add(model)
-        return model
+        update_fields = {key: value for key, value in base_fields.items()}
+        update_fields.pop("candidate_id", None)
+        update_fields.pop("night_key", None)
+        insert_stmt = insert(NeoObservability).values(**base_fields)
+        insert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["candidate_id", "night_key"],
+            set_=update_fields,
+        )
+        self.session.exec(insert_stmt)
+        return self.session.exec(stmt).first()
 
 
 __all__ = ["ObservabilityService"]

@@ -14,6 +14,7 @@ from app.core.site_config import SiteFileConfig
 from app.models import NeoCandidate, NeoEphemeris
 
 logger = logging.getLogger(__name__)
+_mpc_disabled_logged = False
 
 
 class MpcEphemerisClient:
@@ -33,8 +34,14 @@ class MpcEphemerisClient:
     ) -> list[NeoEphemeris]:
         """Return cached rows, fetching from MPC when needed."""
 
+        global _mpc_disabled_logged
         rows = self._load_rows(candidate, start_utc, end_utc)
         if len(rows) >= expected_count:
+            return rows
+        if not settings.mpc_ephemeris_enabled:
+            if not _mpc_disabled_logged:
+                logger.info("MPC ephemeris fetch disabled; skipping remote requests.")
+                _mpc_disabled_logged = True
             return rows
 
         try:

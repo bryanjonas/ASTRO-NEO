@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from datetime import datetime
 
 from app.services.nina_client import NinaBridgeService
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _log_status(label: str, bridge: NinaBridgeService) -> None:
     status = bridge.get_status()
-    nina_status = status.get("nina_status", {})
+    nina_status = status.get("nina_status", status)
     telescope = nina_status.get("telescope", {})
     camera = nina_status.get("camera", {})
     logger.info(
@@ -50,6 +51,73 @@ def test_mount_slew(bridge: NinaBridgeService) -> None:
     _log_status("post-slew", bridge)
 
 
+def test_mount_slew_matrix(
+    bridge: NinaBridgeService,
+    settle_seconds: float = 3.0,
+    poll_interval: float = 0.5,
+) -> None:
+    info = bridge._request("GET", "/equipment/mount/info")
+    coords = info.get("Coordinates", {})
+    base_ra = float(coords.get("RADegrees", info.get("RightAscension", 0.0) * 15))
+    base_dec = float(coords.get("Dec", info.get("Declination", 0.0)))
+
+    deltas = [
+        (10.0, 1.0),
+        (20.0, -2.0),
+        (35.0, 3.0),
+        (60.0, -5.0),
+    ]
+
+    logger.info("Running slew matrix from RA %.4f°, Dec %.4f°", base_ra, base_dec)
+    for idx, (delta_ra, delta_dec) in enumerate(deltas, start=1):
+        target_ra = (base_ra + delta_ra) % 360
+        target_dec = max(min(base_dec + delta_dec, 89.0), -89.0)
+
+        logger.info(
+            "Slew %d/%d -> RA %.4f°, Dec %.4f° (delta %.2f°, %.2f°)",
+            idx,
+            len(deltas),
+            target_ra,
+            target_dec,
+            delta_ra,
+            delta_dec,
+        )
+
+        bridge.slew(target_ra, target_dec)
+        start = time.monotonic()
+        slewing_seen = False
+        first_slewing_true = None
+        first_slewing_false_after_true = None
+
+        while True:
+            info = bridge._request("GET", "/equipment/mount/info")
+            slewing = bool(info.get("Slewing", False))
+            if slewing and not slewing_seen:
+                slewing_seen = True
+                first_slewing_true = time.monotonic() - start
+            if slewing_seen and not slewing:
+                first_slewing_false_after_true = time.monotonic() - start
+                break
+            time.sleep(poll_interval)
+
+        logger.info(
+            "Slew %d timing: slewing=true at %.2fs, slewing=false at %.2fs",
+            idx,
+            first_slewing_true or 0.0,
+            first_slewing_false_after_true or 0.0,
+        )
+
+        settle_start = time.monotonic()
+        while time.monotonic() - settle_start < settle_seconds:
+            info = bridge._request("GET", "/equipment/mount/info")
+            if info.get("Slewing", False):
+                settle_start = time.monotonic()
+            time.sleep(poll_interval)
+
+        total = time.monotonic() - start
+        logger.info("Slew %d complete after %.2fs (settle %.1fs)", idx, total, settle_seconds)
+
+
 def test_camera_capture(bridge: NinaBridgeService) -> None:
     camera_info = bridge._request("GET", "/equipment/camera/info")
     if not camera_info.get("Connected"):
@@ -84,7 +152,7 @@ def main() -> None:
     bridge = NinaBridgeService()
 
     _log_status("startup", bridge)
-    test_mount_slew(bridge)
+    test_mount_slew_matrix(bridge)
     test_camera_capture(bridge)
     _log_status("finish", bridge)
 

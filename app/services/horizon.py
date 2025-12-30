@@ -8,7 +8,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_2/printhorizon"
+PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_3/printhorizon"
 
 
 async def fetch_horizon_profile(lat: float, lon: float) -> List[Dict[str, float]]:

@@ -6,21 +6,24 @@ Database-backed session management using the observing_sessions table.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlmodel import select
+from sqlalchemy import func
 
 from app.db.session import get_session_dep
-from app.models.neocp import NeoCandidate, NeoObservability
+from app.core.config import settings
+from app.models.neocp import NeoCandidate, NeoEphemeris, NeoObservability
 from app.models.session import ObservingSession
 from app.services.automation import AutomationService
 
 router = APIRouter(prefix="/session", tags=["session"])
 logger = logging.getLogger(__name__)
+_LAST_READY_SIGNATURE: tuple[str, ...] | None = None
 
 
 class SessionStartRequest(BaseModel):
@@ -41,6 +44,116 @@ class SessionStatusResponse(BaseModel):
     total_captures: int = 0
     successful_captures: int = 0
     successful_associations: int = 0
+
+
+def _get_visible_targets(db: Session) -> tuple[list[NeoObservability], str | None]:
+    night_key = db.exec(
+        select(NeoObservability.night_key).order_by(NeoObservability.night_key.desc())
+    ).first()
+    if night_key is None:
+        return [], "No observability data available. Refresh targets first."
+    latest = (
+        select(
+            NeoObservability.candidate_id,
+            func.max(NeoObservability.computed_at).label("max_computed_at"),
+        )
+        .where(NeoObservability.night_key == night_key)
+        .group_by(NeoObservability.candidate_id)
+        .subquery()
+    )
+    visible_targets = db.exec(
+        select(NeoObservability)
+        .join(
+            latest,
+            (NeoObservability.candidate_id == latest.c.candidate_id)
+            & (NeoObservability.computed_at == latest.c.max_computed_at),
+        )
+        .where(NeoObservability.night_key == night_key)
+        .where(NeoObservability.is_observable == True)
+        .order_by(NeoObservability.score.desc())
+    ).all()
+    if not visible_targets:
+        return [], "No visible targets available"
+    execute_top_n = max(0, settings.observability_execute_top_n)
+    if execute_top_n:
+        visible_targets = visible_targets[:execute_top_n]
+    return visible_targets, None
+
+
+def _check_ephemeris_ready(db: Session, candidate_ids: set[str]) -> list[str]:
+    if not candidate_ids:
+        return []
+    eph_query = select(NeoEphemeris.candidate_id).where(
+        NeoEphemeris.candidate_id.in_(candidate_ids)
+    )
+    if settings.use_horizons_ephemerides:
+        eph_query = eph_query.where(NeoEphemeris.source == "HORIZONS")
+    eph_query = eph_query.distinct()
+    available_ids = {row for row in db.exec(eph_query).all()}
+    return sorted(candidate_ids - available_ids)
+
+
+def _missing_scout_positions(
+    db: Session,
+    targets: list[NeoObservability],
+    minutes: int = 10,
+) -> list[str]:
+    if not targets:
+        return []
+    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+    missing: list[str] = []
+    for target in targets:
+        candidate_id = target.candidate_id
+        trksub = target.trksub or candidate_id
+        existing = db.exec(
+            select(NeoEphemeris)
+            .where(NeoEphemeris.candidate_id == candidate_id)
+            .where(NeoEphemeris.source == "SCOUT")
+            .where(NeoEphemeris.epoch >= cutoff)
+            .order_by(NeoEphemeris.epoch.desc())
+        ).first()
+        if not existing:
+            missing.append(trksub)
+    return missing
+
+
+@router.get("/ready")
+def session_ready(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
+    global _LAST_READY_SIGNATURE
+    visible_targets, error = _get_visible_targets(db)
+    if error:
+        return {"ready": False, "error": error}
+
+    candidate_ids = {row.candidate_id for row in visible_targets}
+    ranked = sorted(visible_targets, key=lambda item: item.score or 0, reverse=True)
+    top_targets = ranked[:5]
+    if len(top_targets) < 5:
+        return {
+            "ready": False,
+            "error": "Top five targets not available yet.",
+        }
+    missing_scout = _missing_scout_positions(db, top_targets)
+    if missing_scout:
+        return {
+            "ready": False,
+            "error": "Scout positions missing for one or more targets",
+            "missing_candidates": missing_scout,
+        }
+    signature = tuple(sorted(candidate_ids))
+    if _LAST_READY_SIGNATURE != signature:
+        logger.info(
+            "Start Session enabled (targets ready). Top targets: %s",
+            [
+                {
+                    "id": item.trksub or item.candidate_id,
+                    "score": item.score,
+                    "observable": item.is_observable,
+                }
+                for item in ranked[:5]
+            ],
+        )
+        _LAST_READY_SIGNATURE = signature
+    return {"ready": True}
 
 
 @router.post("/start")
@@ -71,19 +184,14 @@ def start_session(
         target_id = request.manual_target_override
         target_name = request.manual_target_override
     else:
-        # Auto-select highest-ranked visible target
-        visible_targets = db.exec(
-            select(NeoObservability)
-            .where(NeoObservability.is_observable == True)
-            .order_by(NeoObservability.score.desc())
-        ).all()
-
-        if not visible_targets:
+        visible_targets, error = _get_visible_targets(db)
+        if error:
             return {
                 "success": False,
-                "error": "No visible targets available"
+                "error": error,
             }
 
+        candidate_ids = {row.candidate_id for row in visible_targets}
         best_target = visible_targets[0]
         target_id = best_target.candidate_id
         target_name = best_target.trksub

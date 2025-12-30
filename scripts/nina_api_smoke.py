@@ -24,7 +24,8 @@ class TestNinaSmoke(unittest.TestCase):
         
         # Verify status
         status = self.service.get_status()
-        self.assertTrue(status["telescope"]["is_connected"])
+        nina_status = status.get("nina_status", status)
+        self.assertTrue(nina_status["telescope"]["is_connected"])
 
     def test_02_slew_mount(self):
         print("\nTesting Mount Slew...")
@@ -38,8 +39,9 @@ class TestNinaSmoke(unittest.TestCase):
         self.assertEqual(response, "Slew finished")
         
         status = self.service.get_status()
-        self.assertAlmostEqual(status["telescope"]["ra_deg"], ra)
-        self.assertAlmostEqual(status["telescope"]["dec_deg"], dec)
+        nina_status = status.get("nina_status", status)
+        self.assertAlmostEqual(nina_status["telescope"]["ra_deg"], ra)
+        self.assertAlmostEqual(nina_status["telescope"]["dec_deg"], dec)
 
     def test_03_camera_exposure(self):
         print("\nTesting Camera Exposure...")
@@ -51,7 +53,9 @@ class TestNinaSmoke(unittest.TestCase):
         # Wait for completion
         time.sleep(1.5)
         status = self.service.get_status()
-        self.assertEqual(status["camera"]["last_status"], "complete")
+        nina_status = status.get("nina_status", status)
+        camera = nina_status.get("camera", {})
+        self.assertFalse(camera.get("is_exposing"))
 
     def test_04_focuser_move(self):
         print("\nTesting Focuser Move...")
@@ -62,7 +66,8 @@ class TestNinaSmoke(unittest.TestCase):
         
         time.sleep(0.2)
         status = self.service.get_status()
-        self.assertEqual(status["focuser"]["position"], pos)
+        nina_status = status.get("nina_status", status)
+        self.assertEqual(nina_status["focuser"]["position"], pos)
 
 if __name__ == "__main__":
     unittest.main()

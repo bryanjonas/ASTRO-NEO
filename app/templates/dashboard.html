@@ -12,10 +12,11 @@
       <button
         class="btn btn-primary"
         @click="startSession()"
-        :disabled="starting">
+        :disabled="starting || !sessionReady.ready">
         <span x-show="!starting">Start Session</span>
         <span x-show="starting">Starting...</span>
       </button>
+      <p class="session-note" x-show="!sessionReady.ready" x-text="sessionReady.message"></p>
     </template>
     <template x-if="sessionStatus.active">
       <button
@@ -361,6 +362,12 @@
   background-color: #fee2e2;
   color: #991b1b;
 }
+
+.session-note {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
 </style>
 
 <script>
@@ -376,6 +383,10 @@ function dashboard() {
       successful_captures: 0,
       successful_associations: 0
     },
+    sessionReady: {
+      ready: false,
+      message: 'Checking ephemeris...'
+    },
     recentCaptures: [],
     logs: [],
     availableTargets: [],
@@ -387,6 +398,7 @@ function dashboard() {
       this.loadRecentCaptures();
       this.loadLogs();
       this.loadAvailableTargets();
+      this.loadSessionReady();
 
       // Poll for updates every 5 seconds
       setInterval(() => {
@@ -394,6 +406,7 @@ function dashboard() {
         this.loadRecentCaptures();
         this.loadLogs();
         this.loadAvailableTargets();
+        this.loadSessionReady();
       }, 5000);
     },
 
@@ -436,10 +449,37 @@ function dashboard() {
       try {
         const response = await fetch('/api/observability/');
         const data = await response.json();
-        // API returns array directly, limit to top 10
-        this.availableTargets = (Array.isArray(data) ? data : []).slice(0, 10);
+        const targets = Array.isArray(data) ? data : [];
+        const visible = targets.filter(target => target.is_observable);
+        const ranked = (visible.length ? visible : targets).sort((a, b) => {
+          const scoreA = typeof a.score === 'number' ? a.score : -1;
+          const scoreB = typeof b.score === 'number' ? b.score : -1;
+          return scoreB - scoreA;
+        });
+        this.availableTargets = ranked.slice(0, 10);
       } catch (error) {
         console.error('Failed to load targets:', error);
+      }
+    },
+
+    async loadSessionReady() {
+      try {
+        const response = await fetch('/api/session/ready');
+        const data = await response.json();
+        this.sessionReady.ready = Boolean(data.ready);
+        if (data.ready) {
+          this.sessionReady.message = '';
+          return;
+        }
+        if (data.missing_candidates && data.missing_candidates.length) {
+          this.sessionReady.message = `Waiting for ephemeris (${data.missing_candidates.length} targets)`;
+        } else {
+          this.sessionReady.message = data.error || 'Waiting for ephemeris';
+        }
+      } catch (error) {
+        console.error('Failed to load session readiness:', error);
+        this.sessionReady.ready = false;
+        this.sessionReady.message = 'Session readiness unknown';
       }
     },
 

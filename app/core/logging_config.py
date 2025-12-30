@@ -62,6 +62,10 @@ def setup_logging(service_name: Optional[str] = None) -> None:
     root.addHandler(_BufferHandler())
     root.setLevel(log_level)
     logging.captureWarnings(True)
+    # Keep noisy transport logs out of normal INFO output.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     _CONFIGURED = True
 
 

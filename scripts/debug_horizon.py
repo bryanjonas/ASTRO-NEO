@@ -10,7 +10,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from app.core.site_config import load_site_config  # noqa: E402
 
-PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_2/printhorizon"
+PVGIS_API_URL = "https://re.jrc.ec.europa.eu/api/v5_3/printhorizon"
 
 async def fetch_horizon():
     site = load_site_config()

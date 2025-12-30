@@ -179,6 +179,9 @@ class AutomationService:
                     results.append(result)
 
                     if result["success"]:
+                        if result.get("slew_only"):
+                            logger.info("Test mode: slew-only run completed, stopping session.")
+                            break
                         logger.info(
                             f"✓ Exposure {i+1}/{plan.count} successful: "
                             f"capture_id={result.get('capture_id')}, "
@@ -186,16 +189,19 @@ class AutomationService:
                             f"association={result.get('association_id') is not None}"
                         )
                     else:
-                        logger.error(
-                            f"✗ Exposure {i+1}/{plan.count} failed: {result.get('error')}"
-                        )
+                        error_msg = result.get("error") or "Exposure failed"
+                        logger.error(f"✗ Exposure {i+1}/{plan.count} failed: {error_msg}")
+                        raise RuntimeError(error_msg)
                 except Exception as e:
                     logger.error(f"Exception during exposure {i+1}/{plan.count}: {e}", exc_info=True)
-                    results.append({
-                        "success": False,
-                        "error": str(e),
-                        "confirmation_attempts": 0,
-                    })
+                    results.append(
+                        {
+                            "success": False,
+                            "error": str(e),
+                            "confirmation_attempts": 0,
+                        }
+                    )
+                    raise
 
         completed_at = datetime.utcnow()
 

@@ -7,8 +7,12 @@ synchronous polling function that waits for a file to appear.
 
 import logging
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
+
+from app.core.site_config import load_site_config
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +46,25 @@ def poll_for_fits_file(
     deadline = time.time() + timeout
     current_interval = poll_interval
 
-    logger.info(f"Polling for FITS file with target name '{target_name}' in {fits_dir}")
+    site_config = load_site_config()
+    local_tz = ZoneInfo(site_config.timezone)
+    date_dir = datetime.now(tz=local_tz).date().isoformat()
+    snapshot_dir = fits_dir / date_dir / target_name / "SNAPSHOT"
+    logger.info(
+        "Polling for FITS file with target name '%s' in %s",
+        target_name,
+        snapshot_dir,
+    )
 
     while time.time() < deadline:
         # Find all FITS files that match the target name
         # Use glob pattern to find files
-        matching_files = list(fits_dir.glob(f"{target_name}_*.fits"))
+        if not snapshot_dir.exists():
+            time.sleep(current_interval)
+            current_interval = min(current_interval * 2.0, 3.2)
+            continue
+
+        matching_files = list(snapshot_dir.glob(f"{target_name}_*.fits"))
 
         if matching_files:
             # Sort by modification time and return the most recent

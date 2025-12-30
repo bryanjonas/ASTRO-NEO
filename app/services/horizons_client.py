@@ -75,19 +75,20 @@ class HorizonsClient:
             - uncertainty_3sigma_arcsec (float): 3-sigma positional uncertainty (arcsec)
         """
 
-        # Build Horizons COMMAND parameter
-        # For NEOCP objects, use DES= with CAP flag (closest apparition)
-        # Remove spaces for URL encoding
-        clean_des = target_designation.replace(" ", "%20")
-        command = f"DES={clean_des};CAP"
+        # Build Horizons COMMAND parameter options.
+        # Try NEOCP-style DES=...;CAP first, then DES=..., then raw designation.
+        command_options = [
+            f"DES={target_designation};CAP",
+            f"DES={target_designation}",
+            target_designation,
+        ]
 
         # Build coordinate center using SITE_COORD
         center = "coord"
         site_coord = f"{self.site_lon},{self.site_lat},{self.site_alt_km}"
 
-        params = {
+        base_params = {
             "format": "json",
-            "COMMAND": f"'{command}'",
             "OBJ_DATA": "YES",  # Include object summary
             "MAKE_EPHEM": "YES",
             "EPHEM_TYPE": "OBSERVER",
@@ -121,34 +122,48 @@ class HorizonsClient:
             step_minutes,
         )
 
-        try:
-            response = httpx.get(self.BASE_URL, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as exc:
-            logger.error("Horizons API HTTP error: %s", exc)
-            raise Exception(f"Horizons API request failed: {exc}") from exc
-        except ValueError as exc:
-            logger.error("Horizons API JSON decode error: %s", exc)
-            raise Exception(f"Horizons API returned invalid JSON: {exc}") from exc
+        last_result = ""
+        for command in command_options:
+            params = dict(base_params)
+            params["COMMAND"] = f"'{command}'"
+            try:
+                response = httpx.get(self.BASE_URL, params=params, timeout=self.timeout)
+                response.raise_for_status()
+                data = response.json()
+            except httpx.HTTPError as exc:
+                logger.error("Horizons API HTTP error: %s", exc)
+                raise Exception(f"Horizons API request failed: {exc}") from exc
+            except ValueError as exc:
+                logger.error("Horizons API JSON decode error: %s", exc)
+                raise Exception(f"Horizons API returned invalid JSON: {exc}") from exc
 
-        # Check for Horizons errors
-        if "error" in data:
-            error_msg = data.get("error", "Unknown error")
-            logger.error("Horizons API error: %s", error_msg)
-            raise Exception(f"Horizons API error: {error_msg}")
+            if "error" in data:
+                error_msg = data.get("error", "Unknown error")
+                logger.warning("Horizons API error for command %s: %s", command, error_msg)
+                last_result = data.get("result") or error_msg
+                continue
 
-        # Parse result
-        result_text = data.get("result", "")
-        if not result_text:
-            logger.error("Horizons API returned empty result")
-            raise Exception("Horizons API returned empty result")
+            result_text = data.get("result", "")
+            if not result_text:
+                logger.warning("Horizons API returned empty result for command %s", command)
+                continue
 
-        rows = self._parse_observer_table(result_text)
+            rows = self._parse_observer_table(result_text)
+            if rows:
+                logger.info(
+                    "Horizons returned %d ephemeris points for %s using command %s",
+                    len(rows),
+                    target_designation,
+                    command,
+                )
+                return rows
+            last_result = result_text
 
-        logger.info("Horizons returned %d ephemeris points for %s", len(rows), target_designation)
-
-        return rows
+        if last_result:
+            snippet = "\n".join(last_result.splitlines()[:15])
+            logger.warning("Horizons result snippet for %s:\n%s", target_designation, snippet)
+        logger.info("Horizons returned 0 ephemeris points for %s", target_designation)
+        return []
 
     def get_current_position(
         self,

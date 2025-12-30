@@ -77,6 +77,9 @@ class SiteFileConfig(BaseModel):
     weather_sensors: list[WeatherSensorConfig] = Field(default_factory=list)
     equipment_profile: EquipmentProfileConfig | None = None
     timezone: str = "UTC"
+    station_code: str | None = None
+    observer_initials: str | None = None
+    software_id: str | None = None
 
 
 def load_site_config(path: str | Path | None = None) -> SiteFileConfig:

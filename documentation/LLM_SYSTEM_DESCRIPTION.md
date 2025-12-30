@@ -19,7 +19,7 @@ This document is the canonical description for LLMs that need to understand ASTR
 The sequential capture workflow is implemented in `app/services/automation.py` and `app/services/sequential_capture.py`.
 
 For each exposure:
-1. **Horizons ephemeris**: Query fresh RA/Dec via `HorizonsClient` using site config.
+1. **Scout current position**: Query current RA/Dec via `ScoutClient` using site config.
 2. **Confirmation loop** (max 3 attempts): slew, take short confirmation exposure, poll for FITS, solve locally, compute pointing offset, re-slew if needed.
 3. **Science exposure**: capture the main frame with NINA (no NINA solve).
 4. **Local solve**: run `solve-field` locally, persist WCS and `has_wcs`.
@@ -27,9 +27,24 @@ For each exposure:
 
 All operations are synchronous and DB-backed (no in-memory SESSION_STATE).
 
+## 3.2 Pointing Tolerance Logic
+- **Centering vs in-frame**: Confirmation uses two thresholds derived from telescope/camera geometry:
+  - **Center**: `max(center_fraction * FOV_radius, center_floor_arcsec)` with optional motion-rate adjustment.
+  - **Acquire**: `acquire_fraction * FOV_radius` (in-frame).
+- If offset ≤ center → “centered”; if offset ≤ acquire → “in-frame”; otherwise re-slew (up to 3 attempts).
+
+## 3.1 Slew & Exposure Lessons (Live NINA)
+- **Slew completion**: Use `GET /equipment/mount/info` and wait until `Slewing=false`, then apply a fixed settle delay (tested 3s). Avoid RA/Dec tolerance checks in this phase; centering is verified via the confirmation solve.
+- **Exposure completion**:
+  - If `waitForResult=false`, completion is when `GET /equipment/camera/info` reports `IsExposing=false`.
+  - If `waitForResult=true`, the capture call returns only after exposure completion, so post-return `IsExposing` is already false.
+- **Reliable file saves**: The Advanced API v2 call that consistently writes FITS to `/data/fits/YYYY-MM-DD/<target>/SNAPSHOT` is:
+  - `save=true`, `waitForResult=false`, `getResult=false`, `solve=false`, `omitImage=true`, `targetName=<name>`.
+  - `waitForResult=true` variants returned success but did not reliably create files under the date-based folder in live testing.
+
 ## 4. File Polling & Local Solving
-- **FITS location**: NINA writes to `/data/fits` (Docker named volume `nina_images` bound to `${NINA_IMAGES_HOST_PATH:-./data/fits}`).
-- **File detection**: `app/services/file_poller.py` synchronously polls for `{TARGET}_*.fits` with exponential backoff (100ms to 3.2s).
+- **FITS location**: NINA writes to `/data/fits/YYYY-MM-DD/<target>/SNAPSHOT` (date is local site time).
+- **File detection**: `app/services/file_poller.py` polls for `{TARGET}_*.fits` under the date/target/SNAPSHOT directory with exponential backoff (100ms to 3.2s).
 - **Solving**: `app/services/solver.py` runs `solve-field` locally in the API container; no remote astrometry worker exists.
 
 ## 5. Target Scoring & Presets
@@ -46,6 +61,7 @@ All operations are synchronous and DB-backed (no in-memory SESSION_STATE).
 ## 6. UI & Operators
 - Minimal dashboard served at `/dashboard` with Alpine-based status polling.
 - Primary API endpoints: `/api/session/start`, `/api/session/stop`, `/api/session/status`, `/api/observability`, `/api/captures`.
+- **Start Session gating**: Enabled only after startup ranking + Scout current-position fetch for the top 10 candidates yields a top 5 with recent Scout data (DB-only check in `/api/session/ready`).
 
 ## 7. Testing & Evidence
 - Local NINA integration is verified via direct REST calls (no bridge service).
@@ -58,7 +74,6 @@ All operations are synchronous and DB-backed (no in-memory SESSION_STATE).
 - Monitor local `solve-field` runtime and index coverage for target magnitude ranges.
 
 ## 9. Next Fixes (Current)
-- **MPC ephemeris 404s**: `MPC_EPHEMERIS_URL` is returning 404; update the endpoint or disable MPC fallback if Horizons-only is acceptable.
-- **Target selection after changes**: Observability now filters out targets lacking Horizons data; refresh scores or restart `observability-engine` before starting new sessions.
-- **Session runs already started**: A session that started before the Horizons filter refresh will still try bad targets; stop and start a new session after refresh.
+- **Scout availability**: Scout can return 503/timeouts; readiness relies on cached Scout rows from startup fetch. If Scout is down, re-run startup refresh later.
+- **Prediction flow**: `EphemerisPredictionService` now uses Scout current position; MPC fallback only when Scout is unavailable.
 - **Dashboard log/captures**: `/api/logs` and `/api/captures?session_id=...` power the UI; verify the API is restarted after changes.

@@ -113,10 +113,11 @@ class NinaBridgeService:
         params: dict[str, Any] = {
             "binning": binning,
             "save": True,
-            "solve": request_solve,
-            "waitForResult": True,
-            "getResult": True,
-            "omitImage": False,
+            # Live NINA tests show reliable file saves with fire-and-forget capture.
+            "solve": False,
+            "waitForResult": False,
+            "getResult": False,
+            "omitImage": True,
         }
         if exposure_seconds:
             params["duration"] = exposure_seconds
@@ -124,11 +125,8 @@ class NinaBridgeService:
             params["targetName"] = target
 
         timeout = None
-        if exposure_seconds:
-            # For waitForResult=True, allow extra time for:
-            # - Exposure time
-            # - Readout/download (~5-10s)
-            # - Plate solving (~10-20s for confirmation shots)
+        if exposure_seconds and params["waitForResult"]:
+            # For waitForResult=True, allow extra time for exposure and readout.
             timeout = max(self.timeout, float(exposure_seconds) + 30.0)
 
         return self._request("GET", "/equipment/camera/capture", params, timeout=timeout)
@@ -142,18 +140,18 @@ class NinaBridgeService:
         poll_interval: float = 1.0,
         settle_seconds: float = 3.0,
     ) -> None:
-        """Poll mount info until slewing stops and the mount has settled."""
+        """Wait for mount slewing to stop, then apply a fixed settle window."""
         deadline = time.time() + timeout
         settle_deadline = 0.0
         while time.time() < deadline:
             status = self._request("GET", "/equipment/mount/info")
-            if not status.get("Slewing", False):
+            if status.get("Slewing", False):
+                settle_deadline = 0.0
+            else:
                 if settle_deadline == 0.0:
                     settle_deadline = time.time() + settle_seconds
                 elif time.time() >= settle_deadline:
                     return
-            else:
-                settle_deadline = 0.0
             time.sleep(poll_interval)
         raise Exception("Mount is still slewing or settling after timeout")
 
@@ -189,18 +187,127 @@ class NinaBridgeService:
     # --- General ---
     
     def get_status(self) -> dict[str, Any]:
-        # This might be a custom endpoint we added to mock, or we need to poll individual devices
-        # Real NINA has /status endpoint? Not exactly, but let's keep our custom one for now
-        # or rely on individual device info.
-        # Actually, let's try to hit the custom /status endpoint we left in mock_nina/main.py?
-        # Wait, I removed /status from main.py in the previous step?
-        # Let me check main.py content from previous step.
-        # I removed /status. I should put it back or define how we get status.
-        # Real NINA doesn't have a monolithic /status.
-        # But for the dashboard we need it.
-        # I will re-add /status to mock_nina as a helper, or implement it here by aggregating.
-        # Let's assume we use /status for now and I need to re-add it to mock_nina.
-        return self._request("GET", "/status")
+        telescope_raw = self._request("GET", "/equipment/mount/info")
+        camera_raw = self._request("GET", "/equipment/camera/info")
+        sequence_raw = self._try_request("GET", "/sequence/json")
+        focuser_raw = self._try_request("GET", "/equipment/focuser/info")
+
+        telescope = self._normalize_telescope(telescope_raw)
+        camera = self._normalize_camera(camera_raw)
+        sequence = self._normalize_sequence(sequence_raw)
+        focuser = self._normalize_focuser(focuser_raw)
+
+        nina_status = {
+            "telescope": telescope,
+            "camera": camera,
+            "sequence": sequence,
+            "focuser": focuser,
+        }
+
+        blockers = self._derive_blockers(telescope, camera, sequence)
+        ready = {
+            "ready_to_expose": self._ready_to_expose(telescope, camera, sequence),
+        }
+
+        return {
+            "nina_status": nina_status,
+            "ready": ready,
+            "blockers": blockers,
+        }
+
+    def _try_request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+    ) -> Any | None:
+        try:
+            return self._request(method, path, params=params)
+        except Exception as exc:
+            logger.debug("Optional NINA endpoint unavailable (%s): %s", path, exc)
+            return None
+
+    @staticmethod
+    def _normalize_telescope(raw: dict[str, Any]) -> dict[str, Any]:
+        coords = raw.get("Coordinates") or {}
+        ra_deg = coords.get("RADegrees")
+        if ra_deg is None:
+            ra_hours = raw.get("RightAscension")
+            ra_deg = float(ra_hours) * 15.0 if ra_hours is not None else None
+        dec_deg = coords.get("Dec")
+        if dec_deg is None:
+            dec_deg = raw.get("Declination")
+        return {
+            "is_connected": bool(raw.get("Connected", True)),
+            "is_parked": bool(raw.get("AtPark", False)),
+            "is_slewing": bool(raw.get("Slewing", False)),
+            "ra_deg": float(ra_deg) if ra_deg is not None else None,
+            "dec_deg": float(dec_deg) if dec_deg is not None else None,
+        }
+
+    @staticmethod
+    def _normalize_camera(raw: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "is_connected": bool(raw.get("Connected", True)),
+            "is_exposing": bool(raw.get("IsExposing", False)),
+            "temperature": raw.get("Temperature"),
+        }
+
+    @staticmethod
+    def _normalize_sequence(raw: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            "is_running": bool(raw.get("IsRunning", False)),
+            "total_items": raw.get("TotalItems"),
+            "current_index": raw.get("CurrentItemIndex"),
+            "name": raw.get("Name"),
+        }
+
+    @staticmethod
+    def _normalize_focuser(raw: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            "is_moving": bool(raw.get("IsMoving", False)),
+            "position": raw.get("Position"),
+            "temperature": raw.get("Temperature"),
+        }
+
+    @staticmethod
+    def _derive_blockers(
+        telescope: dict[str, Any],
+        camera: dict[str, Any],
+        sequence: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        blockers: list[dict[str, Any]] = []
+        if telescope.get("is_connected") is False:
+            blockers.append({"reason": "mount_disconnected"})
+        if telescope.get("is_parked"):
+            blockers.append({"reason": "mount_parked"})
+        if camera.get("is_connected") is False:
+            blockers.append({"reason": "camera_disconnected"})
+        if camera.get("is_exposing"):
+            blockers.append({"reason": "camera_exposing"})
+        if sequence.get("is_running"):
+            blockers.append({"reason": "sequence_running"})
+        return blockers
+
+    @staticmethod
+    def _ready_to_expose(
+        telescope: dict[str, Any],
+        camera: dict[str, Any],
+        sequence: dict[str, Any],
+    ) -> bool:
+        if telescope.get("is_connected") is False or camera.get("is_connected") is False:
+            return False
+        if telescope.get("is_parked") or telescope.get("is_slewing"):
+            return False
+        if camera.get("is_exposing"):
+            return False
+        if sequence.get("is_running"):
+            return False
+        return True
 
     def set_ignore_weather(self, ignore: bool) -> dict[str, bool]:
         """Set the ignore_weather flag on the bridge."""

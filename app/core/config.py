@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     neocp_local_html: str = "/data/neocp_snapshots/toconfirm.html"
     neocp_text_url: str = "https://minorplanetcenter.net/iau/NEO/neocp.txt"
     neocp_local_text: str = "/data/neocp_snapshots/neocp.txt"
-    neocp_fetch_timeout: float = 30.0
+    neocp_fetch_timeout: float = 60.0
     neocp_use_local_sample: bool = False
     neocp_api_url: str = "https://data.minorplanetcenter.net/api/get-obs-neocp"
     neocp_observation_formats: tuple[str, ...] = ("ADES_DF",)
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     neocp_metrics_enabled: bool = True
     neocp_metrics_host: str = "0.0.0.0"
     neocp_metrics_port: int = 9500
+    mpc_ephemeris_enabled: bool = False
     mpc_ephemeris_url: str = "https://data.minorplanetcenter.net/api/get-ephemeris"
     mpc_ephemeris_timeout: float = 30.0
     # JPL Horizons settings
@@ -37,6 +38,8 @@ class Settings(BaseSettings):
     horizons_timeout: float = 30.0
     horizons_cache_hours: int = 6  # Re-fetch if older than this
     horizons_step_minutes: int = 5  # Resolution for ephemeris queries
+    scout_api_url: str = "https://ssd-api.jpl.nasa.gov/scout.api"
+    scout_timeout: float = 30.0
     # Target scoring weights (must sum to ~1.0)
     scoring_weight_mpc: float = 0.30
     scoring_weight_altitude: float = 0.25
@@ -54,6 +57,9 @@ class Settings(BaseSettings):
     observability_max_vmag: float = 20.0
     observability_recent_hours: int = 24
     observability_refresh_minutes: int = 15
+    observability_top_n: int = 5
+    neocp_prefetch_top_n: int = 10
+    observability_execute_top_n: int = 5
     weather_snapshot_ttl_minutes: int = 15
     weather_api_timeout: float = 10.0
     weather_max_wind_speed_mps: float = 13.5  # ~30 mph
@@ -94,6 +100,16 @@ class Settings(BaseSettings):
     nina_images_path: str = "/data/fits"
     astrometry_default_seeing_arcsec: float = 2.5
     astrometry_pixel_scale_arcsec: float = 1.5
+    telescope_focal_length_mm: float | None = None
+    camera_sensor_width_mm: float | None = None
+    camera_sensor_height_mm: float | None = None
+    camera_pixel_size_um: float | None = None
+    camera_resolution_x_px: int | None = None
+    camera_resolution_y_px: int | None = None
+    workflow_acquire_fraction: float = 0.30
+    workflow_center_fraction: float = 0.01
+    workflow_center_floor_arcsec: float = 10.0
+    workflow_slew_settle_time_sec: float = 15.0
     astrometry_min_exposure_seconds: float = 5.0
     astrometry_max_exposure_seconds: float = 180.0
     astrometry_min_frames: int = 4
@@ -101,6 +117,7 @@ class Settings(BaseSettings):
     astrometry_min_delay_seconds: float = 30.0
     astrometry_max_delay_seconds: float = 180.0
     astrometry_max_trailing_pixels: float = 3.0
+    test_mode_slew_only: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

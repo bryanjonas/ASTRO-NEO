@@ -10,6 +10,8 @@ from .core.site_config import bootstrap_site_config
 from .db.session import init_db
 from .dashboard_router import router as dashboard_router
 from .services.captures import prune_missing_captures
+from .services.observability import ObservabilityService
+from .services.neocp_fetcher import NeoCPFetcherService
 
 
 import logging
@@ -17,7 +19,7 @@ import logging
 def create_app() -> FastAPI:
     setup_logging()
     logger = logging.getLogger(__name__)
-    logger.info("Initializing ASTRO-NEO API with DEBUG logging enabled")
+    logger.info("Initializing ASTRO-NEO API")
 
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     app.include_router(api_router, prefix=settings.api_prefix)
@@ -40,6 +42,19 @@ def create_app() -> FastAPI:
         bootstrap_site_config()
         init_db()
         prune_missing_captures()
+        # Fetch latest NEOCP targets and refresh observability in background.
+        import threading
+
+        def _startup_refresh() -> None:
+            try:
+                NeoCPFetcherService().run_cycle()
+            except Exception as exc:
+                logger.warning("NEOCP fetch on startup failed: %s", exc)
+            from .db.session import get_session
+            with get_session() as session:
+                ObservabilityService(session=session).refresh()
+
+        threading.Thread(target=_startup_refresh, daemon=True).start()
 
     return app
 
