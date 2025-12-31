@@ -74,6 +74,32 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
 
+  test-script:
+    build:
+      context: .
+      dockerfile: docker/test-script.Dockerfile
+    pull_policy: build
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      SERVICE_NAME: test-script
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: 0
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+      - ./config:/app/config:ro
+      - ./data/neocp_snapshots:/data/neocp_snapshots:ro
+      - ./data:/data
+      - nina_images:/data/fits
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
   db:
     image: postgres:15
     pull_policy: always

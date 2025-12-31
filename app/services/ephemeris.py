@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
 import httpx
@@ -159,7 +159,7 @@ def _parse_epoch(entry: dict) -> datetime | None:
         dt = datetime.fromisoformat(text)
     except ValueError:
         return None
-    return dt.astimezone(tz=None).replace(tzinfo=None, second=0, microsecond=0)
+    return dt.astimezone(timezone.utc).replace(tzinfo=None, second=0, microsecond=0)
 
 
 def _parse_float(value: object) -> float | None:

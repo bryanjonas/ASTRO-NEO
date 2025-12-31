@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
 
 
 class HorizonsClient:
@@ -76,20 +78,21 @@ class HorizonsClient:
         """
 
         # Build Horizons COMMAND parameter options.
-        # Try NEOCP-style DES=...;CAP first, then DES=..., then raw designation.
-        command_options = [
-            f"DES={target_designation};CAP",
-            f"DES={target_designation}",
-            target_designation,
-        ]
+        # For numbered asteroids, use the semicolon form per Horizons docs.
+        # For designations/names, use DES=...; (encode special chars within COMMAND).
+        designation = target_designation.strip().strip("()")
+        if designation.isdigit():
+            command_options = [f"{designation};"]
+        else:
+            command_options = [f"DES={designation};", designation]
 
         # Build coordinate center using SITE_COORD
-        center = "coord"
+        center = "coord@399"
         site_coord = f"{self.site_lon},{self.site_lat},{self.site_alt_km}"
 
         base_params = {
             "format": "json",
-            "OBJ_DATA": "YES",  # Include object summary
+            "OBJ_DATA": "NO",  # Ephemeris-only response
             "MAKE_EPHEM": "YES",
             "EPHEM_TYPE": "OBSERVER",
             "CENTER": f"'{center}'",
@@ -136,6 +139,23 @@ class HorizonsClient:
             except ValueError as exc:
                 logger.error("Horizons API JSON decode error: %s", exc)
                 raise Exception(f"Horizons API returned invalid JSON: {exc}") from exc
+
+            debug_path = os.getenv("HORIZONS_DEBUG_PATH")
+            if debug_path:
+                try:
+                    raw = data.get("result", "") or ""
+                    redacted = []
+                    for line in raw.splitlines():
+                        if line.strip().startswith("Center geodetic"):
+                            redacted.append("Center geodetic : [REDACTED]")
+                        elif line.strip().startswith("Center cylindric"):
+                            redacted.append("Center cylindric: [REDACTED]")
+                        else:
+                            redacted.append(line)
+                    with open(debug_path, "w", encoding="utf-8") as fh:
+                        fh.write("\n".join(redacted))
+                except Exception as exc:
+                    logger.warning("Failed to write Horizons debug output: %s", exc)
 
             if "error" in data:
                 error_msg = data.get("error", "Unknown error")
@@ -195,38 +215,46 @@ class HorizonsClient:
         """
 
         lines = result_text.split("\n")
-        in_table = False
-        in_header = False
-        rows = []
+        rows: list[dict[str, Any]] = []
 
-        for line in lines:
-            # Look for table start marker
-            if "$$SOE" in line:
-                in_table = True
-                continue
-
-            # Look for table end marker
-            if "$$EOE" in line:
-                break
-
-            # Skip header and column definition lines
-            if in_table and line.strip():
-                # Skip lines that are just dashes or column headers
-                if line.strip().startswith("Date") or "---" in line:
-                    in_header = True
+        if any("$$SOE" in line for line in lines):
+            in_table = False
+            for line in lines:
+                if "$$SOE" in line:
+                    in_table = True
                     continue
-
-                in_header = False
-
-                # Parse data line
+                if "$$EOE" in line:
+                    break
+                if not in_table or not line.strip():
+                    continue
+                if line.strip().startswith("Date") or "---" in line:
+                    continue
                 try:
                     row = self._parse_ephemeris_row(line)
                     if row:
                         rows.append(row)
                 except Exception as exc:
                     logger.warning("Failed to parse Horizons line: %s | Error: %s", line, exc)
-                    continue
+            return rows
 
+        # CSV-format responses may omit $$SOE/$$EOE markers; parse likely data lines.
+        for line in lines:
+            text = line.strip()
+            if not text:
+                continue
+            if text.startswith("*") or text.startswith("JPL/") or text.startswith("Target body"):
+                continue
+            if text.lower().startswith("date"):
+                continue
+            if "," not in text and not text.startswith(("A.D.", "B.C.")) and not text[:4].isdigit():
+                continue
+            try:
+                row = self._parse_ephemeris_row(line)
+                if row:
+                    rows.append(row)
+            except Exception as exc:
+                logger.warning("Failed to parse Horizons line: %s | Error: %s", line, exc)
+                continue
         return rows
 
     def _parse_ephemeris_row(self, line: str) -> dict[str, Any] | None:
@@ -247,7 +275,6 @@ class HorizonsClient:
         if "," in line:
             parts = [p.strip() for p in line.split(",")]
         else:
-            # Space-separated, split by whitespace
             parts = line.split()
 
         if len(parts) < 5:
@@ -256,10 +283,23 @@ class HorizonsClient:
         try:
             # Parse date/time (first field)
             # Format: "YYYY-MMM-DD HH:MM" or similar
-            date_str = parts[0]
-            if len(parts) > 1 and ":" in parts[1]:
-                date_str = f"{parts[0]} {parts[1]}"
-                parts = parts[1:]  # Shift indices
+            if "," in line and " " in parts[0] and ":" in parts[0]:
+                date_str = parts[0].strip()
+                if date_str.startswith(("A.D.", "B.C.")):
+                    date_str = date_str.replace("A.D.", "", 1).replace("B.C.", "", 1).strip()
+                parts = parts[1:]
+            else:
+                date_str = parts[0]
+                if date_str in ("A.D.", "B.C.") and len(parts) > 2:
+                    date_str = parts[1]
+                    time_str = parts[2]
+                    parts = parts[3:]
+                else:
+                    time_str = parts[1] if len(parts) > 1 else ""
+                    parts = parts[2:]
+                if not time_str or ":" not in time_str:
+                    return None
+                date_str = f"{date_str} {time_str}"
 
             # Try parsing common Horizons date formats
             epoch = None
@@ -268,6 +308,8 @@ class HorizonsClient:
                 "%Y-%m-%d %H:%M",
                 "%Y-%b-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M:%S",
+                "%Y-%b-%d %H:%M:%S.%f",
+                "%Y-%m-%d %H:%M:%S.%f",
             ]:
                 try:
                     epoch = datetime.strptime(date_str, fmt)
@@ -279,25 +321,78 @@ class HorizonsClient:
                 logger.warning("Could not parse Horizons date: %s", date_str)
                 return None
 
-            # Parse RA/DEC (typically fields 2,3 or 1,2 after date)
-            # This is a simplified parser - actual field positions
-            # depend on QUANTITIES requested
-            ra_deg = float(parts[1] if len(parts) > 1 else 0.0)
-            dec_deg = float(parts[2] if len(parts) > 2 else 0.0)
+            def _parse_float(value: str | None) -> float | None:
+                if value is None:
+                    return None
+                try:
+                    return float(str(value).strip())
+                except (TypeError, ValueError):
+                    return None
 
-            # Additional fields if available
-            # These indices are estimates and may need adjustment
+            def _parse_hms(tokens: list[str]) -> float | None:
+                if len(tokens) < 3:
+                    return None
+                h = _parse_float(tokens[0])
+                m = _parse_float(tokens[1])
+                s = _parse_float(tokens[2])
+                if h is None or m is None or s is None:
+                    return None
+                return (h + (m / 60.0) + (s / 3600.0)) * 15.0
+
+            def _parse_dms(tokens: list[str]) -> float | None:
+                if len(tokens) < 3:
+                    return None
+                deg = _parse_float(tokens[0])
+                minutes = _parse_float(tokens[1])
+                seconds = _parse_float(tokens[2])
+                if deg is None or minutes is None or seconds is None:
+                    return None
+                sign = -1.0 if deg < 0 else 1.0
+                return sign * (abs(deg) + (minutes / 60.0) + (seconds / 3600.0))
+
+            # CSV table may include solar/lunar presence marker columns after date.
+            while parts and parts[0].strip() == "":
+                parts = parts[1:]
+            if parts and len(parts[0].strip()) == 1 and parts[0].strip().isalpha():
+                parts = parts[1:]
+
+            ra_deg = _parse_float(parts[0] if len(parts) > 0 else None)
+            dec_deg = _parse_float(parts[1] if len(parts) > 1 else None)
+            remaining = parts
+            if ra_deg is None or dec_deg is None:
+                ra_deg = _parse_hms(parts[:3])
+                dec_deg = _parse_dms(parts[3:6])
+                remaining = parts[6:]
+            if ra_deg is None or dec_deg is None:
+                return None
+
+            numeric_values = []
+            for value in remaining:
+                parsed = _parse_float(value)
+                if parsed is not None:
+                    numeric_values.append(parsed)
+
+            def _num(idx: int) -> float | None:
+                if idx < 0 or idx >= len(numeric_values):
+                    return None
+                return numeric_values[idx]
+
+            ra_rate = _num(0)
+            dec_rate = _num(1)
+            ra_rate_arcsec_min = ra_rate / 60.0 if ra_rate is not None else None
+            dec_rate_arcsec_min = dec_rate / 60.0 if dec_rate is not None else None
+
             return {
                 "epoch": epoch,
                 "ra_deg": ra_deg,
                 "dec_deg": dec_deg,
-                "ra_rate_arcsec_min": float(parts[3]) if len(parts) > 3 else 0.0,
-                "dec_rate_arcsec_min": float(parts[4]) if len(parts) > 4 else 0.0,
-                "azimuth_deg": float(parts[5]) if len(parts) > 5 else 0.0,
-                "elevation_deg": float(parts[6]) if len(parts) > 6 else 0.0,
-                "airmass": float(parts[7]) if len(parts) > 7 else 1.0,
-                "v_mag": float(parts[8]) if len(parts) > 8 else 99.0,
-                "solar_elongation_deg": 0.0,  # Parse from additional fields
+                "ra_rate_arcsec_min": ra_rate_arcsec_min,
+                "dec_rate_arcsec_min": dec_rate_arcsec_min,
+                "azimuth_deg": _num(2),
+                "elevation_deg": _num(3),
+                "airmass": _num(4),
+                "v_mag": _num(6),
+                "solar_elongation_deg": _num(10),
                 "lunar_elongation_deg": 0.0,  # Parse from additional fields
                 "uncertainty_3sigma_arcsec": 0.0,  # Parse from additional fields
             }

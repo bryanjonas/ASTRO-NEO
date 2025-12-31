@@ -114,13 +114,14 @@
       <template x-for="(target, index) in availableTargets" :key="target.id">
         <div class="target-item">
           <span class="target-rank" x-text="index + 1"></span>
-          <span class="target-name" x-text="target.trksub || target.candidate_id"></span>
-          <span class="target-score">Score: <span x-text="target.score ? target.score.toFixed(1) : 'N/A'"></span></span>
-          <span class="target-alt">
-            Max Alt: <span x-text="target.max_altitude_deg ? target.max_altitude_deg.toFixed(1) + '°' : 'N/A'"></span>
+          <span class="target-name" x-text="target.trksub || target.id"></span>
+          <span class="target-vmag">
+            Vmag:
+            <span x-text="typeof target.vmag === 'number' ? target.vmag.toFixed(2) : 'N/A'"></span>
           </span>
-          <span class="target-visibility" :class="target.is_observable ? 'visible' : 'not-visible'">
-            <span x-text="target.is_observable ? 'Visible' : 'Not visible'"></span>
+          <span class="target-updated">
+            Updated:
+            <span x-text="target.updated_at ? formatTime(target.updated_at) : 'N/A'"></span>
           </span>
         </div>
       </template>
@@ -340,27 +341,10 @@
   min-width: 120px;
 }
 
-.target-score,
-.target-alt {
+.target-vmag,
+.target-updated {
   color: #6b7280;
   min-width: 100px;
-}
-
-.target-visibility {
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.25rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.target-visibility.visible {
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
-.target-visibility.not-visible {
-  background-color: #fee2e2;
-  color: #991b1b;
 }
 
 .session-note {
@@ -447,16 +431,9 @@ function dashboard() {
 
     async loadAvailableTargets() {
       try {
-        const response = await fetch('/api/observability/');
+        const response = await fetch('/api/whatsup/targets?limit=10');
         const data = await response.json();
-        const targets = Array.isArray(data) ? data : [];
-        const visible = targets.filter(target => target.is_observable);
-        const ranked = (visible.length ? visible : targets).sort((a, b) => {
-          const scoreA = typeof a.score === 'number' ? a.score : -1;
-          const scoreB = typeof b.score === 'number' ? b.score : -1;
-          return scoreB - scoreA;
-        });
-        this.availableTargets = ranked.slice(0, 10);
+        this.availableTargets = Array.isArray(data) ? data : [];
       } catch (error) {
         console.error('Failed to load targets:', error);
       }

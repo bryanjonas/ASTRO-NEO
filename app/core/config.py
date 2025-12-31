@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     horizons_step_minutes: int = 5  # Resolution for ephemeris queries
     scout_api_url: str = "https://ssd-api.jpl.nasa.gov/scout.api"
     scout_timeout: float = 30.0
+    whatsup_timeout: float = 30.0
+    whatsup_refresh_minutes: int = 30
+    whatsup_horizons_ttl_minutes: int = 10
+    whatsup_max_objects: int = 10
+    whatsup_min_altitude_deg: int = 30
+    whatsup_solar_elongation_deg: int = 45
+    whatsup_lunar_elongation_deg: int = 20
+    whatsup_duration_hours: int = 1
+    whatsup_object_type: str = "mp"
     # Target scoring weights (must sum to ~1.0)
     scoring_weight_mpc: float = 0.30
     scoring_weight_altitude: float = 0.25

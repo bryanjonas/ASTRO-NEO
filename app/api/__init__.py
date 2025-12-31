@@ -12,6 +12,7 @@ from .equipment_profiles import router as equipment_router
 from .routes import health_router
 from .session import router as session_router
 from .site import router as site_router
+from .whatsup import router as whatsup_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -24,5 +25,6 @@ api_router.include_router(associations_router)
 api_router.include_router(monitor_router)
 api_router.include_router(captures_router)
 api_router.include_router(logs_router)
+api_router.include_router(whatsup_router)
 
 __all__ = ["api_router"]

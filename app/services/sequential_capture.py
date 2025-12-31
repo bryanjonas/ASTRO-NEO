@@ -30,6 +30,7 @@ from app.models.capture import CaptureLog
 from app.services.analysis import AnalysisService
 from app.services.file_poller import poll_for_fits_file, wait_for_file_size_stable
 from app.services.scout_client import ScoutClient
+from app.services.horizons_client import HorizonsClient
 from app.services.nina_client import NinaBridgeService
 from app.services.solver import solve_fits
 
@@ -61,6 +62,12 @@ class SequentialCaptureService:
                 timeout=settings.scout_timeout,
                 base_url=settings.scout_api_url,
             )
+        self.horizons = HorizonsClient(
+            site_lat=site_config.latitude,
+            site_lon=site_config.longitude,
+            site_alt_m=site_config.altitude_m,
+            timeout=settings.horizons_timeout,
+        )
 
         self.analysis = analysis or AnalysisService(db)
 
@@ -110,20 +117,36 @@ class SequentialCaptureService:
             f"exposure={exposure_seconds}s, filter={filter_name}, binning={binning}"
         )
 
-        # Step 1: Get fresh ephemeris from Scout
+        # Step 1: Get fresh ephemeris from Horizons (fallback to Scout if needed)
         try:
-            ephemeris = self.scout.get_current_position(candidate_id)
+            ephemeris = self.horizons.get_current_position(candidate_id)
             predicted_ra = ephemeris["ra_deg"]
             predicted_dec = ephemeris["dec_deg"]
             rate_arcsec_per_min = self._estimate_rate_arcsec_per_min(ephemeris)
-            logger.info(f"Scout ephemeris: RA={predicted_ra:.6f}, Dec={predicted_dec:.6f}")
+            logger.info(
+                "Horizons ephemeris: RA=%.6f, Dec=%.6f",
+                predicted_ra,
+                predicted_dec,
+            )
         except Exception as e:
-            logger.error(f"Failed to query Scout for {candidate_id}: {e}")
-            return {
-                "success": False,
-                "error": f"Scout query failed: {e}",
-                "confirmation_attempts": 0,
-            }
+            logger.warning("Horizons query failed for %s: %s", candidate_id, e)
+            try:
+                ephemeris = self.scout.get_current_position(candidate_id)
+                predicted_ra = ephemeris["ra_deg"]
+                predicted_dec = ephemeris["dec_deg"]
+                rate_arcsec_per_min = self._estimate_rate_arcsec_per_min(ephemeris)
+                logger.info(
+                    "Scout ephemeris: RA=%.6f, Dec=%.6f",
+                    predicted_ra,
+                    predicted_dec,
+                )
+            except Exception as scout_exc:
+                logger.error("Failed to query ephemerides for %s: %s", candidate_id, scout_exc)
+                return {
+                    "success": False,
+                    "error": f"Ephemeris query failed: {scout_exc}",
+                    "confirmation_attempts": 0,
+                }
 
         # Step 2: Confirmation loop (up to 3 attempts)
         tolerances = self._compute_tolerances(

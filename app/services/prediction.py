@@ -1,4 +1,4 @@
-"""Utilities for predicting NEO positions using JPL Scout ephemerides."""
+"""Utilities for predicting positions using JPL Horizons ephemerides."""
 
 from __future__ import annotations
 
@@ -11,30 +11,24 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.site_config import load_site_config
 from app.models import NeoCandidate, NeoEphemeris
-from app.services.scout_client import ScoutClient
+from app.services.horizons_client import HorizonsClient
 from app.services.ephemeris import MpcEphemerisClient
 
 logger = logging.getLogger(__name__)
 
 
 class EphemerisPredictionService:
-    """Predict RA/Dec for a candidate using JPL Scout ephemerides.
-
-    Strategy:
-    - Always use Scout for authoritative NEOCP tracklet coordinates
-    - Cache Scout ephemerides in database
-    - Re-fetch if cache is stale (> horizons_cache_hours old)
-    - Fallback to MPC only if Scout fails
-    """
+    """Predict RA/Dec for a candidate using JPL Horizons ephemerides."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.site_config = load_site_config()
         self.mpc_client = MpcEphemerisClient(session, self.site_config)
-        self.scout_client = ScoutClient(
-            obs_code=self.site_config.station_code,
-            timeout=settings.scout_timeout,
-            base_url=settings.scout_api_url,
+        self.horizons_client = HorizonsClient(
+            site_lat=self.site_config.latitude,
+            site_lon=self.site_config.longitude,
+            site_alt_m=self.site_config.altitude_m,
+            timeout=settings.horizons_timeout,
         )
         self.sample_minutes = max(1, settings.horizons_step_minutes)
         self.margin_minutes = 60  # Fetch ±1 hour window for interpolation
@@ -63,32 +57,30 @@ class EphemerisPredictionService:
             return None
 
         try:
-            return self._predict_from_scout(candidate, when)
+            return self._predict_from_horizons(candidate, when)
         except Exception as exc:
             logger.warning(
-                "Scout prediction failed for %s at %s: %s",
+                "Horizons prediction failed for %s at %s: %s",
                 candidate.trksub,
                 when.isoformat(),
                 exc,
             )
-            # Fallback to MPC
             logger.info("Falling back to MPC ephemerides for %s", candidate.trksub)
+            return self._predict_from_mpc(candidate, when)
 
-        # Fallback: use MPC ephemerides
-        return self._predict_from_mpc(candidate, when)
-
-    def _predict_from_scout(
+    def _predict_from_horizons(
         self, candidate: NeoCandidate, when: datetime
     ) -> tuple[float, float] | None:
-        """Fetch/use Scout current position for prediction."""
+        """Fetch/use Horizons current position for prediction."""
 
-        logger.info("Fetching Scout current position for %s", candidate.trksub)
-        row = self.scout_client.get_current_position(candidate.trksub)
+        logger.info("Fetching Horizons current position for %s", candidate.trksub)
+        row = self.horizons_client.get_current_position(candidate.id)
         ra = row.get("ra_deg")
         dec = row.get("dec_deg")
         if ra is None or dec is None:
-            logger.warning("Scout current position missing RA/Dec for %s", candidate.trksub)
+            logger.warning("Horizons current position missing RA/Dec for %s", candidate.trksub)
             return None
+        self._cache_horizons_ephemerides(candidate.id, candidate.trksub, [row])
         return float(ra), float(dec)
 
     def _cache_horizons_ephemerides(
@@ -117,7 +109,7 @@ class EphemerisPredictionService:
                 existing.solar_elongation_deg = row_data.get("solar_elongation_deg")
                 existing.lunar_elongation_deg = row_data.get("lunar_elongation_deg")
                 existing.uncertainty_3sigma_arcsec = row_data.get("uncertainty_3sigma_arcsec")
-                existing.source = "SCOUT"
+                existing.source = "HORIZONS"
                 existing.created_at = datetime.utcnow()  # Update timestamp
                 self.session.add(existing)
             else:
@@ -137,7 +129,7 @@ class EphemerisPredictionService:
                     solar_elongation_deg=row_data.get("solar_elongation_deg"),
                     lunar_elongation_deg=row_data.get("lunar_elongation_deg"),
                     uncertainty_3sigma_arcsec=row_data.get("uncertainty_3sigma_arcsec") or row_data.get("sigma_pos"),
-                    source="SCOUT",
+                    source="HORIZONS",
                 )
                 self.session.add(eph)
 
