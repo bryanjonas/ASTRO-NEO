@@ -1,0 +1,56 @@
+Astrometry.net techniques and tips
+June 23, 2023
+Here are tips at each stage of the Astrometry.net solve-field process, with conversion to azimuth / elevation per pixel with a known image location and time.
+
+A critical point is having appropriate star index files available. Visible light images common in citizen science aurora photos should consider the 4100-series Tycho2 index files. The verbose option helps give a hint of what solve-field is doing like:
+
+solve-field -v img.jpg
+
+# even more verbose
+solve-field -vv img.jpg
+Solving field
+
+Noisy images, including typical DSLR images of the night sky can have too many (false) sources detected in step 1. This can be observed in the *-objs.png files generated early in the solve-field processing chain. A reasonable goal for the number of sources detected is about 100. The default source count limit is 1000, but this is way too many for a practical solution time (or indeed, a solution at all). Adjusting the --sigma parameter is a useful way to control for noisy image. An image that at a glance looks high SNR upon closer inspection (e.g. a 3D intensity plot) may reveal a lot of false source detection potential. DSLR images especially should use --downsample 2 or --downsample 4. Two of the first lines upon running solve-field should be like:
+
+Downsampling by 2...
+simplexy: found 129 sources.
+Looking at the *-objs.png file should quickly reveal that mostly stars are highlighted. If there is debris, clouds, reflections, etc. that cause more than several false detections, this could drive failure to calibrate. In the Astrometry.net gallery, that are images with a large planetary body in view from a satellite and other false detections, that still work. But in general too much clutter in the image causes more difficulty in solving.
+
+Once a hash comes over about odds of about 1e6 (exp(1)**14) -- log-odds 14, solve-field attempts to enhance the match. The default log-odds threshold to solve is 1e9 (exp(1)**20) -- log-odds 20, solve-field declares the image field solved. If the image solves, one of the lines will be like:
+
+log-odds ratio 35.9538 (4.11658e+15), 31 match, 0 conflict, 70 distractors, 123 index.
+One of the most major improvements in speeding solution time, from impossibly long to say 10 seconds or less, is to set a minimum image field width with the -L parameter. Astrometry.net is a blind solver, so it doesn’t know if the image is from the Hubble Telescope or a cell phone in the night sky. Obviously that is an extremely wide range of field of view (FOV) to cover. Why not make an obvious lower limit on image FOV and speed image solution time by a factor of 20 or more. Don’t worry about fine adjustment to -L, being within 25-50% is more than adequate. If the lens / camera setup gives a 10 degree FOV, set -L 5.
+
+The *-indx.png shows good and bad sources. The *-ngc.png shows constellations and star names. This is readily confirmed with Stellarium should there be doubt.
+
+In short:
+
+--sigma and --downsample help reduce extraneous sources – try to get a little over 100 sources detected and manually see that most of them are stars
+-L will greatly speed solution, particularly for DSLR, auroral camera, etc. imagery
+Astrometry.net is made for tangent plane images, but extensions exist to calibrate all-sky images.
+Distortion of even prosumer lens may be too much for solve-field to handle over the entire image. Try cropping the image to a region of interest, save as .png and use solve-field on that.
+Field accuracy
+
+Try to find a suitable image crop that will register with low enough error at the edges of the image. The wider the optical field of view, the closer to the center of the image and the smaller the crop. Otherwise, the center of the image will register well, but the error can grow unacceptably large at the edges > 1 degree az/el. This is where one has to visually inspect the image at each step (accuracy of RA/DEC, before converting to az/el) and iterate the cropping.  Very large DSLR images (several megapixels) benefit from downsampling with “solve-field –downsample 2” or so to smooth out the noise.  When the FOV is too large (and didn’t crop enough of the edges off) “solve-field” will simply fail. When a crop is good, solve-field solves in a few minutes (or several seconds) on a laptop.
+
+Astrometry_azel post-processing in Python wrangles the data into a format acceptable to AstroPy for coordinate conversion to azimuth, elevation. Knowing the time and position of the photograph is vital. Seconds of time and 10s of meters of offset aren’t as important to wide field-of-view >30 degree images. Time and position error is increasingly important with decreasing field of view images.
+
+Stellarium
+
+Visually verify with Stellarium noting the time zone. Especially verify azimuth and elevation, which is where the accumulated error will be the worst. When using the Stellarium Equatorial Grid, the right ascension is in hour angle, and declination is in degrees. Convert degrees to hour angle:
+
+hour_angle = degrees * 24 / 360
+That is 1.0 degrees is 0.0666667 hours or 4 minutes.
+
+Stellarium can be scripted to provide a more repeatable simulation.
+
+Troubleshooting
+
+If an image won’t solve, typical problems include:
+
+too much non-sky or clouds
+too much motion blur (need stable camera mount)
+too much noise (try --downsample 2 or --downsample 4)
+See if any stars are apparent with a histogram equalization using ImageMagick. If not, there may simply be too much noise or clouds to solve the image.
+
+magick img.jpg -equalize img-equalize.jpg

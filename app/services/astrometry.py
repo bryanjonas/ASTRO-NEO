@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -95,9 +96,9 @@ class AstrometryService:
                             wcs = WCS(str(wcs_path))
                             analysis = AnalysisService(db)
                             analysis.auto_associate(db, capture, wcs)
-                    except Exception:
+                    except Exception as exc:
                         # Don't fail the solve if association fails
-                        pass
+                        logging.warning("Auto-association failed: %s", exc)
                         
             except SolveError as exc:
                 duration = time.perf_counter() - started

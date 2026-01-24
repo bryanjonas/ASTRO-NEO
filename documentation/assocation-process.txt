@@ -1,0 +1,107 @@
+Fully Automated ADES PSV Production Process
+Preconditions (inputs to this stage)
+For each observation in a tracklet you already have:
+UTC mid-exposure time
+RA, Dec (ICRF/J2000)
+Per-point astrometric uncertainty
+Optional magnitude + band
+Observatory code
+Astrometric catalog used
+Observer / measurer IDs (static config)
+Minimum required observations: ≥4
+1) Normalize inputs to ADES-required units and formats
+Time
+Convert all times to UTC
+Format as ISO-8601 with fractional seconds
+YYYY-MM-DDThh:mm:ss.sss
+Use mid-exposure time, not start or end
+Coordinates
+RA: decimal degrees, double precision
+Dec: decimal degrees, signed
+Reference frame: ICRF / J2000 (implicit unless otherwise stated)
+Uncertainties
+Units: arcseconds
+One uncertainty per coordinate (σRA, σDec)
+If you only have one value, duplicate it for both
+Magnitude (optional but allowed)
+Decimal magnitude
+Photometric band (single-character or MPC-approved string)
+2) Construct PSV header block (metadata)
+This block appears once at the top of the PSV file.
+Required / strongly recommended fields:
+# version=2017
+# observatoryCode=XXX
+# submitter=YourNameOrCode
+# observer=ObserverID
+# measurer=MeasurerID
+# telescope=FreeText
+# instrument=FreeText
+# catalog=GaiaDR3   (or whatever you actually used)
+Rules:
+# starts a comment/metadata line
+Key/value pairs use =
+Order is not strict, but consistency matters
+Values must reflect reality (MPC checks this)
+3) Define the PSV column schema
+Immediately after the header, define the column order.
+Minimal, safe schema for optical astrometry:
+permID provID obsTime ra dec sigRA sigDec mag band
+Rules:
+Columns are space-separated
+Case matters
+Column names must match ADES spec exactly
+permID may be blank for new/unknown objects
+provID can be a temporary internal ID or blank
+4) Populate observation rows (one row per image)
+Each row corresponds to one image / one astrometric measurement.
+Example structure:
+      K25A00A 2026-01-04T06:14:32.417 123.456789 -12.345678 0.25 0.25 18.7 r
+Field rules:
+Blank fields are allowed only where ADES permits
+Numeric fields must not contain placeholders (NaN, null, etc.)
+RA/Dec must be decimal degrees
+Uncertainties must be positive
+Times must be strictly increasing
+5) Enforce PSV-level integrity rules (hard gates)
+Reject the entire PSV if any of the following occur:
+Structural
+Missing required header fields
+Column count mismatch
+Illegal column names
+Non-ASCII characters
+Temporal
+Duplicate timestamps
+Non-monotonic time order
+Time precision worse than seconds
+Astrometric
+Uncertainties ≤ 0
+RA outside [0, 360)
+Dec outside [-90, +90]
+Fewer than 4 observations
+Logical
+Object jumps backward in time
+Motion direction flips between points
+Residual outlier already flagged upstream
+No partial submission. Either entire PSV passes or it is rejected.
+6) Run automated ADES validation
+Before submission:
+Run local ADES validator (or MPC-provided validation logic if embedded)
+Parse output:
+Any ERROR → hard fail
+Any WARNING → fail unless explicitly whitelisted
+Store validation output alongside PSV
+Never submit an unvalidated PSV.
+7) Finalize PSV for API submission
+Before sending:
+Normalize line endings (\n)
+Strip trailing whitespace
+Compute file hash (SHA-256)
+Store immutable copy for audit
+Filename convention (recommended):
+OBSXXX_YYYYMMDD_trackletNN.ades.psv
+8) Submission-ready output artifact
+Your PSV stage outputs exactly:
+*.ades.psv (validated)
+validation.log
+metadata.json (hashes, counts, software version)
+This bundle is now API-ready.

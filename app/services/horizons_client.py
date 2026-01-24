@@ -48,7 +48,7 @@ class HorizonsClient:
 
     def fetch_ephemeris(
         self,
-        target_designation: str,
+        target_designation: str | int,
         start_time: datetime,
         stop_time: datetime,
         step_minutes: int = 5,
@@ -80,7 +80,7 @@ class HorizonsClient:
         # Build Horizons COMMAND parameter options.
         # For numbered asteroids, use the semicolon form per Horizons docs.
         # For designations/names, use DES=...; (encode special chars within COMMAND).
-        designation = target_designation.strip().strip("()")
+        designation = str(target_designation).strip().strip("()")
         if designation.isdigit():
             command_options = [f"{designation};"]
         else:
@@ -187,7 +187,7 @@ class HorizonsClient:
 
     def get_current_position(
         self,
-        target_designation: str,
+        target_designation: str | int,
         when: datetime | None = None,
         window_minutes: int = 10,
         step_minutes: int = 1,
@@ -197,7 +197,7 @@ class HorizonsClient:
         start_time = moment - timedelta(minutes=window_minutes)
         stop_time = moment + timedelta(minutes=window_minutes)
         rows = self.fetch_ephemeris(
-            target_designation=target_designation,
+            target_designation=str(target_designation),
             start_time=start_time,
             stop_time=stop_time,
             step_minutes=step_minutes,
@@ -350,15 +350,31 @@ class HorizonsClient:
                 sign = -1.0 if deg < 0 else 1.0
                 return sign * (abs(deg) + (minutes / 60.0) + (seconds / 3600.0))
 
-            # CSV table may include solar/lunar presence marker columns after date.
-            while parts and parts[0].strip() == "":
-                parts = parts[1:]
-            if parts and len(parts[0].strip()) == 1 and parts[0].strip().isalpha():
-                parts = parts[1:]
+            # CSV table may include solar/lunar presence markers after date.
+            tokens = [p.strip() for p in parts]
+            idx = 0
+            while idx < len(tokens) and tokens[idx] == "":
+                idx += 1
+            while idx < len(tokens) and _parse_float(tokens[idx]) is None and len(tokens[idx]) <= 2:
+                idx += 1
 
-            ra_deg = _parse_float(parts[0] if len(parts) > 0 else None)
-            dec_deg = _parse_float(parts[1] if len(parts) > 1 else None)
-            remaining = parts
+            ra_deg = None
+            dec_deg = None
+            ra_idx = None
+            dec_idx = None
+            for i in range(idx, len(tokens)):
+                if _parse_float(tokens[i]) is not None:
+                    ra_deg = _parse_float(tokens[i])
+                    ra_idx = i
+                    break
+            if ra_idx is not None:
+                for i in range(ra_idx + 1, len(tokens)):
+                    if _parse_float(tokens[i]) is not None:
+                        dec_deg = _parse_float(tokens[i])
+                        dec_idx = i
+                        break
+
+            remaining = tokens[(dec_idx + 1) if dec_idx is not None else 0 :]
             if ra_deg is None or dec_deg is None:
                 ra_deg = _parse_hms(parts[:3])
                 dec_deg = _parse_dms(parts[3:6])

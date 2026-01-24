@@ -22,6 +22,7 @@ def poll_for_fits_file(
     fits_directory: Path | str = "/data/fits",
     timeout: float = 60.0,
     poll_interval: float = 0.1,
+    min_mtime: float | None = None,
 ) -> Optional[Path]:
     """
     Poll for a FITS file matching the target name.
@@ -65,6 +66,10 @@ def poll_for_fits_file(
             continue
 
         matching_files = list(snapshot_dir.glob(f"{target_name}_*.fits"))
+        if min_mtime is not None:
+            matching_files = [
+                path for path in matching_files if path.stat().st_mtime >= min_mtime
+            ]
 
         if matching_files:
             # Sort by modification time and return the most recent

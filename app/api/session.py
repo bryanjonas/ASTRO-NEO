@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.models.neocp import NeoCandidate, NeoEphemeris
 from app.models.session import ObservingSession
 from app.services.automation import AutomationService
+from app.services.nina_client import NinaBridgeService
 from app.services.whatsup import WhatsUpService
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -48,12 +49,9 @@ class SessionStatusResponse(BaseModel):
 
 def _get_whatsup_targets(db: Session) -> tuple[list[NeoCandidate], str | None]:
     service = WhatsUpService(db)
-    targets = service.ensure_targets()
-    if not targets:
-        return [], "No WhatsUp targets available"
     ranked = service.get_ranked_targets(limit=settings.whatsup_max_objects)
     if not ranked:
-        return [], "No WhatsUp targets available"
+        return [], "No WhatsUp targets available. Use Refresh Targets first."
     return ranked, None
 
 
@@ -72,13 +70,12 @@ def session_ready(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
         return {"ready": False, "error": error}
 
     ranked = visible_targets
-    top_targets = ranked[:10]
+    top_targets = ranked[:5]
     if not top_targets:
         return {
             "ready": False,
             "error": "No targets available yet.",
         }
-    WhatsUpService(db).ensure_horizons_cache(top_targets)
     missing_horizons = _check_ephemeris_ready(db, top_targets)
     if missing_horizons:
         return {
@@ -199,7 +196,7 @@ def start_session(
         )
 
         # Execute the plan (this runs synchronously)
-        result = automation.execute_target_plan(plan)
+        result = automation.execute_target_plan(plan, session_id=session.id)
 
         # Update session stats
         session.stats = {
@@ -209,6 +206,19 @@ def start_session(
             "started_at": result["started_at"],
             "completed_at": result["completed_at"]
         }
+        db.refresh(session)
+        if session.status == "stopped":
+            logger.info("Session %s stopped by user request", session.id)
+            if not session.end_time:
+                session.end_time = datetime.utcnow()
+            db.commit()
+            return {
+                "success": False,
+                "stopped": True,
+                "session_id": session.id,
+                "target_name": target_name,
+                "result": result
+            }
         session.status = "completed"
         session.end_time = datetime.utcnow()
         db.commit()
@@ -248,6 +258,13 @@ def stop_session(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
     session.status = "stopped"
     session.end_time = datetime.utcnow()
     db.commit()
+
+    try:
+        nina = NinaBridgeService()
+        nina.stop_sequence()
+        nina.stop_guiding()
+    except Exception as exc:
+        logger.warning("Failed to stop NINA sequence/guide: %s", exc)
 
     logger.info(f"Stopped session {session.id}")
 

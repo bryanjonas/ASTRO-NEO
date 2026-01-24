@@ -17,4 +17,13 @@ async def dashboard(request: Request):
     )
 
 
+@router.get("/dashboard/psv", response_class=HTMLResponse)
+async def psv_dashboard(request: Request):
+    """Render the PSV dashboard."""
+    return templates.TemplateResponse(
+        "psv.html",
+        {"request": request}
+    )
+
+
 __all__ = ["router"]

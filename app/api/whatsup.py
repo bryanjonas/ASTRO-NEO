@@ -13,6 +13,25 @@ from app.services.whatsup import WhatsUpService
 router = APIRouter(prefix="/whatsup", tags=["whatsup"])
 
 
+@router.post("/refresh")
+def refresh_whatsup_targets(
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    service = WhatsUpService(session=session)
+    targets = service.refresh_targets_with_horizons()
+    payload: list[dict[str, Any]] = []
+    for target in targets:
+        payload.append(
+            {
+                "id": target.id,
+                "trksub": target.trksub,
+                "vmag": target.vmag,
+                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+            }
+        )
+    return payload
+
+
 @router.get("/targets")
 def list_whatsup_targets(
     limit: int = Query(10, ge=1, le=100),

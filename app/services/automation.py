@@ -15,12 +15,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from sqlmodel import select
+
 from app.core.config import settings
 from app.db.session import get_session
 from app.services.equipment import get_active_equipment_profile
 from app.services.motion import estimate_motion_rate_arcsec_per_min
 from app.services.prediction import EphemerisPredictionService
 from app.services.presets import select_preset
+from app.models import Measurement, ObservingSession
+from app.services.reporting import ReportService
 from app.services.sequential_capture import SequentialCaptureService
 
 logger = logging.getLogger(__name__)
@@ -131,6 +135,7 @@ class AutomationService:
     def execute_target_plan(
         self,
         plan: TargetPlan,
+        session_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Execute a target plan using sequential capture.
@@ -155,6 +160,7 @@ class AutomationService:
 
         started_at = datetime.utcnow()
         results = []
+        stop_requested = False
 
         # Create sequential capture service
         with get_session() as session:
@@ -162,6 +168,17 @@ class AutomationService:
 
             # Execute each exposure in the plan
             for i in range(plan.count):
+                if session_id is not None:
+                    with get_session() as status_session:
+                        active = status_session.exec(
+                            select(ObservingSession)
+                            .where(ObservingSession.id == session_id)
+                            .where(ObservingSession.status == "active")
+                        ).first()
+                    if not active:
+                        logger.info("Stop requested; ending plan execution for %s", plan.name)
+                        stop_requested = True
+                        break
                 logger.info(f"Starting exposure {i+1}/{plan.count} for {plan.name}")
 
                 try:
@@ -172,15 +189,15 @@ class AutomationService:
                         filter_name=plan.filter_name,
                         binning=plan.binning,
                         confirmation_exposure_seconds=5.0,
-                        confirmation_binning=2,
+                        confirmation_binning=1,
                         confirmation_max_attempts=3,
                         centering_tolerance_arcsec=120.0,
                     )
                     results.append(result)
 
                     if result["success"]:
-                        if result.get("slew_only"):
-                            logger.info("Test mode: slew-only run completed, stopping session.")
+                        if result.get("confirmation_only"):
+                            logger.info("Confirmation exposure completed; stopping session.")
                             break
                         logger.info(
                             f"✓ Exposure {i+1}/{plan.count} successful: "
@@ -209,6 +226,41 @@ class AutomationService:
         successful_captures = sum(1 for r in results if r.get("success"))
         successful_associations = sum(1 for r in results if r.get("association_id") is not None)
 
+        measurement_ids = [r.get("measurement_id") for r in results if r.get("measurement_id")]
+        psv_bundle = None
+        if measurement_ids and len(measurement_ids) >= settings.astrometry_min_frames:
+            if settings.psv_auto_generate:
+                logger.info(
+                    "Generating PSV bundle for %s with %d measurements",
+                    plan.name,
+                    len(measurement_ids),
+                )
+                with get_session() as session:
+                    measurements = session.exec(
+                        select(Measurement).where(Measurement.id.in_(measurement_ids))
+                    ).all()
+                    if len(measurements) >= settings.astrometry_min_frames:
+                        report_service = ReportService(session)
+                        psv_bundle = report_service.write_ades_psv_bundle(measurements)
+                        if psv_bundle["valid"]:
+                            logger.info("PSV bundle created: %s", psv_bundle["psv_path"])
+                        else:
+                            logger.error(
+                                "PSV validation failed: %s",
+                                "; ".join(psv_bundle["errors"]),
+                            )
+                    else:
+                        logger.warning(
+                            "PSV generation skipped: only %d measurements found",
+                            len(measurements),
+                        )
+            else:
+                logger.info(
+                    "PSV auto-generation disabled; %d measurements available for %s",
+                    len(measurement_ids),
+                    plan.name,
+                )
+
         logger.info(
             f"Completed plan for {plan.name}: {successful_captures}/{len(results)} successful, "
             f"{successful_associations} with associations"
@@ -222,6 +274,8 @@ class AutomationService:
             "successful_captures": successful_captures,
             "successful_associations": successful_associations,
             "results": results,
+            "psv_bundle": psv_bundle,
+            "stopped": stop_requested,
         }
 
 

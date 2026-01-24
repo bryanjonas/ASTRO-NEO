@@ -4,12 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     pull_policy: build
-    depends_on:
-      - db
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      DATABASE_URL: sqlite:////data/astro_neo.db
       SERVICE_NAME: api
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: 1
@@ -33,15 +31,13 @@ services:
       context: .
       dockerfile: Dockerfile
     pull_policy: build
-    depends_on:
-      - db
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      DATABASE_URL: sqlite:////data/astro_neo.db
       SERVICE_NAME: neocp-fetcher
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      RUN_MIGRATIONS: 0
+      RUN_MIGRATIONS: 1
     command: ["python", "-m", "app.services.neocp_fetcher"]
     restart: unless-stopped
     ports:
@@ -57,12 +53,10 @@ services:
       context: .
       dockerfile: Dockerfile
     pull_policy: build
-    depends_on:
-      - db
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      DATABASE_URL: sqlite:////data/astro_neo.db
       SERVICE_NAME: observability-engine
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: 0
@@ -79,12 +73,10 @@ services:
       context: .
       dockerfile: docker/test-script.Dockerfile
     pull_policy: build
-    depends_on:
-      - db
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://astro:astro@db:5432/astro
+      DATABASE_URL: sqlite:////data/astro_neo.db
       SERVICE_NAME: test-script
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: 0
@@ -100,23 +92,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
 
-  db:
-    image: postgres:15
-    pull_policy: always
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: astro
-      POSTGRES_USER: astro
-      POSTGRES_PASSWORD: astro
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-
 volumes:
-  postgres_data:
   nina_images:
     driver: local
     driver_opts:

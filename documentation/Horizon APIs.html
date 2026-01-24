@@ -1,0 +1,990 @@
+<!DOCTYPE html><html>
+<head>
+<title></title>
+<style type="text/css">
+<!--
+.xflip {
+    -moz-transform: scaleX(-1);
+    -webkit-transform: scaleX(-1);
+    -o-transform: scaleX(-1);
+    transform: scaleX(-1);
+    filter: fliph;
+}
+.yflip {
+    -moz-transform: scaleY(-1);
+    -webkit-transform: scaleY(-1);
+    -o-transform: scaleY(-1);
+    transform: scaleY(-1);
+    filter: flipv;
+}
+.xyflip {
+    -moz-transform: scaleX(-1) scaleY(-1);
+    -webkit-transform: scaleX(-1) scaleY(-1);
+    -o-transform: scaleX(-1) scaleY(-1);
+    transform: scaleX(-1) scaleY(-1);
+    filter: fliph + flipv;
+}
+-->
+</style>
+</head>
+<body>
+<a name=1></a><img src="documentation/Horizon API-1_1.png"/><br/>
+<img src="documentation/Horizon API-1_2.png"/><br/>
+<a href="https://ssd-api.jpl.nasa.gov/about/">About</a><br/>
+<a href="https://ssd-api.jpl.nasa.gov/doc/">Documents</a><br/>
+<b>Horizons API</b><br/>
+Version:&#160;1.3&#160;(2025 June)<br/><a href="">change&#160;log</a><br/>
+<a href="https://ssd-api.jpl.nasa.gov/doc/horizons_file.html">This&#160;API provides&#160;access&#160;to JPL’s</a><a href="https://ssd.jpl.nasa.gov/horizons/">&#160;Horizons system&#160;b</a><a href="https://ssd-api.jpl.nasa.gov/doc/horizons_file.html">y specifying Horizons settings as parameters in the URL. An alternate&#160;file-based<br/>Horizons API&#160;is available if you would prefer to submit a&#160;Horizons batch input file via&#160;HTTP POST.</a><br/>
+Additional&#160;information&#160;about&#160;available&#160;query&#160;parameters&#160;is&#160;available&#160;in&#160;the<a href="https://ssd.jpl.nasa.gov/ftp/ssd/horizons_batch.txt">&#160;Horizons batch example/instructions&#160;doc</a>ument.<br/>
+<b>HTTP Request</b><br/>
+<b>GET&#160;</b>&#160; https://ssd.jpl.nasa.gov/api/horizons.api <br/>
+<b>Example Ephemeris Query</b><br/>
+Request&#160;an&#160;observer&#160;ephemeris&#160;of&#160;Mars&#160;in&#160;plain-text&#160;format:<br/>
+ https://ssd.jpl.nasa.gov/api/horizons.api?<br/>
+format=text&amp;COMMAND='499'&amp;OBJ_DATA='YES'&amp;MAKE_EPHEM='YES'&amp;EPHEM_TYPE='OBSERVER'&amp;CENTER='500@399'&amp;START_TIME='200<br/>
+6-01-01'&amp;STOP_TIME='2006-01-20'&amp;STEP_SIZE='1%20d'&amp;QUANTITIES='1,9,20,23,24,29' <br/>
+<b>Query Parameters</b><br/>
+Special/reserved character<a href="">s&#160;require&#160;URL&#160;encoding.</a><br/>
+The&#160;following&#160;tables&#160;show&#160;available&#160;query parameters&#160;for the&#160;Horizons&#160;API. The&#160;first table<a href="">&#160;“Common&#160;Parameters” lis</a>ts query<br/>parameters that are independent of&#160;the selected&#160; EPHEM_TYPE . The&#160;next table<a href="">&#160;“Ephemeris-Specific&#160;Parameters</a>” lists remaining<br/>parameters that are specific&#160;to&#160; OBSERVER ,&#160; VECTORS , and&#160; ELEMENTS &#160;ephemeris types and indicates the&#160; EPHEM_TYPE &#160;for which they<br/>are&#160;available.&#160;The&#160;last&#160;two&#160;tables,&#160;<a href="">“SPK&#160;File Parameters</a>” an<a href="">d “Close-Approach&#160;Table&#160;Parameters”</a>,&#160;list&#160;parameters&#160;specific&#160;to&#160;those<br/>special&#160;ephemeris types.<br/>
+Details&#160;on&#160;parameters&#160;can&#160;be&#160;found&#160;in&#160;the<a href="https://ssd.jpl.nasa.gov/horizons/manual.html">&#160;Horizons documentation</a>&#160;and a<a href="https://ssd.jpl.nasa.gov/ftp/ssd/horizons_batch.txt">lso the&#160;Horizons batch example</a>&#160;text file. In the tables below,<br/>direct links to the appropriate section of the Horizons documentation for specific&#160;parameters is given in the “Manual” column when<br/>available.<br/>
+<b>Common Parameters</b><br/>
+Parameter<br/>
+Default<br/>
+Allowable&#160;Values/Format<br/>
+Description<br/>
+Manual<br/>
+specify&#160;output format:&#160; json &#160;for JSON or&#160; text &#160;for<br/>
+format<br/>
+ json <br/>
+ json ,&#160; text <br/>
+ <br/>
+plain-text<br/>
+COMMAND<br/>
+<i>none</i><br/>
+see&#160;<a href="">details below</a><br/>
+target search, selection, or enter user-input object mode<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#select">link</a><br/>
+OBJ_DATA<br/>
+ YES <br/>
+ NO ,&#160; YES <br/>
+toggles&#160;return&#160;of&#160;object&#160;summary&#160;data<br/>
+ <br/>
+MAKE_EPHEM<br/>
+ YES <br/>
+ NO ,&#160; YES <br/>
+toggles&#160;generation&#160;of&#160;ephemeris,&#160;if&#160;possible<br/>
+ <br/>
+ OBSERVER ,&#160; VECTORS ,&#160; ELEMENTS ,<br/>
+EPHEM_TYPE<br/>
+ OBSERVER <br/>
+selects type of&#160;ephemeris to&#160;generate (<a href="">see&#160;details below</a>)<br/>
+ <br/>
+ SPK ,&#160; APPROACH <br/>
+optional; used only in&#160;the event of highly unlikely<br/>
+EMAIL_ADDR<br/>
+<i>none</i><br/>
+any&#160;valid&#160;email&#160;address<br/>
+ <br/>
+problems needing follow-up<br/>
+Note:&#160;No output will be generated unless&#160; MAKE_EPHEM='YES' &#160;and/or&#160; OBJ_DATA='YES' , unless&#160;a database-search&#160;only.<br/>
+<b>Ephemeris-Specific Parameters</b><br/>
+In&#160;the&#160;following&#160;table,&#160;the&#160;column&#160;heading&#160; O &#160;(OBSERVER),&#160; V &#160;(VECTORS), and&#160; E &#160;(ELEMENTS) indicate the ephemeris type for<br/>which the parameter&#160;is available.<br/>
+Symbol&#160; x &#160;means the parameter is fully supported for the indicated ephemeris type. Symbol&#160; - &#160;means the parameter is partially<br/>supported and no&#160;symbol&#160;(blank)&#160;means the parameter&#160;is not supported.<br/>
+Allowable<br/>
+Parameter<br/>
+O<br/>
+V<br/>
+E<br/>
+Default<br/>
+Description<br/>
+Manual<br/>
+Values/Format<br/>
+<a href="">see&#160;details</a><br/>
+CENTER<br/>
+x<br/>
+x<br/>
+x<br/>
+ Geocentric <br/>
+selects coordinate origin (observing site)<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#center">link</a><br/>
+<a href="">below</a><br/>
+ ECLIPTIC ,<br/>
+Ephemeris&#160;reference&#160;plane&#160;(can&#160;be&#160;abbreviated<br/>
+REF_PLANE<br/>
+ <br/>
+x<br/>
+x<br/>
+ ECLIPTIC <br/>
+ FRAME ,&#160; BODY<br/>
+ <br/>
+ E ,&#160; F ,&#160; B , respectively) )<br/>
+EQUATOR <br/>
+ GEODETIC ,<br/>
+COORD_TYPE<br/>
+x<br/>
+x<br/>
+x<br/>
+ GEODETIC <br/>
+selects type of&#160;user&#160;coordinates<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#center">link</a><br/>
+ CYLINDRICAL <br/>
+SITE_COORD<br/>
+x<br/>
+x<br/>
+x<br/>
+ '0,0,0' <br/>
+ <br/>
+set coordinate triplets for&#160; COORD_TYPE <br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#center">link</a><br/>
+START_TIME<br/>
+x<br/>
+x<br/>
+x<br/>
+<i>none</i><br/>
+ <br/>
+specifies ephemeris start time<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#time">link</a><br/>
+STOP_TIME<br/>
+x<br/>
+x<br/>
+x<br/>
+<i>none</i><br/>
+ <br/>
+specifies ephemeris stop time<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#time">link</a><br/>
+ephemeris output print step. Can be fixed time,<br/>
+<a href="">see&#160;details</a><br/>
+uniform interval&#160;(unitless),&#160;calendar&#160;steps,&#160;or<br/>
+STEP_SIZE<br/>
+x<br/>
+x<br/>
+x<br/>
+ '60 min' <br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#time">link</a><br/>
+<a href="">below</a><br/>
+plane-of-sky angular&#160;change steps.&#160;See also<br/>
+ TLIST &#160;alternative.<br/>
+ MINUTES ,<br/>
+TIME_DIGITS<br/>
+x<br/>
+x<br/>
+x<br/>
+ MINUTES <br/>
+ SECONDS ,<br/>
+controls&#160;output&#160;time&#160;precision<br/>
+ <br/>
+ FRACSEC <br/>
+override&#160;default&#160;to&#160;specify&#160;input&#160;&amp;&#160;output<br/>
+varies&#160;with<br/>
+ UT ,&#160; TT ,<br/>
+TIME_TYPE<br/>
+x<br/>
+x<br/>
+x<br/>
+timescale. observer tables:&#160; UT &#160;or TT; vector<br/>
+ <br/>
+ EPHEM_TYPE <br/>
+ TDB <br/>
+tables:&#160; TDB &#160;or UT; element tables:&#160; TDB &#160;only<br/>
+TIME_ZONE<br/>
+x<br/>
+ <br/>
+ <br/>
+ '+00:00' <br/>
+ <br/>
+specifies local&#160;civil&#160;time offset relative to&#160;UT<br/>
+ <br/>
+list of up to 10,000 of discrete output times.<br/>
+<a href="">see&#160;details</a><br/>
+TLIST<br/>
+x<br/>
+x<br/>
+x<br/>
+<i>none</i><br/>
+Either&#160;Julian&#160;Day&#160;numbers&#160;(JD),&#160;Modified&#160;JD<br/>
+ <br/>
+<a href="">below</a><br/>
+(MJD), or calendar dates<br/>
+overrride&#160;default&#160;assumptions,&#160;specify&#160;type&#160;of<br/>
+ JD ,&#160; MJD ,<br/>
+TLIST_TYPE<br/>
+x<br/>
+x<br/>
+x<br/>
+<i>none</i><br/>
+time in TLIST. Be sure to include if using JD&#160;or<br/>
+ <br/>
+ CAL <br/>
+MJD&#160;for ancient dates.<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#output">link</a>,<br/>
+QUANTITIES<br/>
+x<br/>
+ <br/>
+ <br/>
+ 'A' <br/>
+ <br/>
+list of desired output quantity option&#160;codes<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#obsquan">link</a><br/>
+specifies reference frame for&#160;any&#160;geometric&#160;and<br/>
+REF_SYSTEM<br/>
+x<br/>
+x<br/>
+x<br/>
+ ICRF <br/>
+ ICRF ,&#160; B1950 <br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#frames">link</a><br/>
+astrometric&#160;quantities<br/>
+selects output units for&#160;distance and time;&#160;for<br/>
+ KM-S ,&#160; AU-D ,<br/>
+OUT_UNITS<br/>
+ <br/>
+x<br/>
+x<br/>
+ KM-S <br/>
+example,&#160; AU-D &#160;selects astronomical units (au)<br/>
+ <br/>
+ KM-D <br/>
+and&#160;days&#160;(d)<br/>
+<a href="">see&#160;details</a><br/>
+VEC_TABLE<br/>
+ <br/>
+x<br/>
+ <br/>
+ 3 <br/>
+selects vector&#160;table format<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#output">link</a><br/>
+<a href="">below</a><br/>
+selects level&#160;of&#160;correction to&#160;output vectors;<br/>
+ NONE ,&#160; LT ,<br/>
+ NONE &#160;(geometric&#160;states),&#160; LT &#160;(astrometric<br/>
+VEC_CORR<br/>
+ <br/>
+x<br/>
+ <br/>
+ NONE <br/>
+ <br/>
+ LT+S <br/>
+light-time corrected states) or&#160; LT+S &#160;(astrometric<br/>states&#160;corrected&#160;for&#160;stellar&#160;aberration)<br/>
+selects type of&#160;date output;&#160; CAL &#160;for calendar<br/>
+ CAL ,&#160; JD ,<br/>
+CAL_FORMAT<br/>
+x<br/>
+ <br/>
+ <br/>
+ CAL <br/>
+date/time,&#160; JD &#160;for Julian Day numbers, or&#160; BOTH <br/>
+ <br/>
+ BOTH <br/>
+for&#160;both&#160;CAL&#160;and&#160;JD<br/>
+Selects Gregorian-only calendar input/output, or<br/>
+ MIXED ,<br/>
+CAL_TYPE<br/>
+x<br/>
+x<br/>
+x<br/>
+ MIXED <br/>
+mixed Julian/Gregorian, switching on 1582-Oct-5.<br/>
+ <br/>
+ GREGORIAN <br/>
+Recognized&#160;for&#160;close-approach&#160;tables&#160;also.<br/>
+ANG_FORMAT<br/>
+x<br/>
+ <br/>
+ <br/>
+ HMS <br/>
+ HMS ,&#160; DEG <br/>
+selects RA/DEC&#160;output format<br/>
+ <br/>
+ AIRLESS ,<br/>
+toggles&#160;refraction&#160;correction&#160;of&#160;apparent<br/>
+APPARENT<br/>
+x<br/>
+ <br/>
+ <br/>
+ AIRLESS <br/>
+ <br/>
+ REFRACTED <br/>
+coordinates&#160;(Earth&#160;topocentric&#160;only)<br/>
+RANGE_UNITS<br/>
+x<br/>
+ <br/>
+ <br/>
+ AU <br/>
+ AU ,&#160; KM <br/>
+sets the units on range quantities output<br/>
+ <br/>
+turns off output of delta-dot and rdot<br/>
+SUPPRESS_RANGE_RATE<br/>
+x<br/>
+ <br/>
+ <br/>
+ NO <br/>
+ NO ,&#160; YES <br/>
+ <br/>
+(range-rate)<br/>
+integer<br/>
+skip output when object elevation is less than<br/>
+ELEV_CUT<br/>
+x<br/>
+ <br/>
+ <br/>
+ '-90' <br/>
+ <br/>
+[-90:90]<br/>
+specified<br/>
+toggles&#160;skipping&#160;of&#160;print-out&#160;when&#160;daylight&#160;at<br/>
+SKIP_DAYLT<br/>
+x<br/>
+ <br/>
+ <br/>
+ NO <br/>
+ NO ,&#160; YES <br/>
+ <br/>
+ CENTER <br/>
+sets bounds on output based on solar&#160;elongation<br/>
+SOLAR_ELONG<br/>
+x<br/>
+ <br/>
+ <br/>
+ '0,180' <br/>
+ <br/>
+ <br/>
+angle<br/>
+select airmass cutoff;&#160;output is skipped if&#160;relative<br/>optical airmass&#160;is&#160;greater than&#160;the single decimal<br/>
+AIRMASS<br/>
+x<br/>
+ <br/>
+ <br/>
+ 38.0 <br/>
+ <br/>
+value&#160;specified.&#160;Note&#160;than&#160; 1.0 =zenith,&#160; 38.0 &#160;~=<br/>
+ <br/>
+local-horizon. If value is&#160;set &gt;=&#160; 38.0 , this&#160;turns<br/>OFF the filtering effect.<br/>
+skip output when local&#160;hour&#160;angle exceeds a<br/>specified value in the domain&#160; 0.0 &#160;&lt; X&#160;&lt;&#160; 12.0 .<br/>To&#160;restore&#160;output&#160;(turn&#160;OFF&#160;the&#160;cut-off&#160;behavior),<br/>
+LHA_CUTOFF<br/>
+x<br/>
+ <br/>
+ <br/>
+ 0.0 <br/>
+ <br/>
+set X&#160;to&#160; 0.0 &#160;or&#160; 12.0 . For example, a cut-off<br/>
+ <br/>
+value&#160;of&#160; 1.5 &#160;will output table data&#160;only when the<br/>LHA is&#160;within&#160;+/- 1.5 angular hours&#160;of zenith<br/>meridian.<br/>
+skip output when the total&#160;plane-of-sky&#160;angular<br/>
+ANG_RATE_CUTOFF<br/>
+x<br/>
+ <br/>
+ <br/>
+ 0.0 <br/>
+ <br/>
+ <br/>
+rate exceeds&#160;a specified value<br/>
+toggles&#160;additional&#160;output&#160;digits&#160;on&#160;some&#160;angles<br/>
+EXTRA_PREC<br/>
+x<br/>
+ <br/>
+ <br/>
+ NO <br/>
+ NO ,&#160; YES <br/>
+ <br/>
+such as RA/DEC<br/>
+toggles&#160;output&#160;of&#160;table&#160;in&#160;comma-separated<br/>
+CSV_FORMAT<br/>
+x<br/>
+x<br/>
+x<br/>
+ NO <br/>
+ NO ,&#160; YES <br/>
+ <br/>
+value&#160;format<br/>
+VEC_LABELS<br/>
+ <br/>
+x<br/>
+ <br/>
+ YES <br/>
+ NO ,&#160; YES <br/>
+toggles&#160;labeling&#160;of&#160;each&#160;vector&#160;component<br/>
+ <br/>
+toggles&#160;output&#160;of&#160;the&#160;time-varying&#160;delta-T<br/>
+VEC_DELTA_T<br/>
+ <br/>
+x<br/>
+ <br/>
+ NO <br/>
+ NO ,&#160; YES <br/>
+ <br/>
+difference TDB-UT<br/>
+ELM_LABELS<br/>
+ <br/>
+ <br/>
+x<br/>
+ YES <br/>
+ NO ,&#160; YES <br/>
+toggles&#160;labeling&#160;of&#160;each&#160;osculating&#160;element<br/>
+ <br/>
+ ABSOLUTE ,<br/>
+determines what type of periapsis time (Tp) is<br/>
+TP_TYPE<br/>
+ <br/>
+ <br/>
+x<br/>
+ ABSOLUTE <br/>
+ <br/>
+ RELATIVE <br/>
+returned<br/>
+R_T_S_ONLY<br/>
+x<br/>
+ <br/>
+ <br/>
+ NO <br/>
+ NO ,&#160; YES <br/>
+toggles&#160;output&#160;only&#160;at&#160;target&#160;rise/transit/set<br/>
+ <br/>
+<b>SPK File Parameters (</b> EPHEM_TYPE=SPK <b>)</b><br/>
+The&#160;following&#160;parameters&#160;are&#160;available&#160;when&#160;EPHEM_TYPE is&#160; SPK . Binary SPK file&#160;generation&#160;is&#160;restricted to small-bodies&#160;only<br/>(asteroids&#160;and comets). See&#160;the<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#spk">&#160;Horizons documentation</a>&#160;for details. See also the section below for deta<a href="">ils on&#160;SPK&#160;file output</a>&#160;format.<br/>
+Parameter<br/>
+Default<br/>
+Description<br/>
+Manual<br/>
+START_TIME<br/>
+<i>none</i><br/>
+specifies ephemeris start time<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#time">link</a><br/>
+STOP_TIME<br/>
+<i>none</i><br/>
+specifies ephemeris stop time<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#time">link</a><br/>
+<b>Close-Approach Table Parameters (</b> EPHEM_TYPE=APPROACH <b>)</b><br/>
+The&#160;following&#160;parameters&#160;are&#160;available&#160;when&#160;EPHEM_TYPE is&#160; APPROACH . See&#160;the<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#ca">&#160;Horizons documentation&#160;on c</a>lose-approach tables<br/>for&#160;details.<br/>
+Allowable<br/>
+Parameter<br/>
+Default<br/>
+Units<br/>
+Description<br/>
+Values/Format<br/>
+Extended&#160;close-approach&#160;tables&#160;include&#160;Julian&#160;Day&#160;numbers.&#160;B-plane<br/>
+ STANDARD ,<br/>
+CA_TABLE_TYPE<br/>
+ STANDARD <br/>
+ <br/>
+information&#160;is also output if there is a covariance for the object stored<br/>
+ EXTENDED <br/>
+in&#160;the system database or specified with user-input elements.<br/>
+maximum computed 3-sigma uncertainty in time of Earth<br/>
+TCA3SG_LIMIT<br/>
+ 14400 <br/>
+minutes<br/>
+ <br/>
+close-approach<br/>
+sets the spherical&#160;radius within which the nominal&#160;target must pass one<br/>
+CALIM_SB<br/>
+ 0.05 <br/>
+au<br/>
+ <br/>
+of the perturbing&#160;asteroids&#160;(Ceres, Pallas, Vesta, etc.) to activate<br/>close-approach&#160;flagging<br/>
+ .1, .1, .1,<br/>
+sets the spherical&#160;radius within which the nominal&#160;target must pass one<br/>
+.1, 1.0, 1.0,<br/>
+of the planets&#160;(or the Moon) to activate close-approach&#160;flagging, in&#160;the<br/>
+CALIM_PL<br/>
+au<br/>
+ <br/>
+1.0, 1.0, .1,<br/>
+order: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune,<br/>
+.003 <br/>
+Pluto, and Moon<br/>
+<b>User-specified Heliocentric Ecliptic Osculating Elements</b><br/>
+The&#160;following&#160;parameters&#160;are&#160;used to define&#160;an&#160;arbitrary small-body target for numerical integration. See&#160;the<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#user">&#160;Horizons documentation<br/></a>for&#160;a&#160;complete&#160;description&#160;of&#160;these&#160;parameters.<br/>
+Heliocentric&#160;ecliptic&#160;osculating elements may be specified with [ TP ,&#160; QR ], [ MA ,&#160; A ], or [ MA ,&#160; N ]. If elements&#160;are&#160;not specified with<br/>[ TP ,&#160; QR ], they will be&#160;computed from the&#160;other possible&#160;input pairs&#160;because&#160;Horizons&#160;always&#160;internally uses&#160;[ TP ,&#160; QR ].<br/>
+Note that other obliquities might be implicit in ecliptic&#160;elements from non-JPL sources. For accurate propagation, users should verify<br/>which obliquity&#160;is relevant,&#160;and may&#160;have to&#160;convert elements obtained from a&#160;different source before input here.<br/>
+Parameter<br/>
+Units<br/>
+Description<br/>
+OBJECT<br/>
+ <br/>
+Name of user input object<br/>
+EPOCH<br/>
+ <br/>
+Julian&#160;Day number (JDTDB) of osculating elements<br/>
+Reference&#160;ecliptic&#160;frame&#160;of&#160;elements:&#160; J2000 &#160;or&#160; B1950 .&#160; J2000 &#160;assumes the IAU76/80 J2000 obliquity of 84381.448<br/>
+ECLIP<br/>
+ <br/>
+arcsec&#160;relative&#160;to&#160;the&#160;ICRF&#160;reference&#160;frame.&#160; B1950 &#160;assumes FK4/B1950 obliquity of 84404.8362512&#160;arcsec.<br/>
+EC<br/>
+ <br/>
+Eccentricity<br/>
+QR<br/>
+au<br/>
+Perihelion&#160;distance&#160;(see&#160;note&#160;above)<br/>
+TP<br/>
+ <br/>
+Perihelion&#160;Julian&#160;Day&#160;number&#160;(see&#160;note&#160;above)<br/>
+OM<br/>
+deg<br/>
+Longitude&#160;of&#160;ascending&#160;node&#160;wrt&#160;ecliptic<br/>
+W<br/>
+deg<br/>
+Argument of perihelion&#160;wrt ecliptic<br/>
+IN<br/>
+deg<br/>
+Inclination&#160;wrt&#160;ecliptic<br/>
+MA<br/>
+deg<br/>
+Mean&#160;anomaly (see note above)<br/>
+A<br/>
+au<br/>
+Semi-major axis (see note above)<br/>
+N<br/>
+deg/d<br/>
+Mean&#160;motion&#160;(see note above)<br/>
+<b>Optional Small-body Parameters</b><br/>
+Object<br/>
+Parameter<br/>
+Default<br/>
+Units<br/>
+Description<br/>
+Type<br/>
+RAD<br/>
+ <br/>
+ <br/>
+km<br/>
+Object radius<br/>
+H<br/>
+asteroid<br/>
+ <br/>
+ <br/>
+Absolute magnitude parameter<br/>
+G<br/>
+asteroid<br/>
+ <br/>
+ <br/>
+Magnitude slope parameter; can&#160;be &lt; 0<br/>
+M1<br/>
+comet<br/>
+ <br/>
+ <br/>
+Total&#160;absolute&#160;magnitude<br/>
+M2<br/>
+comet<br/>
+ <br/>
+ <br/>
+Nuclear absolute magnitude<br/>
+K1<br/>
+comet<br/>
+ <br/>
+ <br/>
+Total&#160;magnitude&#160;scaling&#160;factor<br/>
+K2<br/>
+comet<br/>
+ <br/>
+ <br/>
+Nuclear magnitude scaling factor<br/>
+PHCOF<br/>
+comet<br/>
+ <br/>
+ <br/>
+Phase coefficient for&#160; K2 =5<br/>
+A1<br/>
+ <br/>
+ <br/>
+au/d^2<br/>
+Radial non-gravitational acceleration<br/>
+A2<br/>
+ <br/>
+ <br/>
+au/d^2<br/>
+Transverse&#160;non-gravitational&#160;acceleration<br/>
+A3<br/>
+ <br/>
+ <br/>
+au/d^2<br/>
+Normal non-gravitational acceleration<br/>
+R0<br/>
+ <br/>
+2.808<br/>
+au<br/>
+Non-grav. model constant, normalizing distance<br/>
+ALN<br/>
+ <br/>
+0.1112620426<br/>
+ <br/>
+Non-grav. model constant, normalizing factor<br/>
+NM<br/>
+ <br/>
+2.15<br/>
+ <br/>
+Non-grav. model constant, exponent m<br/>
+NN<br/>
+ <br/>
+5.093<br/>
+ <br/>
+Non-grav. model constant, exponent n<br/>
+NK<br/>
+ <br/>
+4.6142<br/>
+ <br/>
+Non-grav. model constant, exponent k<br/>
+DT<br/>
+ <br/>
+ <br/>
+d<br/>
+Non-grav. lag/delay parameter (comets)<br/>
+AMRAT<br/>
+ <br/>
+ <br/>
+m^2/kg<br/>
+Solar pressure model, area/mass ratio<br/>
+SRC<br/>
+ <br/>
+ <br/>
+ <br/>
+Square-root covariance from JPL (upper-triangular, vector-stored)<br/>
+Estimated&#160;non-grav&#160;parameter&#160;names&#160; A1 ,&#160; A2 ,&#160; A3 ,&#160; DT &#160;in order matching SRC. If no<br/>
+EST<br/>
+ <br/>
+ <br/>
+ <br/>
+estimated non-gravs in the solution’s SRC,&#160; EST=' ' &#160;or unspecified.<br/>
+<b>Description of Selected Parameters</b><br/>
+ EPHEM_TYPE <b>&#160;Parameter</b><br/>
+There&#160;are&#160;five&#160;ephemeris&#160;types&#160;available. These&#160;are&#160;selected using&#160;the&#160; EPHEM_TYPE &#160;parameter. The table below shows the<br/>
+ EPHEM_TYPE &#160;values and corresponding ephemeris type.<br/>
+EPHEM_TYPE<br/>
+Description<br/>
+Typical&#160;Usage<br/>
+Observables (RA/DEC,&#160;Az/El,&#160;physical&#160;aspect,&#160;angles,<br/>
+OBSERVER<br/>
+telescope&#160;observations<br/>
+uncertainties)<br/>
+ELEMENTS<br/>
+Osculating orbital&#160;elements<br/>
+instantaneous geometry over time, celestial mechanics<br/>
+VECTORS<br/>
+Cartesian&#160;state vectors&#160;and uncertainties<br/>
+dynamical studies, propagation, programming<br/>
+APPROACH<br/>
+Close approaches&#160;to planets&#160;(and 16 largest asteroids)<br/>
+encounter planning &amp; hazards<br/>
+time-continuous states, navigation, mission-planning, plug-in for<br/>
+SPK<br/>
+SPK&#160;binary trajectory files (asteroids and comets only)<br/>
+visualization&#160;tools<br/>
+ COMMAND <b>&#160;Parameter</b><br/>
+The&#160; COMMAND &#160;parameter looks up the target body, selecting it if a&#160;unique match is found, or returning a&#160;list of matches if there are<br/>multiple matches. It is also used to enter user-defined objects.&#160;The&#160;assigned value&#160;for&#160; COMMAND &#160;should be delimited with single<br/>quotes ( ' ) and some&#160;symbols&#160;within&#160;the&#160;quotes&#160;may need to be&#160;encoded to be&#160;successfully passed as&#160;a URL, as&#160;described below.<br/>
+To&#160;specify&#160;a&#160;major-body&#160;(a&#160;planet,&#160;natural-satellite,&#160;spacecraft,&#160;or&#160;special&#160;pre-computed&#160;cases),&#160;specify&#160;the&#160;unique&#160;Horizons&#160;ID<br/>associated&#160;with&#160;that&#160;body.&#160;For&#160;example,&#160; COMMAND='499' &#160;selects the planet Mars while&#160; COMMAND='5' &#160;selects the Jupiter system<br/>barycenter.&#160; COMMAND='MB' &#160;will return a&#160;list of current major-bodies and their ID&#160;codes.<br/>
+For small-bodies (asteroids and comets), a&#160;search syntax with numerous parameter keywords separated by semi-colons can be used<br/>to&#160;find&#160;objects&#160;with&#160;certain&#160;combinations&#160;of&#160;properties.&#160;For&#160;discussion&#160;of&#160;small-body&#160;look-up&#160;searching,&#160;see<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#search">&#160;Horizons documentation</a>.<br/>
+When&#160;you&#160;already&#160;know&#160;what&#160;you&#160;are&#160;looking&#160;for,&#160;numbered&#160;asteroids&#160;can&#160;be&#160;selected&#160;with&#160;the&#160;IAU&#160;number&#160;followed&#160;by&#160;a&#160;semicolon<br/>( ; ). For example,&#160; COMMAND='1;' &#160;selects the small-body “1 Ceres”. If the semicolon is not specified,&#160; COMMAND='1' , this&#160;will instead<br/>select the Mercury&#160;barycenter.&#160;The semicolon syntax resolves numbering ambiguities between major&#160;bodies and small-bodies.<br/>
+Small-body designations, such as ‘1999&#160;AN10’ can be specified using the DES keyword&#160; COMMAND='DES=1999 AN10;' .<br/>
+SPK&#160;IDs, if known, are considered a&#160;type of designation. For example,&#160; COMMAND='99942;' &#160;(IAU number) and<br/>
+ COMMAND='DES=2099942;' &#160;(SPK&#160;ID), or&#160; COMMAND='Apophis;' &#160;(name) all select the object Apophis, though the numeric&#160;forms are<br/>
+guaranteed to&#160;be unique matches,&#160;while a&#160;name search may not be.<br/>
+To&#160;input&#160;an&#160;arbitrary&#160;target&#160;for&#160;numerical&#160;integration,<a href="">&#160;heliocentric&#160;ecliptic&#160;small-body osculating elements</a>&#160;can be specified by users<br/>when&#160; COMMAND=';' <a href="">.&#160;TLEs</a>&#160;(two-line elements) may be input for Earth-orbiting objects by setting&#160; COMMAND='TLE' .<br/>
+IMPORTANT:&#160;API&#160;calls&#160;must&#160;encode&#160;semicolons&#160;as&#160; %3B &#160;in the URL since the symbol usually cannot be directly sent without<br/>premature interpretation by the local operating system or&#160;software.&#160;Implementation of&#160;the above examples in a&#160;URL&#160;would be<br/>
+ COMMAND='1%3B' ,&#160; COMMAND='DES=1999%20AN10%3B' ,&#160; COMMAND='Apophis%3B' &#160;and&#160; COMMAND='%3B' , for example.<br/>
+Plea<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#select">se see the&#160;Horizons documentation&#160;f</a>or more details and examples of object selection, including specification of surface targets.<br/>
+ CENTER <b>&#160;Parameter</b><br/>
+This&#160;setting&#160;can&#160;be&#160;the&#160;observing&#160;site&#160;name, its&#160;unique&#160;IAU&#160;site&#160;code, the&#160;string&#160;‘coord’ (which&#160;tells&#160;the&#160;system to use&#160;coordinate<br/>information&#160;stored&#160;in&#160;parameters&#160; SITE_COORD &#160;and&#160; COORD_TYPE ) or the&#160;string&#160;‘geo’ (meaning&#160;geocenter or body center).<br/>
+Plea<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#center">se see the&#160;Horizons documentation&#160;f</a>or more details and examples.<br/>
+ STEP_SIZE <b>&#160;Parameter</b><br/>
+This&#160;setting&#160;specifies&#160;table&#160;output print times&#160;using&#160;the&#160;form ‘integer {units} {mode}’.<br/>
+{units}<br/>
+Minimum&#160;Abbreviation<br/>
+Description<br/>
+Example<br/>
+days<br/>
+d<br/>
+fixed interval<br/>
+ STEP_SIZE='1d' <br/>
+hours<br/>
+h<br/>
+fixed interval<br/>
+ STEP_SIZE='3%20h' &#160;(w/URL-encoded space)<br/>
+minutes<br/>
+m<br/>
+fixed interval<br/>
+ STEP_SIZE='10m' <br/>
+years<br/>
+y<br/>
+calendar&#160;stepping<br/>
+ STEP_SIZE='1 year' <br/>
+months<br/>
+mo<br/>
+calendar&#160;stepping<br/>
+ STEP_SIZE='1 mo' <br/>
+ <br/>
+ <br/>
+unitless fixed intervals<br/>
+ STEP_SIZE='86400' &#160;(1 second output given 1 day between start/stop)<br/>
+Calendar stepping<br/>
+If&#160;calendar-stepping&#160;units&#160;of&#160;years&#160;or&#160;months&#160;are&#160;specified,&#160;output&#160;steps&#160;will&#160;follow&#160;the&#160;calendar&#160;based&#160;on&#160;the&#160;starting&#160;date.&#160;For<br/>example,&#160;if&#160;the&#160;start&#160;is&#160;2008-Feb-29,&#160;and&#160;output&#160;is&#160;requested&#160;at&#160;“1&#160;year”&#160;steps,&#160;output&#160;will&#160;be&#160;returned&#160;only&#160;for&#160;Feb&#160;29&#160;calendar&#160;days<br/>in&#160;those leap years having 29 days in&#160;February.<br/>
+If&#160;output&#160;is&#160;requested&#160;at&#160;“1&#160;month”&#160;intervals,&#160;output&#160;will&#160;occur&#160;for&#160;every&#160;successive&#160;month&#160;on&#160;the&#160;29th&#160;of&#160;that&#160;month.&#160;If&#160;a&#160;start&#160;date&#160;on<br/>the 31st is requested, output will only occur for months having 31 days.<br/>
+Unitless&#160;output&#160;stepping<br/>
+If&#160;only&#160;the&#160;integer&#160;component&#160;is&#160;given&#160;in&#160; STEP_SIZE , the&#160;interval between&#160;specified&#160; START_TIME &#160;and&#160; STOP_TIME &#160;is divided into that<br/>many evenly spaced output steps. For example, if start and stop times are 1 hour (3600 seconds) apart, requesting a unitless output<br/>step&#160;of&#160;‘3600’&#160;will&#160;produce&#160;output&#160;every&#160;second;&#160;‘240’&#160;will&#160;output&#160;every&#160;15&#160;seconds&#160;(3600/15&#160;=&#160;240&#160;intervals).<br/>
+Unitless&#160; STEP_SIZE &#160;is the only way to obtain output with less than 1 minute spacing, while Horizons output steps must be greater<br/>than 0.5 seconds.<br/>
+For example, given a&#160;two-minute span between start/stop (120 seconds), specifying a&#160;unitless step-size of 240 would produce output<br/>at&#160;0.5&#160;second&#160;intervals,&#160;the&#160;smallest&#160;output&#160;resolution.&#160;Only&#160;short&#160;periods&#160;of&#160;time&#160;can&#160;be&#160;covered&#160;in&#160;a&#160;single&#160;ephemeris&#160;when&#160;such&#160;fine<br/>output resolution&#160;is&#160;specified.<br/>
+Rise-Transit-Set&#160;event&#160;stepping<br/>
+When&#160; EPHEM_TYPE= 'OBS' &#160;and&#160; CENTER &#160;is a&#160;topocentric&#160;location, the optional {mode} setting can be used to toggle output at rise-<br/>transit-set events only (within integer &lt;= 9&#160;min resolution), where rise and set are relative to one of three reference planes while<br/>considering&#160; ELEV_CUT &#160;angle setting:<br/>
+{mode}<br/>
+Rise-Transit-Set&#160;aberrations&#160;relative&#160;to&#160;reference&#160;plane<br/>
+Example<br/>
+TVH<br/>
+True&#160;visual&#160;horizon&#160;(include&#160;horizon&#160;dip&#160;and&#160;refraction)<br/>
+ STEP_SIZE='1m TVH' &#160;(RTS with +/-&#160;1 minute resolution)<br/>
+GEO<br/>
+Geometric&#160;horizon&#160;(include&#160;refraction)<br/>
+ STEP_SIZE='5m GEO' &#160;(RTS with +/-&#160;5 minute resolution)<br/>
+RAD<br/>
+Radar&#160;horizon (geometric&#160;horizon,&#160;NO refraction)<br/>
+ STEP_SIZE='1m RAD' &#160;(RTS with +/-1 minute resolution)<br/>
+‘Geometric&#160;horizon’&#160;refers&#160;to&#160;the&#160;horizon&#160;defined&#160;by&#160;the&#160;plane&#160;perpendicular&#160;to&#160;the&#160;local&#160;zenith&#160;(modified&#160;by&#160; ELEV_CUT ).<br/>
+Time-varying&#160;output&#160;(angular&#160;stepping)<br/>
+This&#160;mode&#160;turns&#160;on&#160;time-varying&#160;output, requesting&#160;approximate&#160;angular motion&#160;criteria for output instead of time-based stepping.<br/>Angular range&#160;can&#160;be&#160;60 to 3600 (arcsec).<br/>
+{mode}<br/>
+Description<br/>
+Example<br/>
+Output after&#160;specified angular&#160;change in plane-of-sky<br/>
+ STEP_SIZE='VAR 600' &#160;(output after moving 600 arcseconds in<br/>
+VAR<br/>
+position<br/>
+plane-of-sky)<br/>
+There&#160;is&#160;no {units} specification&#160;for angle-stepping&#160;(time-varying) mode, it is&#160;implicitly arcseconds.<br/>
+ TLIST <b>&#160;Parameter</b><br/>
+The&#160;Horizons&#160; TLIST &#160;parameter allows specification of up to 10,000 discrete output times, though URL length limits may impose<br/>smaller&#160;limits depending on local&#160;software.&#160;When using TLIST,&#160;do&#160;not use any&#160;of&#160;the other&#160;time-span parameters:&#160; START_TIME ,<br/>
+ STOP_TIME , or&#160; STEP_SIZE , but do consider using&#160; TLIST_TYPE &#160;and&#160; TIME_TYPE &#160;to ensure your&#160;input is interpreted as intended.<br/>
+ TLIST &#160;values may be specified as individually quote-wrapped Julian Day numbers (JD), Modified Julian Day numbers (MJD, where<br/>
+MJD&#160;= JD&#160;- 2400000.5, the number of days since 1858-Nov-17), or any calendar date form that Horizons recognizes, such as ‘2035-<br/>Jul-12&#160;10:17:19.373’. See system documentation for more examples of supported calendar date forms.<br/>
+For numeric&#160;TLIST values (JD&#160;or MJD&#160;input), the default behavior is to determine if the chronologically earliest value is JD&#160;or MJD<br/>based on its magnitude. A small value less than&#160; abs(625360.5) &#160;will be interpreted as toggling MJD&#160;input for the rest of the TLIST.&#160;If<br/>they are in fact ancient Julian Day Numbers (prior to around 3001 BC), set TLIST_TYPE= ‘JD’ to force&#160;interpretation&#160;of small numeric<br/>TLIST values&#160;as&#160;JD instead of MJD.<br/>
+TLIST can&#160;contain&#160;a mix&#160;of JD and calendar dates, but MJD values&#160;cannot be&#160;included in&#160;the&#160;mix&#160;without resulting&#160;in&#160;all other dates<br/>being assumed to be MJD.<br/>
+When&#160;more&#160;than&#160;one&#160;TLIST&#160;value&#160;needs&#160;to&#160;be&#160;specified,&#160;the&#160;list&#160;of&#160;individually&#160;quoted&#160;values&#160;is&#160;further&#160;delimited&#160;using&#160;either&#160;comma<br/>
+ (,) &#160;or space ` ` characters. An example specification for Horizons is<br/>
+ TLIST= '2455339.95748' '2455354.92142' '2033-Jan-17 12:10:25.1' <br/>
+However, to successfully transmit such a&#160;list via&#160;URL to the API, the spaces (or commas) and single quotes in the TLIST setting should<br/>be URL-encoded using&#160; %20 &#160;for spaces,&#160; %2C &#160;for commas, and&#160; %27 &#160;for single-quotes. The resulting URL for successful API&#160;handling<br/>of the&#160;example&#160;would look like&#160;this:<br/>
+ TLIST=%272455339.95748%27%20%272455354.92142%27%20%272033-Jan-17%2012:10:25.1%27 <br/>
+If&#160;URL-length&#160;limits&#160;are&#160;encountered&#160;when&#160;specifying&#160;long&#160;TLISTS,&#160;the<a href="https://ssd-api.jpl.nasa.gov/doc/horizons_file.html">&#160;file-based Horizons&#160;API</a>&#160;provides an alternate input method<br/>that supports long lists without the need for URL character-encoding.<br/>
+ VEC_TABLE <b>&#160;Parameter</b><br/>
+The&#160;VEC_TABLE&#160;parameter&#160;is&#160;used&#160;to&#160;set&#160;table&#160;format&#160;details&#160;when&#160; EPHEM_TYPE=VECTOR . Values&#160;assigned can&#160;be&#160;a single&#160;integer<br/>from 1 to 6, with&#160;optionally present modifier symbols&#160;allowed for numerically integrated small-bodies<br/>
+Quantities Output:<br/>
+Value<br/>
+Quantities&#160;Output<br/>
+1<br/>
+Position&#160;components&#160;{x,y,z}&#160;only&#160;(with&#160;optional&#160;statistical&#160;request&#160;codes)<br/>
+2<br/>
+State vector {x,y,z,Vx,Vy,Vz} (with optional statistical request codes)<br/>
+3<br/>
+State vector, 1-way light-time, range, and range-rate<br/>
+4<br/>
+Position,&#160;1-way&#160;light-time,&#160;range,&#160;and&#160;range-rate<br/>
+5<br/>
+Velocity&#160;components&#160;{vx,&#160;vy,&#160;vz}&#160;only<br/>
+6<br/>
+1-way light-time, range, and range-rate<br/>
+Modifier codes are accepted for values&#160; 1 &#160;and&#160; 2 &#160;to trigger output of formal statistical uncertainties when available (for&#160;asteroids<br/>and comets only).<br/>
+Available&#160;modifier&#160;codes&#160;for&#160;values&#160; 1 &#160;and&#160; 2 &#160;as shown in the following table.<br/>
+Code<br/>
+Description<br/>
+x<br/>
+XYZ&#160;uncertainties&#160;(ICRF&#160;or&#160;FK4/B1950)<br/>
+a<br/>
+ACN&#160;uncertainties&#160;(along-track,&#160;cross-track,&#160;normal)<br/>
+r<br/>
+RTN uncertainties (radial,&#160;transverse,&#160;normal)<br/>
+p<br/>
+POS uncertainties (plane-of-sky; radial, RA, and DEC components)<br/>
+Examples:<br/>
+ VEC_TABLE='1xa' &#160;returns position components along with their uncertainties, and with uncertainties in the ACN system also.<br/>
+ VEC_TABLE='2xarp' &#160;returns position and velocity, with uncertainties in all four coordinate systems.<br/>
+<b>TLEs (Two-Line Elements)</b><br/>
+Two-Line&#160;Elements&#160;(TLEs)&#160;may&#160;be&#160;input&#160;to&#160;define&#160;an&#160;artificial&#160;Earth-orbiting&#160;satellite.&#160;They&#160;are&#160;used&#160;only&#160;when&#160; COMMAND='TLE' &#160;(input<br/>object is&#160;the&#160;target), or if&#160; CENTER='@TLE' &#160;also (meaning the input object is the coordinate center).<br/>
+TLEs&#160;must be&#160;supplied in&#160;standard format with&#160;starting&#160;and ending&#160;quote&#160;marks&#160;enclosing&#160;the&#160;entire&#160;block. Name&#160;specification&#160;line(s)<br/>are&#160;optional.&#160;Up&#160;to&#160;600&#160;pairs&#160;(1200&#160;data&#160;lines)&#160;can&#160;be&#160;specified,&#160;but&#160;this&#160;limit&#160;is&#160;subject&#160;to&#160;change.<br/>
+Example&#160;assignment&#160;for&#160;object&#160;‘SC-1’:<br/>
+TLE = '<br/>SC-1<br/>1 87820U 11053A &#160; 11273.79990913 &#160;.00099611 &#160;00000-0 &#160;64461-3 0 &#160;9991<br/>2 87820 042.7843 189.7738 0014383 039.8647 002.5266 15.74868665 &#160; 196<br/>1 87820U 11053A &#160; 11273.86983630 -.00085102 +00000-0 -55758-3 0 &#160;9998<br/>2 87820 042.7804 189.3478 0014258 040.7498 038.5752 15.74826749000204'<br/>
+IMPORTANT:&#160;You&#160;must&#160;URI-encode&#160;such&#160;content&#160;because&#160;a&#160;new-line&#160;character&#160;cannot&#160;be&#160;directly&#160;input&#160;via&#160;URL.&#160;The&#160;above<br/>example&#160;would&#160;use&#160; %0A &#160;for the new-line (LF) character as shown below.<br/>
+TLE='SC-1%0A1 87820U 11053A &#160; 11273.79990913 &#160;.00099611 &#160;00000-0 &#160;64461-3 0 &#160;9991%0A2 87820 042.7843 189.7738 0014383 039.8647 002.5266 15.74868665 &#160; 196%0A1 87820U 11053A &#160; 11273.86983630 -.00085102 +00000-0 -55758-3 0 &#160;9998%0A2 87820 042.7804 189.3478 0014258 040.7498 038.5752 15.74826749000204'<br/>
+Although&#160;the&#160;above&#160;form may work on&#160;some&#160;systems&#160;with&#160;space&#160;characters&#160;contained within&#160;the&#160;quote&#160;characters&#160;( ' ), it is&#160;best<br/>practice to&#160;encode all space characters using&#160; %20 . The&#160;corresponding&#160;content with&#160;space-encoding&#160;would look like&#160;the&#160;following.<br/>
+TLE='SC-1%0A1%2087820U%2011053A%20%20%2011273.79990913%20%20.00099611%20%2000000-0%20%2064461-3%200%20%209991%0A2%2087820%20042.7843%20189.7738%200014383%20039.8647%20002.5266%2015.74868665%20%20%20196%0A1%2087820U%2011053A%20%20%2011273.86983630%20-.00085102%20+00000-0%20-55758-3%200%20%209998%0A2%2087820%20042.7804%20189.3478%200014258%20040.7498%20038.5752%2015.74826749000204'<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html#tles">See the&#160;Horizons documentation&#160;f</a>or more details about TLEs.<br/>
+<b>Data Output</b><br/>
+Please&#160;always check&#160;the JSON payload “signature” object for the API&#160;“version”.&#160;If&#160;the&#160;version&#160;does&#160;not&#160;match&#160;the&#160;version&#160;in&#160;this<br/>document (at the top),&#160;there is no guarantee that the format has not changed.<br/>
+Example&#160;&#34;signature&#34;&#160;object&#160;with&#160;&#34;version&#34;&#160;value&#160;&#34;1.0&#34;:&#160; &#34;signature&#34;:{&#34;version&#34;:&#34;1.0&#34;,&#34;source&#34;:&#34;NASA/JPL ... API&#34;} <br/>
+Successful query requests result in a&#160;data&#160;payload. The format of such a&#160;data&#160;payload is controlled by the&#160; format &#160;parameter.<br/>
+<b>Example&#160;</b> text <b>-format Output</b><br/>
+The&#160;first two lines&#160;are&#160;added by the&#160;API. It is&#160;important to note&#160;the&#160; API VERSION &#160;value when programmatically processing results to<br/>ensure the API&#160;version is what you expect.&#160;The number&#160;of&#160;blank lines following&#160; API SOURCE &#160;may vary but will be at least one. If you<br/>request&#160;the&#160;body&#160;information&#160;page&#160;( OBJ_DATA='YES' ), there&#160;will be&#160;an&#160;additional block of text output after the&#160;blank lines&#160;following<br/>
+ API SOURCE . The&#160;remainder of the&#160;output is&#160;formatted as&#160;provided by the&#160;Horizons&#160;system.<br/>
+API VERSION: 1.0<br/>API SOURCE: NASA/JPL Horizons API<br/>
+*******************************************************************************<br/>Ephemeris / WWW_USER Tue Sep &#160;6 22:51:14 2022 Pasadena, USA &#160; &#160; &#160; &#160;/ Horizons<br/>*******************************************************************************<br/>Target body name: Mars (499) &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{source: mar097}<br/>Center body name: Earth (399) &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; {source: mar097}<br/>Center-site name: GEOCENTRIC<br/>*******************************************************************************<br/>Start time &#160; &#160; &#160;: A.D. 1998-Jan-01 10:00:00.0000 UT<br/>Stop &#160;time &#160; &#160; &#160;: A.D. 1998-Jan-02 00:00:00.0000 UT<br/>Step-size &#160; &#160; &#160; : 60 minutes<br/>*******************************************************************************<br/>Target pole/equ : IAU_MARS &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{West-longitude positive}<br/>Target radii &#160; &#160;: 3396.19, 3396.19, 3376.2 km &#160; &#160; {Equator_a, b, pole_c}<br/>Center geodetic : 0.0, 0.0, -6378.137 &#160; &#160; &#160; &#160; &#160; &#160; {E-lon(deg),Lat(deg),Alt(km)}<br/>Center cylindric: 0.0, 0.0, 0.0 &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; {E-lon(deg),Dxy(km),Dz(km)}<br/>Center pole/equ : ITRF93 &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{East-longitude positive}<br/>Center radii &#160; &#160;: 6378.137, 6378.137, 6356.752 km {Equator_a, b, pole_c}<br/>Target primary &#160;: Sun<br/>Vis. interferer : MOON (R_eq= 1737.400) km &#160; &#160; &#160; &#160;{source: mar097}<br/>Rel. light bend : Sun, EARTH &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{source: mar097}<br/>Rel. lght bnd GM: 1.3271E+11, 3.9860E+05 km^3/s^2<br/>Atmos refraction: NO (AIRLESS)<br/>RA format &#160; &#160; &#160; : HMS<br/>Time format &#160; &#160; : CAL<br/>Calendar mode &#160; : Mixed Julian/Gregorian<br/>EOP file &#160; &#160; &#160; &#160;: eop.220904.p221128<br/>EOP coverage &#160; &#160;: DATA-BASED 1962-JAN-20 TO 2022-SEP-04. PREDICTS-&gt; 2022-NOV-27<br/>Units conversion: 1 au= 149597870.700 km, c= 299792.458 km/s, 1 day= 86400.0 s<br/>Table cut-offs 1: Elevation (-90.0deg=NO ),Airmass (&gt;38.000=NO), Daylight (NO )<br/>Table cut-offs 2: Solar elongation ( &#160;0.0,180.0=NO ),Local Hour Angle( 0.0=NO )<br/>Table cut-offs 3: RA/DEC angular rate ( &#160; &#160; 0.0=NO )<br/>*********************************************************************************************<br/>&#160;Date__(UT)__HR:MN &#160; &#160; R.A._____(ICRF)_____DEC &#160; &#160;APmag &#160; S-brt &#160; &#160; &#160; &#160; &#160; &#160; delta &#160; &#160; &#160;deldot<br/>*********************************************************************************************<br/>$$SOE<br/>&#160;1998-Jan-01 10:00 &#160; &#160; 20 55 41.20 -18 33 23.0 &#160; &#160;1.199 &#160; 4.107 &#160;2.13799045474771 &#160; 5.6049390<br/>&#160;1998-Jan-01 11:00 &#160; &#160; 20 55 49.17 -18 32 49.7 &#160; &#160;1.205 &#160; 4.112 &#160;2.13812533287512 &#160; 5.6044117<br/>&#160;1998-Jan-01 12:00 &#160; &#160; 20 55 57.13 -18 32 16.5 &#160; &#160;1.221 &#160; 4.128 &#160;2.13826019831403 &#160; 5.6038846<br/>&#160;1998-Jan-01 13:00 &#160; &#160; 20 56 05.09 -18 31 43.1 &#160; &#160;1.234 &#160; 4.141 &#160;2.13839505107206 &#160; 5.6033579<br/>&#160;1998-Jan-01 14:00 &#160; &#160; 20 56 13.05 -18 31 09.8 &#160; &#160;1.249 &#160; 4.156 &#160;2.13852989115697 &#160; 5.6028315<br/>&#160;1998-Jan-01 15:00 &#160; &#160; 20 56 21.01 -18 30 36.5 &#160; &#160;1.229 &#160; 4.136 &#160;2.13866471857652 &#160; 5.6023055<br/>&#160;1998-Jan-01 16:00 &#160; &#160; 20 56 28.97 -18 30 03.1 &#160; &#160;1.242 &#160; 4.149 &#160;2.13879953333835 &#160; 5.6017797<br/>&#160;1998-Jan-01 17:00 &#160; &#160; 20 56 36.93 -18 29 29.7 &#160; &#160;1.236 &#160; 4.143 &#160;2.13893433545018 &#160; 5.6012543<br/>&#160;1998-Jan-01 18:00 &#160; &#160; 20 56 44.89 -18 28 56.3 &#160; &#160;1.225 &#160; 4.132 &#160;2.13906912492008 &#160; 5.6007292<br/>&#160;1998-Jan-01 19:00 &#160; &#160; 20 56 52.85 -18 28 22.9 &#160; &#160;1.233 &#160; 4.139 &#160;2.13920390175678 &#160; 5.6002045<br/>&#160;1998-Jan-01 20:00 &#160; &#160; 20 57 00.81 -18 27 49.4 &#160; &#160;1.239 &#160; 4.146 &#160;2.13933866596968 &#160; 5.5996802<br/>&#160;1998-Jan-01 21:00 &#160; &#160; 20 57 08.76 -18 27 15.9 &#160; &#160;1.246 &#160; 4.153 &#160;2.13947341756857 &#160; 5.5991564<br/>&#160;1998-Jan-01 22:00 &#160; &#160; 20 57 16.72 -18 26 42.5 &#160; &#160;1.226 &#160; 4.133 &#160;2.13960815656331 &#160; 5.5986329<br/>&#160;1998-Jan-01 23:00 &#160; &#160; 20 57 24.67 -18 26 08.9 &#160; &#160;1.216 &#160; 4.123 &#160;2.13974288296371 &#160; 5.5981098<br/>&#160;1998-Jan-02 00:00 &#160; &#160; 20 57 32.63 -18 25 35.4 &#160; &#160;1.205 &#160; 4.111 &#160;2.13987759677950 &#160; 5.5975872<br/>$$EOE<br/>*********************************************************************************************<br/>Column meaning:<br/>
+... [some content excluded here for brevity] ...<br/>
+&#160;Computations by ...<br/>&#160; &#160; &#160;Solar System Dynamics Group, Horizons On-Line Ephemeris System<br/>&#160; &#160; &#160;4800 Oak Grove Drive, Jet Propulsion Laboratory<br/>&#160; &#160; &#160;Pasadena, CA &#160;91109 &#160; USA<br/>&#160; &#160; &#160;Information: http://ssd.jpl.nasa.gov/<br/>&#160; &#160; &#160;Connect &#160; &#160;: telnet://ssd.jpl.nasa.gov:6775 &#160;(via browser)<br/>&#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; telnet ssd.jpl.nasa.gov 6775 &#160; &#160;(via command-line)<br/>&#160; &#160; &#160;Author &#160; &#160; : Jon.D.Giorgini@jpl.nasa.gov<br/>
+*****************************************************************************************<br/>
+If&#160;there&#160;are&#160;any&#160;errors&#160;in&#160;your&#160;input&#160;file&#160;(such&#160;as&#160;requesting&#160;ephemeris&#160;output&#160;times&#160;outside&#160;the&#160;range&#160;available),&#160;they&#160;will&#160;be&#160;shown&#160;at<br/>the end of the normal output. Thus, such error detection is the responsibility of the user.<br/>
+In&#160;some&#160;cases,&#160;error&#160;messages&#160;will&#160;provide&#160;suggestions&#160;that&#160;are&#160;only&#160;applicable&#160;to&#160;the&#160;command-line&#160;interface.&#160;For&#160;example,&#160;when<br/>specifying an observatory&#160;code that does not exist,&#160;the message suggests typing&#160; ..., ?! for help . In&#160;such&#160;cases, if the&#160;error is<br/>not obvious,&#160;please check<a href="https://ssd.jpl.nasa.gov/horizons/manual.html">&#160;the&#160;Horizons system documentation.</a><br/>
+For automated systems, or when you are satisfied you don’t need to confirm output, UNIX/Linux/MacOS command-line users can pipe<br/>the API&#160;command output through the local&#160;‘sed’&#160;command&#160;to&#160;strip&#160;out&#160;headers&#160;and&#160;footnotes,&#160;leaving&#160;only&#160;the&#160;table&#160;data:<br/>
+ | sed -e '1,/$$SOE/d' -e '/$$EOE/,$d' <br/>
+<b>Example&#160;</b> json <b>-format Output</b><br/>
+When&#160; json -format&#160;is&#160;requested,&#160;the&#160;API&#160;attempts&#160;to&#160;detect&#160;any&#160;Horizons&#160;error&#160;message(s),&#160;capture&#160;them,&#160;and&#160;report&#160;them&#160;in&#160;the<br/>
+ error &#160;field. Thus, if the&#160; error &#160;field is present in the output, an appropriate programmatic&#160;response can be issued.<br/>
+In&#160;the&#160;following&#160;successful&#160;request,&#160;the&#160;content&#160;of&#160;interest&#160;will&#160;be&#160;in&#160;the&#160;JSON&#160; result &#160;field.<br/>
+{<br/>&#160; &#34;signature&#34; : {<br/>&#160; &#160; &#34;source&#34; : &#34;NASA/JPL Horizons API&#34;,<br/>&#160; &#160; &#34;version&#34; : &#34;1.0&#34;<br/>&#160; },<br/>&#160; &#34;result&#34; : &#34; \n \n*******************************************************************************\nEphemeris / WWW_USER Tue Sep &#160;6 22:51:14 2022 Pasadena, USA &#160; &#160; &#160;/ Horizons &#160; &#160;\n*******************************************************************************\nTarget body name: Mars (499) &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{source: mar097}\nCenter body name: Earth (399) &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; {source: mar097}\nCenter-site name: GEOCENTRIC\n*******************************************************************************\nStart time &#160; &#160; &#160;: A.D. 1998-Jan-01 10:00:00.0000 UT &#160; &#160; &#160;\nStop &#160;time &#160; &#160; &#160;: A.D. 1998-Jan-02 00:00:00.0000 UT &#160; &#160; &#160;\nStep-size &#160; &#160; &#160; : 60 minutes\n*******************************************************************************\nTarget pole/equ : IAU_MARS &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{West-longitude positive}\nTarget radii &#160; &#160;: 3396.19, 3396.19, 3376.2 km &#160; &#160; {Equator_a, b, pole_c}\nCenter geodetic : 0.0, 0.0, -6378.137 &#160; &#160; &#160; &#160; &#160; &#160; {E-lon(deg),Lat(deg),Alt(km)}\nCenter cylindric: 0.0, 0.0, 0.0 &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; {E-lon(deg),Dxy(km),Dz(km)}\nCenter pole/equ : High-precision EOP model &#160; &#160; &#160; &#160;{East-longitude positive}\nCenter radii &#160; &#160;: 6378.137, 6378.137, 6356.752 km {Equator_a, b, pole_c}\nTarget primary &#160;: Sun\nVis. interferer : MOON (R_eq= 1737.400) km &#160; &#160; &#160; &#160;{source: mar097}\nRel. light bend : Sun, EARTH &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;{source: mar097}\nRel. lght bnd GM: 1.3271E+11, 3.9860E+05 km^3/s^2 &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;\nAtmos refraction: NO (AIRLESS)\nRA format &#160; &#160; &#160; : HMS\nTime format &#160; &#160; : CAL \nCalendar mode &#160; : Mixed Julian/Gregorian\nEOP file &#160; &#160; &#160; &#160;: eop.200513.p200804 &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; \nEOP coverage &#160; &#160;: DATA-BASED 1962-JAN-20 TO 2020-MAY-13. PREDICTS-&gt; 2020-AUG-03\nUnits conversion: 1 au= 149597870.700 km, c= 299792.458 km/s, 1 day= 86400.0 s \nTable cut-offs 1: Elevation (-90.0deg=NO ),Airmass (&gt;38.000=NO), Daylight (NO )\nTable cut-offs 2: Solar elongation ( &#160;0.0,180.0=NO ),Local Hour Angle( 0.0=NO )\nTable cut-offs 3: RA/DEC angular rate ( &#160; &#160; 0.0=NO ) &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; \n*****************************************************************************************\n Date__(UT)__HR:MN &#160; &#160; R.A._____(ICRF)_____DEC &#160; &#160;APmag &#160; S-brt &#160; &#160; &#160; &#160; &#160; &#160; delta &#160; &#160; &#160;deldot &#160; &#160; &#160;deldot\n*****************************************************************************************\n$$SOE\n 1998-Jan-01 10:00 &#160; &#160; 20 55 41.20 -18 33 23.0 &#160; &#160;1.199 &#160; 4.107 &#160;2.13799045474771 &#160; 5.6049390\n 1998-Jan-01 11:00 &#160; &#160; 20 55 49.17 -18 32 49.7 &#160; &#160;1.205 &#160; 4.112 &#160;2.13812533287512 &#160; 5.6044117\n 1998-Jan-01 12:00 &#160; &#160; 20 55 57.13 -18 32 16.5 &#160; &#160;1.221 &#160; 4.128 &#160;2.13826019831403 &#160; 5.6038846\n 1998-Jan-01 13:00 &#160; &#160; 20 56 05.09 -18 31 43.1 &#160; &#160;1.234 &#160; 4.141 &#160;2.13839505107206 &#160; 5.6033579\n 1998-Jan-01 14:00 &#160; &#160; 20 56 13.05 -18 31 09.8 &#160; &#160;1.249 &#160; 4.156 &#160;2.13852989115697 &#160; 5.6028315\n 1998-Jan-01 15:00 &#160; &#160; 20 56 21.01 -18 30 36.5 &#160; &#160;1.229 &#160; 4.136 &#160;2.13866471857652 &#160; 5.6023055\n 1998-Jan-01 16:00 &#160; &#160; 20 56 28.97 -18 30 03.1 &#160; &#160;1.242 &#160; 4.149 &#160;2.13879953333835 &#160; 5.6017797\n 1998-Jan-01 17:00 &#160; &#160; 20 56 36.93 -18 29 29.7 &#160; &#160;1.236 &#160; 4.143 &#160;2.13893433545018 &#160; 5.6012543\n 1998-Jan-01 18:00 &#160; &#160; 20 56 44.89 -18 28 56.3 &#160; &#160;1.225 &#160; 4.132 &#160;2.13906912492008 &#160; 5.6007292\n 1998-Jan-01 19:00 &#160; &#160; 20 56 52.85 -18 28 22.9 &#160; &#160;1.233 &#160; 4.139 &#160;2.13920390175678 &#160; 5.6002045\n 1998-Jan-01 20:00 &#160; &#160; 20 57 00.81 -18 27 49.4 &#160; &#160;1.239 &#160; 4.146 &#160;2.13933866596968 &#160; 5.5996802\n 1998-Jan-01 21:00 &#160; &#160; 20 57 08.76 -18 27 15.9 &#160; &#160;1.246 &#160; 4.153 &#160;2.13947341756857 &#160; 5.5991564\n 1998-Jan-01 22:00 &#160; &#160; 20 57 16.72 -18 26 42.5 &#160; &#160;1.226 &#160; 4.133 &#160;2.13960815656331 &#160; 5.5986329\n 1998-Jan-01 23:00 &#160; &#160; 20 57 24.67 -18 26 08.9 &#160; &#160;1.216 &#160; 4.123 &#160;2.13974288296371 &#160; 5.5981098\n 1998-Jan-02 00:00 &#160; &#160; 20 57 32.63 -18 25 35.4 &#160; &#160;1.205 &#160; 4.111 &#160;2.13987759677950 &#160; 5.5975872\n$$EOE\n*****************************************************************************************\nColumn meaning:\n \nTIME\n\n &#160;Times PRIOR to 1962 are UT1, a mean-solar time closely related to the\nprior but now-deprecated GMT. Times AFTER 1962 are in UTC, the current\ncivil or \&#34;wall-clock\&#34; time-scale. UTC is kept within 0.9 seconds of UT1\nusing integer leap-seconds for 1972 and later years.\n\n &#160;Conversion from the internal Barycentric Dynamical Time (TDB) of solar\nsystem dynamics to the non-uniform civil UT time-scale requested for output\nhas not been determined for UTC times after the next July or January 1st.\nTherefore, the last known leap-second is used as a constant over future\nintervals.\n\n &#160;Time tags refer to the UT time-scale conversion from TDB on Earth\nregardless of observer location within the solar system, although clock\nrates may differ due to the local gravity field and no analog to \&#34;UT\&#34;\nmay be defined for that location.\n\n &#160;Any 'b' symbol in the 1st-column denotes a B.C. date. First-column blank\n(\&#34; \&#34;) denotes an A.D. date. Calendar dates prior to 1582-Oct-15 are in the\nJulian calendar system. Later calendar dates are in the Gregorian system.\n\n &#160;NOTE: \&#34;n.a.\&#34; in output means quantity \&#34;not available\&#34; at the print-time.\n \n R.A._____(ICRF)_____DEC =\n &#160;Astrometric right ascension and declination of the target center with\nrespect to the observing site (coordinate origin) in the reference frame of\nthe planetary ephemeris (ICRF). Compensated for down-leg light-time delay\naberration.\n\n &#160;Units: RA &#160;in hours-minutes-seconds of time &#160; (HH MM SS.ff)\n &#160; &#160; &#160; &#160; DEC in degrees-minutes-seconds of arc &#160;(sDD MN SC.f)\n \n APmag S-brt =\n &#160; Target's approximate apparent visual magnitude &amp; surface brightness. For\nplanets and satellites, values are available only for solar phase angles in the\nrange generally visible from Earth. This is to avoid extrapolation of models\nbeyond their valid (data-based) limits.\n &#160; Units: MAGNITUDE &amp; VISUAL MAGNITUDES PER SQUARE ARCSECOND\n \n delta &#160;deldot =\n &#160; Range (\&#34;delta\&#34;) and range-rate (\&#34;delta-dot\&#34;) of target center with respect\nto the observer at the instant light seen by the observer at print-time would\nhave left the target center (print-time minus down-leg light-time); the\ndistance traveled by a light ray emanating from the center of the target and\nrecorded by the observer at print-time. \&#34;deldot\&#34; is a projection of the\nvelocity vector along this ray, the light-time-corrected line-of-sight from\nthe coordinate center, and indicates relative motion. A positive \&#34;deldot\&#34;\nmeans the target center is moving away from the observer (coordinate center).\nA negative \&#34;deldot\&#34; means the target center is moving toward the observer.\nUnits: AU and KM/S\n\n\n Computations by ...\n &#160; &#160; Solar System Dynamics Group, Horizons On-Line Ephemeris System\n &#160; &#160; 4800 Oak Grove Drive, Jet Propulsion Laboratory\n &#160; &#160; Pasadena, CA &#160;91109 &#160; USA\n &#160; &#160; Information: http://ssd.jpl.nasa.gov/\n &#160; &#160; Connect &#160; &#160;: telnet://ssd.jpl.nasa.gov:6775 &#160;(via browser)\n &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160; &#160;telnet ssd.jpl.nasa.gov 6775 &#160; &#160;(via command-line)\n &#160; &#160; Author &#160; &#160; : Jon.D.Giorgini@jpl.nasa.gov\n\n*****************************************************************************************\n&#34;<br/>}<br/>
+<b>Non-unique Object Specification</b><br/>
+If&#160;the&#160;object&#160;specified&#160;via&#160;the&#160; COMMAND &#160;query parameter is not unique within the Horizons system, you will get a&#160;list of matching<br/>objects. Below&#160;is&#160;an&#160;example&#160;( text -format)&#160;output&#160;where&#160; COMMAND='DES=141P;' .<br/>
+API VERSION: 1.0<br/>API SOURCE: NASA/JPL Horizons API<br/>
+*******************************************************************************<br/>JPL/DASTCOM &#160; &#160; &#160; &#160; &#160; &#160;Small-body Index Search Results &#160; &#160; 2021-May-11 07:53:26<br/>
+&#160;Comet AND asteroid index search:<br/>
+&#160; &#160; DES = 141P;<br/>
+&#160;Matching small-bodies:<br/>
+&#160; &#160; Record # &#160;Epoch-yr &#160;&gt;MATCH DESIG&lt; &#160;Primary Desig &#160;Name<br/>&#160; &#160; -------- &#160;-------- &#160;------------- &#160;------------- &#160;-------------------------<br/>&#160; &#160; 90001032 &#160; &#160;2011 &#160; &#160;141P &#160; &#160; &#160; &#160; &#160; 141P &#160; &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>&#160; &#160; 90001033 &#160; &#160;2019 &#160; &#160;141P &#160; &#160; &#160; &#160; &#160; 141P &#160; &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>&#160; &#160; 90001034 &#160; &#160;1994 &#160; &#160;141P-A &#160; &#160; &#160; &#160; 141P-A &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>&#160; &#160; 90001035 &#160; &#160;1997 &#160; &#160;141P-A &#160; &#160; &#160; &#160; 141P-A &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>&#160; &#160; 90001036 &#160; &#160;1999 &#160; &#160;141P-A &#160; &#160; &#160; &#160; 141P-A &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>&#160; &#160; 90001037 &#160; &#160;1994 &#160; &#160;141P-D &#160; &#160; &#160; &#160; 141P-D &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>&#160; &#160; 90001038 &#160; &#160;1999 &#160; &#160;141P-D &#160; &#160; &#160; &#160; 141P-D &#160; &#160; &#160; &#160; &#160;Machholz 2<br/>
+&#160;(7 matches. To SELECT, enter record # (integer), followed by semi-colon.)<br/>*******************************************************************************<br/>
+In&#160;the&#160;above&#160;example,&#160;there&#160;are&#160;three&#160;bodies&#160;represented:&#160;the&#160;parent&#160;comet&#160; 141P , fragment A&#160; (141P-A) , and fragment D&#160; (141P-<br/>D) . There&#160;are&#160;also multiple&#160;orbits&#160;for each&#160;of these&#160;comets&#160;represented by the&#160; Epoch-yr &#160;field in the results table. This is typically<br/>because the orbit may change between apparitions due to changed outgassing accelerations. Maintaining different solutions&#160;supports<br/>the different historical acceleration models appropriate to the time.<br/>
+To&#160;select&#160;the&#160;object&#160;and&#160;orbit&#160;of&#160;interest,&#160;you&#160;must&#160;specify&#160;the&#160;Horizons&#160;record&#160;number&#160;listed&#160;in&#160;the&#160; Record # &#160;column. For example,<br/>to&#160;select&#160;the&#160;orbit&#160;for&#160;the&#160;parent&#160;comet&#160;with&#160;epoch&#160;2019,&#160;specify&#160; COMMAND='90001033;' . However, be&#160;warned that for small bodies<br/>(comets&#160;and&#160;asteroids)&#160;these&#160;record&#160;numbers&#160;are&#160;subject&#160;to&#160;change&#160;without&#160;notice.<br/>
+For unique comet selection without using Horizons record numbers, there are additional flags that can be used in the&#160; COMMAND <br/>specification.&#160;For&#160;example,&#160;if&#160;you know there are fragments for&#160;comet 141P and you want the parent comet,&#160;you can add the&#160; NOFRAG <br/>flag&#160;to the&#160; COMMAND &#160;specification such as&#160; COMMAND='DES=141P;NOFRAG' .<br/>
+Similarly, if you know you always want the orbit with the most recent epoch, you can add the&#160; CAP &#160;flag (closest-apparition) to the<br/>
+ COMMAND &#160;specification such as&#160; COMMAND='DES=141P;CAP' . In&#160;this&#160;example, combining&#160; CAP &#160;and&#160; NOFRAG &#160;will result in a&#160;unique match<br/>
+for&#160;the&#160;parent&#160;comet&#160;141P&#160;as&#160;in&#160; COMMAND='DES=141P;CAP;NOFRAG' . For fragments, the&#160;designation&#160;is&#160;already unique&#160;so you’d only<br/>need the&#160; CAP &#160;flag as in&#160; COMMAND='DES=141P-A;CAP' .<br/>
+<a href="https://ssd.jpl.nasa.gov/horizons/manual.html">See the&#160;Horizons documentation&#160;f</a>or more details.<br/>
+<b>Small-Body SPK File Generation</b><br/>
+The&#160;binary SPK file&#160;is&#160;base-64 encoded on&#160;return&#160;and, for&#160; text -format&#160;output,&#160;begins&#160;after&#160;the&#160;API&#160;header&#160;text&#160;with&#160;the&#160;base-64<br/>string&#160; REFGL1NQ... &#160;in the following example for asteroid 1 Ceres (SPK-ID&#160;2000001).<br/>
+API VERSION: 1.0<br/>API SOURCE: NASA/JPL Horizons API<br/>
+ID= '2000001'<br/>
+SPK Binary Data Follows -- base64 encoded:<br/>
+REFGL1NQSyACAAAABgAAAFNNQl9TUEtfRklMRSAgICAgICAgICAgICAgICAgICAgICAgICAgICAg<br/>
+<hr/>
+<a name=2></a>REFGL1NQSyACAAAABgAAAFNNQl9TUEtfRklMRSAgICAgICAgICAgICAgICAgICAgICAgICAgICAg<br/>ICAgICAgICAgICAgICAgICAgID4AAAA+AAAAMLcAAExUTC1JRUVFAAAAAAAAAAAAAAAAAAAAAAAA<br/>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA<br/>...<br/>AAAAAAAAAAAAAAAAAAAAAAAAAA==<br/>
+To&#160;convert&#160;the&#160;base-64&#160;encoded&#160;content&#160;to&#160;a&#160;usable&#160;binary&#160;SPK&#160;file,&#160;extract&#160;the&#160;encoded&#160;portion&#160;to&#160;a&#160;file&#160;and&#160;use&#160;a&#160;base-64&#160;decoder.<br/>On most Linux systems this is done with the command&#160; base64 --decode {extracted_file_content} , where<br/>
+ {extacted_file_content} &#160;is the name of the file containing the encoded content from the API.<br/>
+<b>Example SPK Horizons Request</b><br/>
+<b>For Small-Body in the JPL Database</b><br/>
+The&#160;following&#160;example&#160;requests&#160;an&#160;SPK file&#160;spanning&#160;2020-01-01 through&#160;2030-12-31 (TDB) for asteroids&#160;1 Ceres.<br/>
+https://ssd.jpl.nasa.gov/api/horizons.api?COMMAND='1%3B'&amp;EPHEM_TYPE=SPK&amp;START_TIME='2020-01-01'&amp;STOP_TIME='2030-12-31'&amp;OBJ_DATA=NO<br/>
+<b>For Small-Body&#160;<i>not</i></b><b>&#160;in the JPL Database</b><br/>
+The&#160;following&#160;example&#160;requests&#160;an&#160;SPK file&#160;covering&#160;2030-01-01 through&#160;2031-01-01 (TDB) for the&#160;small-body specified with&#160;user-<br/>supplied osculating elements and non-gravitational&#160;parameters.<br/>
+https://ssd.jpl.nasa.gov/api/horizons.api?COMMAND='%3B'&amp;MAKE_EPHEM=YES&amp;EPHEM_TYPE=SPK&amp;OBJ_DATA=NO&amp;START_TIME='2030-Jan-1'&amp;STOP_TIME='2031-Jan-1'&amp;OBJECT='User%20Apophis'&amp;EPOCH=2459311.5&amp;ECLIP=J2000&amp;EC=0.1915350975906659&amp;QR=0.7458351838564465&amp;TP=2459424.5839352785&amp;OM=203.9782743995174&amp;W=126.6377455281965&amp;IN=3.33973556589891&amp;A1='3.869431020576E-13'&amp;A2='-2.898628963521E-14'&amp;R0=1.&amp;ALN=1.&amp;NM=2.&amp;NN=5.093&amp;NK=0.<br/>
+<b>Command-line Examples</b><br/>
+An&#160;example&#160;Linux&#160;command-line&#160;to extract the&#160;binary SPK file&#160;content from a successful&#160; text -format&#160;output&#160;is&#160;shown&#160;below.<br/>However, be advised that such usage will not easily catch errors returned from the API.<br/>
+curl -s &#34;https://ssd.jpl.nasa.gov/api/horizons.api?format=text&amp;COMMAND='1%3B'&amp;EPHEM_TYPE=SPK&amp;START_TIME='2020-01-01'&amp;STOP_TIME='2030-12-31'&amp;OBJ_DATA=NO&#34; | awk '/REFGL1NQ/,0' | base64 --decode &gt; 2000001.bsp<br/>
+Similarly, for the&#160; json -format&#160;output,&#160;the&#160;SPK&#160;encoded&#160;content&#160;is&#160;contained&#160;in&#160;the&#160; spk: &#160;object as in the following example:<br/>
+{<br/>&#160; &#34;signature&#34; : {<br/>&#160; &#160; &#34;source&#34; : &#34;NASA/JPL Horizons API&#34;,<br/>&#160; &#160; &#34;version&#34; : &#34;0.2&#34;<br/>&#160; },<br/>&#160; &#34;result&#34; : &#34;\nID= '2000001'\n\n&#34;,<br/>&#160; &#34;spk_file_id&#34; : &#34;2000001&#34;,<br/>&#160; &#34;spk&#34; : &#34;REFGL1NQSyACAAAABgAAAFNNQl9TUEtfRklMRSAgICAgICAgICAgICAgICAgICAgICAgICAgICAg\nICAgICAgICAgICAgICAgICAgID4AAAA+AAA ... AAAA\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nAAAAAAAAAAAAAAAAAAAAAAAAAA==\n&#34;<br/>}<br/>
+Extract&#160;the&#160;content&#160;from&#160;the&#160;JSON&#160; spk &#160;object excluding the surrounding quotes and then decode to produce the corresponding<br/>binary SPK&#160;file. The JSON&#160; spk_file_id &#160;value suggests an appropriate filename (excluding the&#160; .bsp &#160;extension) for output:<br/>
+ 2000001 &#160;in this example from which the filename&#160; 2000001.bsp &#160;could be formed.<br/>
+<b>Sample Scripts</b><br/>
+The&#160;following&#160;scripts&#160;generate&#160;SPK files&#160;spanning&#160; 2030-01-01 &#160;to&#160; 2031-01-01 &#160;for the small-body specified on the command-line. In<br/>this example, the desired small-body is specified using its SPK-ID&#160;(e.g.,&#160; 2000001 &#160;for asteroid 1 Ceres).<br/>
+IMPORTANT:&#160;You&#160;must&#160;take&#160;care&#160;t<a href="">o&#160;encode special characters</a>&#160;in the URL within your scripts for proper interpretation of your<br/>query parameters.&#160;In the scripts below,&#160;the Horizons&#160; COMMAND &#160;parameter contains special characters&#160; = &#160;and&#160; ; &#160;which must be<br/>converted&#160;to&#160; %3D &#160;and&#160; %3B , respectively. For example,&#160; COMMAND='DES=2000001;' &#160;must be encoded as<br/>
+ COMMAND='DES%3D2000001%3B' .<br/>
+<b>Perl</b><br/>
+Assuming&#160;the&#160;following&#160;Perl&#160;script&#160;is&#160;saved&#160;to&#160;a&#160;file&#160; horizons_spk.pl , it could be&#160;invoked from the&#160;command-line&#160;to generate&#160;an&#160;SPK<br/>file&#160;for asteroid 1 Ceres&#160;(SPKID 2000001) as&#160; perl horizons_spk.pl 2000001 .<br/>
+use strict;<br/>use LWP::UserAgent;<br/>use JSON;<br/>use MIME::Base64;<br/>
+# Define API URL and SPK filename:<br/>my $url = &#34;https://ssd.jpl.nasa.gov/api/horizons.api&#34;;<br/>my $spk_filename = 'spk_file.bsp';<br/>
+# Define the time span:<br/>my $start_time = '2030-01-01';<br/>my $stop_time = '2031-01-01';<br/>
+# Get the requested SPK-ID from the command-line:<br/>my $spkid = shift;<br/>unless ( defined $spkid ) { die &#34;please specify SPK-ID on the command-line&#34;; }<br/>
+# Build the appropriate URL for this API request:<br/># IMPORTANT: You must encode the &#34;=&#34; as &#34;%3D&#34; and the &#34;;&#34; as &#34;%3B&#34; in the<br/># &#160; &#160; &#160; &#160; &#160; &#160;Horizons COMMAND parameter specification.<br/>$url .= &#34;?format=json&amp;EPHEM_TYPE=SPK&amp;OBJ_DATA=NO&#34;;<br/>$url .= &#34;&amp;COMMAND='DES%3D$spkid%3B'&amp;START_TIME='$start_time'&amp;STOP_TIME='$stop_time'&#34;;<br/>
+# Build and submit the API request and decode the JSON-response:<br/>my $ua = LWP::UserAgent-&gt;new;<br/>my $response = $ua-&gt;get($url);<br/>my $data = decode_json($response-&gt;content);<br/>
+# If the request was valid...<br/>if ( $response-&gt;code eq '200' ) {<br/>&#160; #<br/>&#160; # If the SPK file was generated, decode it and write it to the output file:<br/>&#160; if ( defined $data-&gt;{spk} ) {<br/>&#160; &#160; #<br/>&#160; &#160; # If a suggested SPK file basename was provided, use it:<br/>&#160; &#160; if ( defined $data-&gt;{spk_file_id} ) { $spk_filename = &#34;$data-&gt;{spk_file_id}.bsp&#34;; }<br/>&#160; &#160; open (my $fh, &#34;&gt;&#34;, $spk_filename) or die &#34;unable to open $spk_filename: $!\n&#34;;<br/>&#160; &#160; #<br/>&#160; &#160; # Decode and write the binary SPK file content:<br/>&#160; &#160; print $fh decode_base64($data-&gt;{spk});<br/>&#160; &#160; close $fh;<br/>&#160; &#160; print &#34;wrote SPK content to $spk_filename\n&#34;;<br/>&#160; &#160; exit;<br/>&#160; }<br/>&#160; #<br/>&#160; # Otherwise, the SPK file was not generated so output an error:<br/>&#160; print &#34;ERROR: SPK file not generated\n&#34;;<br/>&#160; if ( defined $data-&gt;{result} ) { print $data-&gt;{result}; }<br/>&#160; else { print $response-&gt;content; }<br/>&#160; exit 1;<br/>}<br/>
+# If the request was invalid, extract error content and display it:<br/>if ( $response-&gt;code eq '400' ) {<br/>&#160; print &#34;ERROR in API call: HTTPS response: &#34;, $response-&gt;status_line, &#34;\n&#34;;<br/>&#160; if ( defined $data-&gt;{message} ) { print $data-&gt;{message}, &#34;\n&#34;; }<br/>&#160; else { print $response-&gt;content; }<br/>&#160; exit 1;<br/>}<br/>
+# Otherwise, some other error occurred:<br/>print &#34;ERROR in API call: HTTPS response: &#34;, $response-&gt;status_line, &#34;\n&#34;;<br/>exit 1;<br/>
+<b>Python</b><br/>
+Assuming&#160;the&#160;following&#160;Python&#160;script&#160;is&#160;saved&#160;to&#160;a&#160;file&#160; horizons_spk.py , it could be&#160;invoked from the&#160;command-line&#160;to generate&#160;an<br/>SPK&#160;file for asteroid 1 Ceres (SPKID&#160;2000001) as&#160; python horizons_spk.py 2000001 .<br/>
+import sys<br/>import json<br/>import base64<br/>import requests<br/>
+# Define API URL and SPK filename:<br/>url = 'https://ssd.jpl.nasa.gov/api/horizons.api'<br/>spk_filename = 'spk_file.bsp'<br/>
+# Define the time span:<br/>start_time = '2030-01-01'<br/>stop_time = '2031-01-01'<br/>
+# Get the requested SPK-ID from the command-line:<br/>if (len(sys.argv)) == 1:<br/>&#160; print(&#34;please specify SPK-ID on the command-line&#34;);<br/>&#160; sys.exit(2)<br/>spkid = sys.argv[1]<br/>
+# Build the appropriate URL for this API request:<br/># IMPORTANT: You must encode the &#34;=&#34; as &#34;%3D&#34; and the &#34;;&#34; as &#34;%3B&#34; in the<br/># &#160; &#160; &#160; &#160; &#160; &#160;Horizons COMMAND parameter specification.<br/>url += &#34;?format=json&amp;EPHEM_TYPE=SPK&amp;OBJ_DATA=NO&#34;<br/>url += &#34;&amp;COMMAND='DES%3D{}%3B'&amp;START_TIME='{}'&amp;STOP_TIME='{}'&#34;.format(spkid, start_time, stop_time)<br/>
+# Submit the API request and decode the JSON-response:<br/>response = requests.get(url)<br/>try:<br/>&#160; data = json.loads(response.text)<br/>except ValueError:<br/>&#160; print(&#34;Unable to decode JSON results&#34;)<br/>
+# If the request was valid...<br/>if (response.status_code == 200):<br/>&#160; #<br/>&#160; # If the SPK file was generated, decode it and write it to the output file:<br/>&#160; if &#34;spk&#34; in data:<br/>&#160; &#160; #<br/>&#160; &#160; # If a suggested SPK file basename was provided, use it:<br/>&#160; &#160; if &#34;spk_file_id&#34; in data:<br/>&#160; &#160; &#160; spk_filename = data[&#34;spk_file_id&#34;] + &#34;.bsp&#34;<br/>&#160; &#160; try:<br/>&#160; &#160; &#160; f = open(spk_filename, &#34;wb&#34;)<br/>&#160; &#160; except OSError as err:<br/>&#160; &#160; &#160; print(&#34;Unable to open SPK file '{0}': {1}&#34;.format(spk_filename, err))<br/>&#160; &#160; #<br/>&#160; &#160; # Decode and write the binary SPK file content:<br/>&#160; &#160; f.write(base64.b64decode(data[&#34;spk&#34;]))<br/>&#160; &#160; f.close()<br/>&#160; &#160; print(&#34;wrote SPK content to {0}&#34;.format(spk_filename))<br/>&#160; &#160; sys.exit()<br/>&#160; #<br/>&#160; # Otherwise, the SPK file was not generated so output an error:<br/>&#160; print(&#34;ERROR: SPK file not generated&#34;)<br/>&#160; if &#34;result&#34; in data:<br/>&#160; &#160; print(data[&#34;result&#34;])<br/>&#160; else:<br/>&#160; &#160; print(response.text)<br/>&#160; sys.exit(1)<br/>
+# If the request was invalid, extract error content and display it:<br/>if (response.status_code == 400):<br/>&#160; data = json.loads(response.text)<br/>&#160; if &#34;message&#34; in data:<br/>&#160; &#160; print(&#34;MESSAGE: {}&#34;.format(data[&#34;message&#34;]))<br/>&#160; else:<br/>&#160; &#160; print(json.dumps(data, indent=2))<br/>
+# Otherwise, some other error occurred:<br/>print(&#34;response code: {0}&#34;.format(response.status_code))<br/>sys.exit(2)<br/>
+<b>URL Encoding</b><br/>
+If&#160;a&#160;query&#160;parameter&#160;<i>value</i>&#160;contains any of the following characters, those characters should be URI-encoded before submitting your<br/>request.&#160;The&#160;following&#160;table&#160;shows&#160;these&#160;reserved&#160;characters&#160;and&#160;their&#160;corresponding&#160;encoding.&#160;For&#160;example,&#160;a&#160;query&#160;string&#160;value<br/>“My Value” should be encoded as&#160; My%20Value &#160;where the space character is replaced with&#160; %20 .<br/>
+Char.<br/>
+Encoding<br/>
+Name<br/>
+LF<br/>
+%0A<br/>
+line feed (new-line)<br/>
+` `<br/>
+%20<br/>
+space<br/>
+ # <br/>
+%23<br/>
+hash tag<br/>
+ $ <br/>
+%24<br/>
+dollar sign<br/>
+ &amp; <br/>
+%26<br/>
+ampersand<br/>
+ + <br/>
+%2B<br/>
+plus sign<br/>
+ , <br/>
+%2C<br/>
+comma<br/>
+ / <br/>
+%2F<br/>
+slash<br/>
+ : <br/>
+%3A<br/>
+colon<br/>
+ ; <br/>
+%3B<br/>
+semicolon<br/>
+ = <br/>
+%3D<br/>
+equals sign<br/>
+ ? <br/>
+%3F<br/>
+question mark<br/>
+ @ <br/>
+%40<br/>
+at&#160;symbol<br/>
+ [ <br/>
+%5B<br/>
+left square bracket<br/>
+ ] <br/>
+%5D<br/>
+right square bracket<br/>
+More information&#160;is available in<a href="https://datatracker.ietf.org/doc/html/rfc3875#section-2.3">&#160;section 2.3&#160;of&#160;RFC3975</a>.<br/>
+<b>HTTP Response Codes</b><br/>
+Most errors are returned via appropriate HTTP response codes. However, it is possible to submit Horizons input data (e.g., a bad<br/>
+ START_TIME &#160;value) resulting in Horizons-generated errors. In such cases, a&#160;non-error code of 200 is returned so the user is<br/>
+responsible&#160;for&#160;checking&#160;the&#160;payload&#160;if&#160;they&#160;wish&#160;to&#160;detect&#160;such&#160;errors.<br/>
+HTTP<br/>
+Description<br/>
+Typical&#160;Usage<br/>
+Code<br/>
+200<br/>
+OK<br/>
+normal&#160;successful&#160;result<br/>
+the request contained invalid keywords and/or content or used a&#160;request-method other than GET&#160;or POST&#160;(details<br/>
+400<br/>
+Bad Request<br/>
+returned&#160;in&#160;the&#160;JSON&#160;or&#160;text&#160;payload)<br/>
+Method Not<br/>
+405<br/>
+the request used an incorrect method (see the&#160;<a href="">HTTP Request</a>&#160;section)<br/>
+Allowed<br/>
+Internal<br/>
+500<br/>
+the database is not available at the time of the request<br/>
+Server Error<br/>
+Service<br/>
+the server is currently unable to handle the request due to a&#160;temporary overloading or maintenance of the server,<br/>
+503<br/>
+Unavailable<br/>
+which will&#160;likely&#160;be alleviated after&#160;some delay<br/>
+<b>Change Log</b><br/>
+<b>Version 1.3 (2025 June)</b><br/>
+Update to&#160;mention&#160; TIME_TYPE &#160;setting<br/>
+<b>Version 1.2 (2022 September)</b><br/>
+Update to&#160;list new&#160; CAL_TYPE &#160;setting<br/>
+<b>Version 1.1 (2021 December)</b><br/>
+Update to&#160;mention&#160; TLIST &#160;calendar date option, new&#160; TLIST_TYPE &#160;setting, and elaborate on&#160; STEP_SIZE &#160;options<br/>
+<b>Version 1.0 (2021 July)</b><br/>
+Initial&#160;release<br/>
+Site Manager :&#160;Ryan Park<br/>
+<a href="http://www.jpl.nasa.gov/copyrights.php">Privacy</a><br/>
+|<br/>
+<a href="http://www.jpl.nasa.gov/imagepolicy">Image Policy</a><br/>
+Webmaster :&#160;Alan Chamberlin<br/>
+URS Clearance :&#160;CL#16-5242<br/>
+Contact :&#160;contact-ssd-api@jpl.nasa.gov<br/>
+<hr/>
+</body>
+</html>

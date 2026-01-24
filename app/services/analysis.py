@@ -12,10 +12,15 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.wcs import WCS
+from astropy.wcs.utils import proj_plane_pixel_scales
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from photutils.detection import DAOStarFinder
 from sqlmodel import Session, select
 
-from app.models import CaptureLog, NeoEphemeris, CandidateAssociation
+from app.core.config import settings
+from app.models import CaptureLog, Measurement, NeoEphemeris, CandidateAssociation
 from app.services.star_subtraction import CatalogStarSubtractor
 
 logger = logging.getLogger(__name__)
@@ -38,6 +43,13 @@ class AnalysisService:
         data = np.asarray(data, dtype=float)
         mean, median, std = sigma_clipped_stats(data, sigma=3.0)
         threshold = median + (5.0 * std)
+        logger.debug(
+            "Source detection stats: mean=%.3f median=%.3f std=%.3f threshold=%.3f",
+            mean,
+            median,
+            std,
+            threshold,
+        )
 
         try:
             # FWHM=4.0 is a reasonable default for typical seeing
@@ -111,10 +123,22 @@ class AnalysisService:
         cleaned_data, stars_subtracted = subtractor.subtract_stars(
             data, target_ra, target_dec, exclusion_radius_arcsec
         )
+        logger.info(
+            "Star subtraction complete: removed=%d exclusion_radius=%.1f\"",
+            stars_subtracted,
+            exclusion_radius_arcsec,
+        )
 
         # Detect sources in cleaned image with lower threshold
         mean, median, std = sigma_clipped_stats(cleaned_data, sigma=3.0)
         threshold = median + (3.0 * std)  # Lower threshold after star removal
+        logger.debug(
+            "Post-subtraction stats: mean=%.3f median=%.3f std=%.3f threshold=%.3f",
+            mean,
+            median,
+            std,
+            threshold,
+        )
 
         try:
             finder = DAOStarFinder(fwhm=4.0, threshold=threshold - median)
@@ -187,10 +211,12 @@ class AnalysisService:
 
     def auto_associate(
         self,
-        db: Session,
-        capture: CaptureLog,
-        wcs: WCS,
-        use_star_subtraction: bool = True
+        db: Session | None = None,
+        capture: CaptureLog | None = None,
+        wcs: WCS | None = None,
+        capture_id: int | None = None,
+        tolerance_arcsec: float = 10.0,
+        use_star_subtraction: bool = True,
     ) -> Optional[CandidateAssociation]:
         """
         Attempt to automatically associate a capture with its target ephemeris.
@@ -206,30 +232,97 @@ class AnalysisService:
         Returns:
             CandidateAssociation if successful, None otherwise
         """
+        db = db or self.session
+        if db is None:
+            raise RuntimeError("Database session required for association")
+
+        if capture is None and capture_id is not None:
+            capture = db.get(CaptureLog, capture_id)
+
+        if capture is None:
+            logger.error("Association failed: capture not found")
+            return None
+
         if not capture.target or capture.target == "unknown":
             logger.debug("No target specified, cannot auto-associate")
             return None
 
+        if wcs is None:
+            path = Path(capture.path)
+            wcs_path = path.with_suffix(".wcs")
+            try:
+                if wcs_path.exists():
+                    wcs = WCS(str(wcs_path))
+                    logger.info("Loaded WCS from %s", wcs_path)
+                else:
+                    wcs = WCS(fits.getheader(path))
+                    logger.info("Loaded WCS from FITS header for %s", path)
+            except Exception as exc:
+                logger.warning("Failed to load WCS for %s: %s", capture.path, exc)
+                return None
+
+        logger.info(
+            "Starting auto-association: capture_id=%s target=%s path=%s",
+            capture.id,
+            capture.target,
+            capture.path,
+        )
+
         # 1. Find Ephemeris (nearest to capture time)
-        ephems = db.exec(select(NeoEphemeris).where(NeoEphemeris.trksub == capture.target)).all()
+        ephems = db.exec(
+            select(NeoEphemeris)
+            .where(NeoEphemeris.trksub == capture.target)
+            .order_by(NeoEphemeris.epoch)
+        ).all()
 
         if not ephems:
             logger.warning(f"No ephemeris found for target {capture.target}")
             return None
 
+        logger.info("Loaded %d ephemeris points for %s", len(ephems), capture.target)
+
         best_eph = None
         min_diff = float("inf")
+        before = None
+        after = None
         for eph in ephems:
             diff = abs((eph.epoch - capture.started_at).total_seconds())
             if diff < min_diff:
                 min_diff = diff
                 best_eph = eph
+            if eph.epoch <= capture.started_at:
+                before = eph
+            if eph.epoch >= capture.started_at and after is None:
+                after = eph
 
-        if not best_eph or min_diff > 300:  # > 5 mins
-            logger.warning(f"Nearest ephemeris is {min_diff:.0f}s away (> 300s limit)")
+        if not best_eph:
+            logger.warning("No ephemeris available for %s", capture.target)
             return None
 
-        logger.info(f"Using ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
+        use_ra = best_eph.ra_deg
+        use_dec = best_eph.dec_deg
+        use_epoch = best_eph.epoch
+
+        if min_diff > 300:  # > 5 mins
+            logger.warning(f"Nearest ephemeris is {min_diff:.0f}s away (> 300s limit)")
+            interp = self._interpolate_ephemeris(before, after, capture.started_at)
+            if interp is None:
+                return None
+            use_ra, use_dec, use_epoch = interp
+            logger.info(
+                "Using interpolated ephemeris at %s (bracketed by %s, %s)",
+                capture.started_at,
+                before.epoch if before else None,
+                after.epoch if after else None,
+            )
+        else:
+            logger.info(f"Using ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
+
+        logger.info(
+            "Ephemeris position: RA=%.6f Dec=%.6f",
+            use_ra,
+            use_dec,
+        )
 
         # 2. Detect Sources (with or without star subtraction)
         stars_subtracted = 0
@@ -248,28 +341,52 @@ class AnalysisService:
             logger.warning(f"No sources detected in {capture.path}")
             return None
 
-        logger.info(f"Detected {len(detections)} sources")
+        logger.info(
+            "Detected %d sources (stars_subtracted=%s)",
+            len(detections),
+            stars_subtracted,
+        )
 
         # 3. Find Best Match
-        tolerance_arcsec = 10.0
         match = self.find_best_match(
             detections,
-            best_eph.ra_deg,
-            best_eph.dec_deg,
+            use_ra,
+            use_dec,
             tolerance_arcsec=tolerance_arcsec
         )
 
         if not match:
             logger.warning(
                 f"No match within {tolerance_arcsec}\" of predicted position "
-                f"({best_eph.ra_deg:.5f}, {best_eph.dec_deg:.5f})"
+                f"({use_ra:.5f}, {use_dec:.5f})"
             )
             return None
+
+        logger.info(
+            "Best match within %.1f\": RA=%.6f Dec=%.6f",
+            tolerance_arcsec,
+            match["ra_deg"],
+            match["dec_deg"],
+        )
+
+        try:
+            self._save_annotation_png(
+                fits_path=Path(capture.path),
+                wcs=wcs,
+                capture_id=capture.id,
+                predicted_ra=use_ra,
+                predicted_dec=use_dec,
+                matched_ra=match["ra_deg"],
+                matched_dec=match["dec_deg"],
+                radius_arcsec=tolerance_arcsec,
+            )
+        except Exception as exc:
+            logger.warning("Failed to save annotation PNG for %s: %s", capture.path, exc)
 
         # 4. Calculate Residual
         residual_arcsec = self._calculate_residual(
             match["ra_deg"], match["dec_deg"],
-            best_eph.ra_deg, best_eph.dec_deg
+            use_ra, use_dec
         )
 
         logger.info(
@@ -282,8 +399,8 @@ class AnalysisService:
             capture_id=capture.id,
             ra_deg=match["ra_deg"],
             dec_deg=match["dec_deg"],
-            predicted_ra_deg=best_eph.ra_deg,
-            predicted_dec_deg=best_eph.dec_deg,
+            predicted_ra_deg=use_ra,
+            predicted_dec_deg=use_dec,
             residual_arcsec=residual_arcsec,
             snr=match.get("snr"),
             peak_counts=match.get("peak"),
@@ -295,7 +412,159 @@ class AnalysisService:
         db.commit()
         db.refresh(assoc)
 
+        logger.info(
+            "Association saved: id=%s capture_id=%s residual=%.2f\" snr=%s stars_subtracted=%s",
+            assoc.id,
+            capture.id,
+            residual_arcsec,
+            match.get("snr"),
+            stars_subtracted,
+        )
+
         return assoc
+
+    @staticmethod
+    def _interpolate_ephemeris(
+        before: NeoEphemeris | None,
+        after: NeoEphemeris | None,
+        when: datetime,
+    ) -> tuple[float, float, datetime] | None:
+        if before is None or after is None:
+            return None
+        if before.ra_deg is None or before.dec_deg is None:
+            return None
+        if after.ra_deg is None or after.dec_deg is None:
+            return None
+        if before.epoch == after.epoch:
+            return (before.ra_deg, before.dec_deg, before.epoch)
+        total = (after.epoch - before.epoch).total_seconds()
+        if total <= 0:
+            return None
+        fraction = (when - before.epoch).total_seconds() / total
+        fraction = max(0.0, min(1.0, fraction))
+        ra = AnalysisService._interpolate_angle(before.ra_deg, after.ra_deg, fraction)
+        dec = before.dec_deg + (after.dec_deg - before.dec_deg) * fraction
+        return (ra, dec, when)
+
+    @staticmethod
+    def _interpolate_angle(start: float, end: float, fraction: float) -> float:
+        delta = ((end - start + 180.0) % 360.0) - 180.0
+        return (start + delta * fraction) % 360.0
+
+    def record_measurement_from_association(
+        self,
+        db: Session,
+        capture: CaptureLog,
+        association: CandidateAssociation,
+        exposure_seconds: float | None,
+    ) -> Measurement:
+        from datetime import timedelta
+
+        if exposure_seconds:
+            obs_time = capture.started_at + timedelta(seconds=exposure_seconds / 2.0)
+        else:
+            obs_time = capture.started_at
+
+        ra_uncert = association.residual_arcsec
+        if ra_uncert is None:
+            ra_uncert = settings.astrometry_default_seeing_arcsec or 1.0
+        dec_uncert = ra_uncert
+
+        band = settings.default_band or "R"
+        filter_name = getattr(capture, "filter_name", None)
+        if filter_name:
+            band = str(filter_name)
+
+        predicted_mag = self._predict_mag_from_ephemeris(db, capture)
+
+        meas = Measurement(
+            capture_id=capture.id,
+            target=capture.target or "unknown",
+            obs_time=obs_time,
+            ra_deg=association.ra_deg,
+            dec_deg=association.dec_deg,
+            ra_uncert_arcsec=ra_uncert,
+            dec_uncert_arcsec=dec_uncert,
+            magnitude=predicted_mag,
+            mag_sigma=None,
+            band=band,
+            exposure_seconds=exposure_seconds,
+            tracking_mode=None,
+            station_code=settings.station_code,
+            observer=settings.observer_initials,
+            software=settings.software_id,
+            flags=None,
+            reviewed=False,
+            ast_cat="GaiaDR3",
+        )
+        db.add(meas)
+        db.commit()
+        db.refresh(meas)
+        logger.info(
+            "Measurement stored: id=%s capture_id=%s obs_time=%s ra=%.6f dec=%.6f",
+            meas.id,
+            capture.id,
+            obs_time.isoformat(),
+            association.ra_deg,
+            association.dec_deg,
+        )
+        return meas
+
+    def _predict_mag_from_ephemeris(
+        self,
+        db: Session,
+        capture: CaptureLog,
+    ) -> float | None:
+        if not capture.target:
+            return None
+
+        ephems = db.exec(
+            select(NeoEphemeris)
+            .where(NeoEphemeris.trksub == capture.target)
+            .order_by(NeoEphemeris.epoch)
+        ).all()
+        if not ephems:
+            return None
+
+        best_eph = None
+        min_diff = float("inf")
+        before = None
+        after = None
+        for eph in ephems:
+            diff = abs((eph.epoch - capture.started_at).total_seconds())
+            if diff < min_diff:
+                min_diff = diff
+                best_eph = eph
+            if eph.epoch <= capture.started_at:
+                before = eph
+            if eph.epoch >= capture.started_at and after is None:
+                after = eph
+
+        def _mag_value(eph: NeoEphemeris | None) -> float | None:
+            if eph is None:
+                return None
+            if eph.v_mag_predicted is not None:
+                return eph.v_mag_predicted
+            return eph.magnitude
+
+        if best_eph is None:
+            return None
+
+        mag = _mag_value(best_eph)
+
+        if min_diff > 300 and before and after:
+            mag_before = _mag_value(before)
+            mag_after = _mag_value(after)
+            if mag_before is not None and mag_after is not None:
+                total = (after.epoch - before.epoch).total_seconds()
+                if total > 0:
+                    fraction = (capture.started_at - before.epoch).total_seconds() / total
+                    fraction = max(0.0, min(1.0, fraction))
+                    mag = mag_before + (mag_after - mag_before) * fraction
+
+        if mag is None:
+            logger.warning("No predicted magnitude available for %s", capture.target)
+        return mag
 
     def _calculate_residual(
         self,
@@ -311,6 +580,53 @@ class AnalysisService:
         d_dec = dec1 - dec2
         dist_deg = math.sqrt(d_ra**2 + d_dec**2)
         return dist_deg * 3600.0
+
+    @staticmethod
+    def _save_annotation_png(
+        *,
+        fits_path: Path,
+        wcs: WCS,
+        capture_id: int | None,
+        predicted_ra: float,
+        predicted_dec: float,
+        matched_ra: float,
+        matched_dec: float,
+        radius_arcsec: float,
+    ) -> None:
+        data = fits.getdata(fits_path)
+        if data is None or data.size == 0:
+            raise ValueError("FITS image data is empty")
+        if data.ndim > 2:
+            data = data[0]
+
+        scales = proj_plane_pixel_scales(wcs)
+        scale_arcsec = float(np.mean(scales)) * 3600.0
+        radius_px = max(5.0, radius_arcsec / scale_arcsec)
+
+        pred_x, pred_y = wcs.wcs_world2pix(predicted_ra, predicted_dec, 0)
+        match_x, match_y = wcs.wcs_world2pix(matched_ra, matched_dec, 0)
+
+        vmin, vmax = np.nanpercentile(data, [1.0, 99.0])
+        if not np.isfinite(vmin) or not np.isfinite(vmax):
+            vmin, vmax = float(np.nanmin(data)), float(np.nanmax(data))
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.imshow(data, cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
+        ax.add_patch(plt.Circle((pred_x, pred_y), radius_px, color="yellow", fill=False, linewidth=2))
+        ax.add_patch(plt.Circle((match_x, match_y), radius_px, color="cyan", fill=False, linewidth=2))
+        legend_handles = [
+            plt.Line2D([0], [0], color="yellow", marker="o", markerfacecolor="none", linestyle=""),
+            plt.Line2D([0], [0], color="cyan", marker="o", markerfacecolor="none", linestyle=""),
+        ]
+        ax.legend(legend_handles, ["Predicted", "Associated"], loc="upper right", frameon=True)
+        ax.set_axis_off()
+
+        suffix = f"_annotated_{capture_id}" if capture_id is not None else "_annotated"
+        output_path = fits_path.with_suffix("").with_name(f"{fits_path.stem}{suffix}.png")
+        fig.savefig(output_path, dpi=200, bbox_inches="tight", pad_inches=0.1)
+        plt.close(fig)
+        logger.info("Saved annotated image: %s", output_path)
+
     def resolve_click(self, capture: CaptureLog, click_x: float | None = None, click_y: float | None = None, polygon: list[dict[str, float]] | None = None, crop_size: int = 20) -> dict[str, Any] | None:
         """Resolve a click or polygon on an image to a precise centroid and RA/Dec."""
         import logging

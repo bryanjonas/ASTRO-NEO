@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.site_config import SiteFileConfig, load_site_config
 from app.models import NeoCandidate, NeoEphemeris
 from app.services.horizons_client import HorizonsClient
+from app.services.scout_client import ScoutClient
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,11 @@ class WhatsUpService:
             site_lon=self.site_config.longitude,
             site_alt_m=self.site_config.altitude_m,
             timeout=settings.horizons_timeout,
+        )
+        self.scout = ScoutClient(
+            obs_code=self.site_config.station_code,
+            timeout=settings.scout_timeout,
+            base_url=settings.scout_api_url,
         )
 
     def fetch_targets(self, when: datetime | None = None) -> list[WhatsUpTargetPayload]:
@@ -204,9 +210,39 @@ class WhatsUpService:
                 continue
             try:
                 row = self.horizons.get_current_position(candidate.id)
-                self._upsert_ephemeris(candidate, row)
+                self._upsert_ephemeris(candidate, row, source="HORIZONS")
             except Exception as exc:
                 logger.warning("Horizons fetch failed for %s: %s", candidate.id, exc)
+
+    def refresh_targets_with_horizons(self) -> list[NeoCandidate]:
+        targets = self.refresh_targets()
+        successful: list[NeoCandidate] = []
+        for candidate in targets:
+            try:
+                row = self.horizons.get_current_position(candidate.id)
+                self._upsert_ephemeris(candidate, row, source="HORIZONS")
+                max_altitude = settings.max_target_altitude_deg
+                elevation = row.get("elevation_deg")
+                if (
+                    max_altitude is not None
+                    and elevation is not None
+                    and float(elevation) >= float(max_altitude)
+                ):
+                    candidate.status = "WHATSUP_TOO_HIGH"
+                    logger.warning(
+                        "Skipping %s: elevation %.1f° exceeds max %.1f°",
+                        candidate.id,
+                        float(elevation),
+                        float(max_altitude),
+                    )
+                    continue
+                candidate.status = "WHATSUP"
+                successful.append(candidate)
+            except Exception as exc:
+                logger.warning("Horizons fetch failed for %s: %s", candidate.id, exc)
+                candidate.status = "WHATSUP_NO_HORIZONS"
+        self.session.commit()
+        return successful
 
     def missing_horizons(self, targets: Iterable[NeoCandidate]) -> list[str]:
         cutoff = datetime.utcnow() - timedelta(
@@ -256,13 +292,18 @@ class WhatsUpService:
             self.session.refresh(record)
         return results
 
-    def _upsert_ephemeris(self, candidate: NeoCandidate, row: dict[str, Any]) -> None:
+    def _upsert_ephemeris(
+        self,
+        candidate: NeoCandidate,
+        row: dict[str, Any],
+        source: str,
+    ) -> None:
         epoch = row["epoch"]
         existing = self.session.exec(
             select(NeoEphemeris)
             .where(NeoEphemeris.candidate_id == candidate.id)
             .where(NeoEphemeris.epoch == epoch)
-            .where(NeoEphemeris.source == "HORIZONS")
+            .where(NeoEphemeris.source == source)
         ).first()
         ra_rate = row.get("ra_rate_arcsec_min")
         dec_rate = row.get("dec_rate_arcsec_min")
@@ -281,7 +322,7 @@ class WhatsUpService:
             "airmass": row.get("airmass"),
             "v_mag_predicted": row.get("v_mag"),
             "uncertainty_3sigma_arcsec": row.get("uncertainty_3sigma_arcsec"),
-            "source": "HORIZONS",
+            "source": source,
         }
 
         if existing:

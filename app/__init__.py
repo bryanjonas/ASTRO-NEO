@@ -41,21 +41,41 @@ def create_app() -> FastAPI:
         bootstrap_site_config()
         init_db()
         prune_missing_captures()
-        # Fetch latest WhatsUp targets and cache Horizons positions in background.
-        import threading
+        try:
+            from .db.session import get_session
+            from sqlmodel import select, delete
+            from datetime import datetime
 
-        def _startup_refresh() -> None:
-            try:
-                from .db.session import get_session
-                with get_session() as session:
-                    service = WhatsUpService(session=session)
-                    service.ensure_targets(force=True)
-                    top = service.get_ranked_targets(limit=settings.whatsup_max_objects)
-                    service.ensure_horizons_cache(top[:10])
-            except Exception as exc:
-                logger.warning("WhatsUp fetch on startup failed: %s", exc)
+            from .models import NeoCandidate, NeoEphemeris, ObservingSession
 
-        threading.Thread(target=_startup_refresh, daemon=True).start()
+            with get_session() as session:
+                target_ids = session.exec(
+                    select(NeoCandidate.id).where(
+                        NeoCandidate.status.in_(["WHATSUP", "WHATSUP_NO_HORIZONS"])
+                    )
+                ).all()
+                if target_ids:
+                    session.exec(
+                        delete(NeoEphemeris).where(NeoEphemeris.candidate_id.in_(target_ids))
+                    )
+                    session.exec(
+                        delete(NeoCandidate).where(NeoCandidate.id.in_(target_ids))
+                    )
+                    session.commit()
+                active_sessions = session.exec(
+                    select(ObservingSession).where(ObservingSession.status == "active")
+                ).all()
+                if active_sessions:
+                    now = datetime.utcnow()
+                    for active in active_sessions:
+                        active.status = "stopped"
+                        active.end_time = now
+                    session.commit()
+                    logger.info("Stopped %d active session(s) on startup", len(active_sessions))
+        except Exception as exc:
+            logger.warning("Failed to clear WhatsUp targets on startup: %s", exc)
+
+        logger.info("Startup complete; waiting for manual WhatsUp refresh.")
 
     return app
 

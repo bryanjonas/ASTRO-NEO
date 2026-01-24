@@ -16,6 +16,15 @@ class CaptureLog(SQLModel, table=True):
     index: Optional[int] = Field(default=None, index=True)
     path: str = Field(max_length=512)
     started_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    predicted_ra_deg: Optional[float] = Field(default=None)
+    predicted_dec_deg: Optional[float] = Field(default=None)
+    filter_name: Optional[str] = Field(default=None, max_length=32)
+    binning: Optional[int] = Field(default=None)
+    exposure_seconds: Optional[float] = Field(default=None)
+    has_wcs: bool = Field(default=False, index=True)
+    solved_ra_deg: Optional[float] = Field(default=None)
+    solved_dec_deg: Optional[float] = Field(default=None)
+    error_message: Optional[str] = Field(default=None, max_length=1024)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="dashboard" x-data="psvDashboard()">
+  <div class="dashboard-header">
+    <div>
+      <h1>PSV Builder</h1>
+      <p>Review stored measurements, select objects, and generate PSV bundles.</p>
+    </div>
+    <div class="session-actions">
+      <a class="btn-outline" href="/dashboard">Back to Dashboard</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Objects with Measurements</h2>
+    <div class="session-note">
+      Ready = numbered object, vmag > 16, and two nights with 3-5 measurements + at least one magnitude per night.
+    </div>
+  <div class="table">
+    <div class="table-row table-head">
+        <div>Select</div>
+        <div>Object</div>
+        <div>Vmag</div>
+        <div>Science</div>
+        <div>Solved</div>
+        <div>Associated</div>
+        <div>Nights</div>
+        <div>Details</div>
+      </div>
+      <template x-if="targets.length === 0">
+        <div class="table-row">
+          <div class="muted">No measurements found.</div>
+        </div>
+      </template>
+      <template x-for="row in targets" :key="row.target">
+        <div class="table-row">
+          <div>
+            <input type="checkbox" class="checkbox" :value="row.target" x-model="selectedTargets">
+          </div>
+          <div>
+            <span class="mono" x-text="row.object_number"></span>
+            <span class="ready-mark" x-show="row.ready">✓</span>
+          </div>
+          <div x-text="row.vmag === null ? '—' : row.vmag.toFixed(2)"></div>
+          <div x-text="row.science_exposures"></div>
+          <div x-text="row.solved"></div>
+          <div x-text="row.associated"></div>
+          <div x-text="row.nights_observed"></div>
+          <div class="night-detail">
+            <template x-for="night in row.per_night" :key="night.night">
+              <div>
+                <span x-text="night.night"></span>
+                <span class="muted">obs</span>
+                <span x-text="night.count"></span>
+                <span class="muted">mag</span>
+                <span x-text="night.mag_count"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="controls">
+      <button class="btn-outline" @click="selectReady()">Select Ready</button>
+      <button class="btn-outline" @click="clearSelection()">Clear</button>
+      <button class="btn-primary" :disabled="selectedTargets.length === 0 || creating" @click="createBundle()">
+        <span x-text="creating ? 'Generating...' : 'Generate PSV'"></span>
+      </button>
+      <span class="muted" x-text="statusMessage"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Generated PSV Files</h2>
+    <div class="table">
+      <div class="table-row table-head">
+        <div>Filename</div>
+        <div>Size</div>
+        <div>Modified</div>
+        <div>Download</div>
+      </div>
+      <template x-if="files.length === 0">
+        <div class="table-row">
+          <div class="muted">No PSV files found.</div>
+        </div>
+      </template>
+      <template x-for="file in files" :key="file.name">
+        <div class="table-row">
+          <div class="mono filename" x-text="file.name"></div>
+          <div x-text="formatBytes(file.size_bytes)"></div>
+          <div class="mono" x-text="file.modified_at"></div>
+          <div>
+            <a class="btn-outline" :href="`/api/psv/download/${file.name}`">Download</a>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<style>
+.dashboard {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.dashboard-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.table {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 80px 140px 80px 90px 80px 100px 80px 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+
+.table-head {
+  font-weight: 600;
+  color: #111827;
+  background: #f9fafb;
+  border-radius: 0.75rem;
+}
+
+.controls {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.btn-primary,
+.btn-outline {
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #111827;
+  color: #f9fafb;
+  text-decoration: none;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.btn-outline {
+  background: #ffffff;
+  color: #111827;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.muted {
+  color: #6b7280;
+}
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.badge-ok {
+  background: #dcfce7;
+  color: #166534;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+.badge-warn {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+.ready-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.night-detail {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.filename {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.table .table-row .btn-outline {
+  white-space: nowrap;
+}
+
+@media (max-width: 960px) {
+  .table-row {
+    grid-template-columns: 60px 120px 80px 80px 80px 80px 80px 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .table-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+}
+</style>
+
+<script>
+function psvDashboard() {
+  return {
+    targets: [],
+    files: [],
+    selectedTargets: [],
+    creating: false,
+    statusMessage: '',
+
+    init() {
+      this.loadTargets();
+      this.loadFiles();
+    },
+
+    async loadTargets() {
+      try {
+        const response = await fetch('/api/psv/targets');
+        const data = await response.json();
+        this.targets = data.targets || [];
+      } catch (error) {
+        console.error('Failed to load PSV targets:', error);
+      }
+    },
+
+    async loadFiles() {
+      try {
+        const response = await fetch('/api/psv/files');
+        const data = await response.json();
+        this.files = data.files || [];
+      } catch (error) {
+        console.error('Failed to load PSV files:', error);
+      }
+    },
+
+    selectReady() {
+      this.selectedTargets = this.targets.filter((row) => row.ready).map((row) => row.target);
+    },
+
+    clearSelection() {
+      this.selectedTargets = [];
+    },
+
+    async createBundle() {
+      if (this.selectedTargets.length === 0) {
+        return;
+      }
+      this.creating = true;
+      this.statusMessage = 'Generating PSV bundle...';
+      try {
+        const response = await fetch('/api/psv/bundle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targets: this.selectedTargets })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || 'Failed to generate PSV');
+        }
+        this.statusMessage = data.valid ? 'PSV bundle created.' : 'PSV bundle created with validation errors.';
+        await this.loadFiles();
+      } catch (error) {
+        console.error('Failed to generate PSV bundle:', error);
+        this.statusMessage = 'Failed to generate PSV bundle.';
+      } finally {
+        this.creating = false;
+      }
+    },
+
+    formatBytes(value) {
+      if (!value && value !== 0) return '';
+      if (value < 1024) return `${value} B`;
+      const kb = value / 1024;
+      if (kb < 1024) return `${kb.toFixed(1)} KB`;
+      return `${(kb / 1024).toFixed(1)} MB`;
+    }
+  };
+}
+</script>
+{% endblock %}

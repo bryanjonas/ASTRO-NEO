@@ -25,6 +25,7 @@ dependencies = [
     "prometheus-client~=0.20",
     "photutils~=1.12",
     "Pillow~=10.4",
+    "matplotlib~=3.8",
     "scipy~=1.11",
     "lxml~=5.1",
     "python-json-logger~=2.0",

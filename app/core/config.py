@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "ASTRO-NEO"
     app_version: str = "0.1.0"
     api_prefix: str = "/api"
-    database_url: str = "postgresql+psycopg://astro:astro@db:5432/astro"
+    database_url: str = "sqlite:////data/astro_neo.db"
     site_name: str = "default"
     site_latitude: float = 0.0
     site_longitude: float = 0.0
@@ -38,13 +38,16 @@ class Settings(BaseSettings):
     horizons_timeout: float = 30.0
     horizons_cache_hours: int = 6  # Re-fetch if older than this
     horizons_step_minutes: int = 5  # Resolution for ephemeris queries
+    horizons_session_window_minutes: int = 15
+    horizons_session_step_minutes: int = 1
     scout_api_url: str = "https://ssd-api.jpl.nasa.gov/scout.api"
     scout_timeout: float = 30.0
     whatsup_timeout: float = 30.0
     whatsup_refresh_minutes: int = 30
     whatsup_horizons_ttl_minutes: int = 10
-    whatsup_max_objects: int = 10
+    whatsup_max_objects: int = 5
     whatsup_min_altitude_deg: int = 30
+    max_target_altitude_deg: float | None = 80.0
     whatsup_solar_elongation_deg: int = 45
     whatsup_lunar_elongation_deg: int = 20
     whatsup_duration_hours: int = 1
@@ -88,15 +91,23 @@ class Settings(BaseSettings):
     # Direct NINA connection (nina-bridge service removed)
     nina_url: str = "http://host.docker.internal:1888/api"
     nina_timeout: float = 300.0  # 5 minutes to handle long exposures + plate solving
+    # Slew coordinates frame: "jnow" (default) or "icrs"
+    nina_slew_frame: str = "icrs"
 
     data_root: str = "/data"
     fits_retention_days: int = 14
     # Local astrometry solve configuration (synchronous subprocess)
-    astrometry_solve_timeout: float = 300.0
-    astrometry_config_path: str = "/app/astrometry.cfg"
+    astrometry_solve_timeout: float = 120.0
+    astrometry_debug_logs: bool = True
+    astrometry_config_path: str = "/app/app/worker/astrometry.cfg"
     astrometry_scale_low_arcsec: float | None = None
     astrometry_scale_high_arcsec: float | None = None
-    astrometry_search_radius_deg: float | None = None
+    astrometry_search_radius_deg: float | None = 0.3
+    confirmation_solve_radius_deg: float = 0.2
+    confirmation_solve_downsample: int = 2
+    confirmation_solve_sigma: float | None = 4.5
+    confirmation_scale_low_arcsec: float | None = 2.16
+    confirmation_scale_high_arcsec: float | None = 2.64
     astrometry_downsample: int | None = None
     calibration_dark_counts: int = 10
     calibration_flat_counts: int = 10
@@ -107,8 +118,10 @@ class Settings(BaseSettings):
     synthetic_target_interval_minutes: int = 10
     synthetic_target_prefix: str = "FAKE"
     nina_images_path: str = "/data/fits"
+    psv_output_dir: str = "/data/psv"
+    psv_auto_generate: bool = False
     astrometry_default_seeing_arcsec: float = 2.5
-    astrometry_pixel_scale_arcsec: float = 1.5
+    astrometry_pixel_scale_arcsec: float = 2.4
     telescope_focal_length_mm: float | None = None
     camera_sensor_width_mm: float | None = None
     camera_sensor_height_mm: float | None = None
@@ -122,7 +135,7 @@ class Settings(BaseSettings):
     astrometry_min_exposure_seconds: float = 5.0
     astrometry_max_exposure_seconds: float = 180.0
     astrometry_min_frames: int = 4
-    astrometry_max_frames: int = 10
+    astrometry_max_frames: int = 5
     astrometry_min_delay_seconds: float = 30.0
     astrometry_max_delay_seconds: float = 180.0
     astrometry_max_trailing_pixels: float = 3.0

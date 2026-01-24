@@ -1,79 +1,113 @@
 # ASTRO-NEO System Description (LLM-Optimized)
 
-This document is the canonical description for LLMs that need to understand ASTRO-NEO holistically. It summarizes the architecture, data flows, automation behaviors, integrations, and operational assumptions so downstream reasoning can reference a single authoritative source.
+This document is the canonical description of ASTRO-NEO for LLMs. It reflects the current runtime behavior, data flow, and operational constraints.
 
 ## 1. Mission & Scope
-- **Mission**: Automate end-to-end NEOCP follow-up—ingest candidates, decide what to observe, steer hardware, solve images, and deliver MPC-compliant reports.
-- **Key goals**: accuracy (Horizons-based pointing), reliability (per-exposure confirmation + synchronous pipeline), and traceability (DB-backed session and capture records).
-- **Deployment**: Docker Compose services running FastAPI (`api`), background workers (`neocp-fetcher`, `observability-engine`), and Postgres (`db`).
-- **Languages & frameworks**: Python 3.11 backend (FastAPI/Uvicorn, SQLModel + Alembic), Alpine-driven minimal dashboard, and Docker volumes for shared `/data/fits`.
+- Automate NEOCP follow-up: ingest candidates, rank targets, slew, capture, solve, associate, and produce MPC-compliant PSV output.
+- Reliability and traceability: all actions are DB-backed, synchronous, and logged.
+- Containers: Docker Compose services for API, fetchers, and supporting tools. Shared data lives under `/data`.
 
-## 2. Architecture & Data Flow
-1. **Candidate ingestion**: `neocp-fetcher` polls the MPC NEOCP feed, seeds `NeoCandidate` records, and keeps source metadata up to date.
-2. **Observability engine**: `app/services/observability.py` enriches each candidate with site visibility and composite scores using the six-component model (MPC priority, altitude, time-to-set, motion rate, uncertainty, arc extension).
-3. **Session start**: `/api/session/start` selects the highest-ranked visible target (or a manual override) and records an `ObservingSession` entry.
-4. **Sequential capture loop**: `AutomationService` builds a target plan and runs `SequentialCaptureService`, which executes a synchronous per-exposure pipeline.
-5. **Association & reporting**: Solved frames feed source detection and association, then flow into MPC-compliant report generation.
+## 2. Core Services
+- **API**: FastAPI app (`api`) orchestrates sessions, capture flow, solving, association, and PSV output.
+- **NEOCP Fetcher**: polls MPC feeds and stores `NeoCandidate` + snapshots.
+- **Observability**: computes visibility/score data used for ranking and filtering.
 
-## 3. Sequential Capture Pipeline
-The sequential capture workflow is implemented in `app/services/automation.py` and `app/services/sequential_capture.py`.
+## 3. Data Model (SQLite)
+Key tables (SQLite):
+- `NeoCandidate`: candidates from NEOCP.
+- `NeoEphemeris`: ephemeris samples (Horizons or Scout).
+- `CaptureLog`: per-exposure capture metadata and solve results.
+- `CandidateAssociation`: association result linking capture to target position.
+- `Measurement`: astrometric measurement for PSV output.
+- `ObservingSession`: session lifecycle + stats.
 
-For each exposure:
-1. **Scout current position**: Query current RA/Dec via `ScoutClient` using site config.
-2. **Confirmation loop** (max 3 attempts): slew, take short confirmation exposure, poll for FITS, solve locally, compute pointing offset, re-slew if needed.
-3. **Science exposure**: capture the main frame with NINA (no NINA solve).
-4. **Local solve**: run `solve-field` locally, persist WCS and `has_wcs`.
-5. **Detect + associate**: detect sources and match against predicted ephemeris, create `CandidateAssociation` if matched.
+## 4. Target List + Session Readiness
+- UI lists **top 5** candidates (ranked by `vmag` by default).
+- `/api/session/ready` enables Start Session only when:
+  - WhatsUp targets exist (manual refresh required).
+  - Recent Horizons ephemeris exists for the top targets.
+- Refresh endpoint (`/api/whatsup/refresh`) pulls targets and ephemeris.
 
-All operations are synchronous and DB-backed (no in-memory SESSION_STATE).
+## 5. Ephemeris Handling
+- Horizons is the authoritative source for local pointing/association.
+- Before starting exposures for a target, the system fetches a **window** of ephemeris points:
+  - Window: **next 15 minutes**
+  - Step: **1 minute**
+- All fetched rows are persisted in `NeoEphemeris`.
+- Association uses the capture timestamp and interpolates between nearest ephemeris points if the nearest row is too old.
 
-## 3.2 Pointing Tolerance Logic
-- **Centering vs in-frame**: Confirmation uses two thresholds derived from telescope/camera geometry:
-  - **Center**: `max(center_fraction * FOV_radius, center_floor_arcsec)` with optional motion-rate adjustment.
-  - **Acquire**: `acquire_fraction * FOV_radius` (in-frame).
-- If offset ≤ center → “centered”; if offset ≤ acquire → “in-frame”; otherwise re-slew (up to 3 attempts).
+## 6. Sequential Capture Flow
+Implemented in `SequentialCaptureService`:
+1. Fetch and store Horizons ephemeris window for the target.
+2. Compute predicted RA/Dec for the current time.
+3. Slew to predicted coordinates.
+4. Capture science exposure via NINA.
+5. Poll for FITS and stabilize file.
+6. Solve locally via `solve-field`.
+7. Associate detected source with predicted position.
 
-## 3.1 Slew & Exposure Lessons (Live NINA)
-- **Slew completion**: Use `GET /equipment/mount/info` and wait until `Slewing=false`, then apply a fixed settle delay (tested 3s). Avoid RA/Dec tolerance checks in this phase; centering is verified via the confirmation solve.
-- **Exposure completion**:
-  - If `waitForResult=false`, completion is when `GET /equipment/camera/info` reports `IsExposing=false`.
-  - If `waitForResult=true`, the capture call returns only after exposure completion, so post-return `IsExposing` is already false.
-- **Reliable file saves**: The Advanced API v2 call that consistently writes FITS to `/data/fits/YYYY-MM-DD/<target>/SNAPSHOT` is:
-  - `save=true`, `waitForResult=false`, `getResult=false`, `solve=false`, `omitImage=true`, `targetName=<name>`.
-  - `waitForResult=true` variants returned success but did not reliably create files under the date-based folder in live testing.
+Notes:
+- Confirmation capture/solve is currently bypassed (kept as stubs).
+- All steps are synchronous and logged.
 
-## 4. File Polling & Local Solving
-- **FITS location**: NINA writes to `/data/fits/YYYY-MM-DD/<target>/SNAPSHOT` (date is local site time).
-- **File detection**: `app/services/file_poller.py` polls for `{TARGET}_*.fits` under the date/target/SNAPSHOT directory with exponential backoff (100ms to 3.2s).
-- **Solving**: `app/services/solver.py` runs `solve-field` locally in the API container; no remote astrometry worker exists.
+## 7. Local Plate Solving
+- Uses `solve-field` locally in the API container.
+- Solve parameters include RA/Dec hint, radius steps, and scale bounds.
+- Progressive radius for science solves:
+  - 0.2 → 0.3 → 0.4 degrees
+  - timeouts: 45s → 60s → 90s
+- Scale bounds are locked to ±10% of computed pixel scale when available.
+- WCS headers are written back into the FITS.
 
-## 5. Target Scoring & Presets
-- Scoring resides in `app/services/target_scoring.py`. Each component returns 0–100:
-  - MPC priority
-  - Altitude
-  - Time-to-set
-  - Motion rate
-  - Uncertainty
-  - Arc extension
-- Weights default to 30/25/15/10/10/10 and are configurable via settings.
-- Exposure presets come from `app/services/presets.py`: bright/medium/faint templates with motion-aware exposure reduction.
+## 8. Association & PSV Output
+- `AnalysisService.auto_associate`:
+  - loads WCS
+  - finds predicted position (interpolated ephemeris)
+  - detects sources
+  - matches nearest within tolerance
+  - writes `CandidateAssociation`
+- Measurements are stored only when a capture is **solved and associated**.
+- Magnitudes on new measurements are populated from Horizons predicted V magnitude.
+- PSV bundles are generated **manually** via the PSV Builder page (auto-generation is disabled).
+- PSV bundles are written to `/data/psv`.
 
-## 6. UI & Operators
-- Minimal dashboard served at `/dashboard` with Alpine-based status polling.
-- Primary API endpoints: `/api/session/start`, `/api/session/stop`, `/api/session/status`, `/api/observability`, `/api/captures`.
-- **Start Session gating**: Enabled only after startup ranking + Scout current-position fetch for the top 10 candidates yields a top 5 with recent Scout data (DB-only check in `/api/session/ready`).
+## 9. Annotated Outputs
+- For successful associations, an annotated PNG is saved alongside the FITS:
+  - `<FITS_STEM>_annotated.png`
+  - Both predicted and associated positions are marked with circles + legend.
 
-## 7. Testing & Evidence
-- Local NINA integration is verified via direct REST calls (no bridge service).
-- The solver pipeline writes WCS headers back into FITS for downstream compatibility.
-- File polling is synchronous and tied to the capture call, avoiding background correlation/backfill logic.
+## 10. UI Summary
+- Dashboard polls:
+  - session status
+  - recent captures
+  - logs
+  - target list
+  - readiness
+- Start Session is disabled until readiness passes.
+- PSV Builder page (`/dashboard/psv`) provides:
+  - per-object stats (object number, vmag, science/solved/associated counts)
+  - multi-night readiness indicator (green checkmark)
+  - manual PSV bundle generation and download links
 
-## 8. Remaining Work & Operators' Hooks
-- Validate confirmation loop behavior across multiple exposures and slow readouts.
-- Ensure Horizons queries remain within API rate limits for long sessions.
-- Monitor local `solve-field` runtime and index coverage for target magnitude ranges.
+## 11. Operational Defaults
+- Top targets shown: 5
+- Horizons window: 15 minutes
+- Horizons step: 1 minute
+- Max target altitude: 80 degrees
+- Science exposures: multiple per target (count configurable in presets/plan)
+- PSV auto-generation: disabled (manual only)
 
-## 9. Next Fixes (Current)
-- **Scout availability**: Scout can return 503/timeouts; readiness relies on cached Scout rows from startup fetch. If Scout is down, re-run startup refresh later.
-- **Prediction flow**: `EphemerisPredictionService` now uses Scout current position; MPC fallback only when Scout is unavailable.
-- **Dashboard log/captures**: `/api/logs` and `/api/captures?session_id=...` power the UI; verify the API is restarted after changes.
+## 12. Common Failure Modes
+- **No targets**: refresh not run or Horizons fetch failed.
+- **Association skipped**: ephemeris too stale (fixed by windowed fetch + interpolation).
+- **Solve timeout**: too-wide hint radius or scale bounds; use progressive steps.
+- **Missing dependencies**: local solver requires `astropy`, `photutils`, `matplotlib`.
+
+## 13. Key Files
+- `app/services/sequential_capture.py`: capture flow + solve + association.
+- `app/services/analysis.py`: auto-association + annotations.
+- `app/services/solver.py`: local solve-field invocation.
+- `app/services/whatsup.py`: target refresh + ephemeris cache.
+- `app/core/config.py`: runtime settings.
+- `app/api/psv.py`: PSV readiness + bundle endpoints.
+- `app/templates/psv.html`: PSV Builder UI.

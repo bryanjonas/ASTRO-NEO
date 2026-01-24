@@ -74,6 +74,13 @@ class NinaBridgeService:
         endpoint = "/equipment/mount/park" if park else "/equipment/mount/unpark"
         return self._request("GET", endpoint)
 
+    def mount_info_raw(self) -> dict[str, Any]:
+        return self._request("GET", "/equipment/mount/info")
+
+    def mount_info(self) -> dict[str, Any]:
+        raw = self.mount_info_raw()
+        return self._normalize_telescope(raw)
+
     def slew(self, ra_deg: float, dec_deg: float) -> str:
         return self._request("GET", "/equipment/mount/slew", {"ra": ra_deg, "dec": dec_deg})
 

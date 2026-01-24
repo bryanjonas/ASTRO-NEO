@@ -17,22 +17,29 @@ All operations are synchronous and traceable.
 """
 
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+import astropy.units as u
+from astropy.coordinates import FK5, SkyCoord
+from astropy.time import Time
+
 from sqlalchemy.orm import Session
+from sqlmodel import select
 
 from app.core.config import settings
 from app.core.site_config import load_site_config
 from app.models.analysis import CandidateAssociation
+from app.models.neocp import NeoCandidate, NeoEphemeris
 from app.models.capture import CaptureLog
 from app.services.analysis import AnalysisService
 from app.services.file_poller import poll_for_fits_file, wait_for_file_size_stable
 from app.services.scout_client import ScoutClient
 from app.services.horizons_client import HorizonsClient
 from app.services.nina_client import NinaBridgeService
-from app.services.solver import solve_fits
+from app.services.solver import SolveError, solve_fits
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +78,141 @@ class SequentialCaptureService:
 
         self.analysis = analysis or AnalysisService(db)
 
+    @staticmethod
+    def _to_mount_coords(ra_deg: float, dec_deg: float) -> tuple[float, float]:
+        """Convert ICRS/J2000 coords to the mount frame used by NINA."""
+        frame = settings.nina_slew_frame.strip().lower()
+        if frame in ("jnow", "fk5", "apparent"):
+            try:
+                coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
+                jnow = coord.transform_to(FK5(equinox=Time.now()))
+                return float(jnow.ra.deg), float(jnow.dec.deg)
+            except Exception as exc:
+                logger.warning("Failed to convert coords to %s; using ICRS: %s", frame, exc)
+        return ra_deg, dec_deg
+
+    @staticmethod
+    def _format_ra_dec(ra_deg: float, dec_deg: float) -> tuple[str, str]:
+        coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
+        ra_hms = coord.ra.to_string(unit=u.hour, sep=":", pad=True, precision=0)
+
+        dms = coord.dec.signed_dms
+        sign = "-" if dms.sign < 0 else ""
+        deg = int(abs(dms.d))
+        minute = int(abs(dms.m))
+        second = int(round(abs(dms.s)))
+        if second == 60:
+            second = 0
+            minute += 1
+        if minute == 60:
+            minute = 0
+            deg += 1
+        dec_dms = f"{sign}{deg:02d}° {minute:02d}' {second:02d}\""
+        return ra_hms, dec_dms
+
+    @staticmethod
+    def _max_target_altitude() -> float | None:
+        max_alt = settings.max_target_altitude_deg
+        if max_alt is None:
+            return None
+        if max_alt >= 90.0:
+            return None
+        return float(max_alt)
+
+    @staticmethod
+    def _jnow_to_icrs(ra_deg: float, dec_deg: float) -> tuple[float, float]:
+        coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame=FK5(equinox=Time.now()))
+        icrs = coord.icrs
+        return float(icrs.ra.deg), float(icrs.dec.deg)
+
+    @staticmethod
+    def _to_icrs_from_epoch(
+        ra_deg: float,
+        dec_deg: float,
+        epoch: str | float | None,
+    ) -> tuple[float, float]:
+        if epoch is None:
+            return ra_deg, dec_deg
+        epoch_str = str(epoch).strip().upper()
+        if epoch_str in ("JNOW", "NOW"):
+            return SequentialCaptureService._jnow_to_icrs(ra_deg, dec_deg)
+        return ra_deg, dec_deg
+
+    def _solve_with_progressive_radius(
+        self,
+        *,
+        fits_path: str | Path,
+        ra_hint: float,
+        dec_hint: float,
+        base_radius_deg: float,
+        downsample: int | None,
+        sigma: float | None,
+        scale_low_arcsec: float | None,
+        scale_high_arcsec: float | None,
+        max_radius_deg: float = 2.0,
+        timeout_seconds: float | None = None,
+        radius_steps: list[float] | None = None,
+        timeout_steps: list[int | None] | None = None,
+    ) -> tuple[dict[str, Any], float]:
+        if radius_steps:
+            radii = [float(step) for step in radius_steps]
+        else:
+            radii = []
+            radius = max(0.1, float(base_radius_deg))
+            cap = max(radius, float(max_radius_deg))
+            radii.append(radius)
+            for factor in (1.5, 2.0):
+                next_radius = radius * factor
+                if next_radius < cap:
+                    radii.append(next_radius)
+            while radii[-1] < cap:
+                next_radius = min(cap, radii[-1] * 2.0)
+                if next_radius <= radii[-1]:
+                    break
+                radii.append(next_radius)
+        if timeout_steps:
+            timeouts = list(timeout_steps)
+        else:
+            base_timeout = timeout_seconds or settings.astrometry_solve_timeout
+            timeouts = []
+            if base_timeout:
+                factors = [0.5, 0.75, 1.0]
+                for idx in range(len(radii)):
+                    factor = factors[idx] if idx < len(factors) else 1.0
+                    timeouts.append(max(30, int(base_timeout * factor)))
+            else:
+                timeouts = [None for _ in radii]
+        last_exc: Exception | None = None
+        for attempt_radius, attempt_timeout in zip(radii, timeouts, strict=False):
+            try:
+                logger.info(
+                    "Attempting plate solve with radius %.2f deg (timeout=%ss)",
+                    attempt_radius,
+                    attempt_timeout if attempt_timeout is not None else "default",
+                )
+                result = solve_fits(
+                    fits_path=fits_path,
+                    ra_hint=ra_hint,
+                    dec_hint=dec_hint,
+                    radius_deg=attempt_radius,
+                    downsample=downsample,
+                    sigma=sigma,
+                    scale_low_arcsec=scale_low_arcsec,
+                    scale_high_arcsec=scale_high_arcsec,
+                    timeout=attempt_timeout,
+                )
+                return result, attempt_radius
+            except SolveError as exc:
+                last_exc = exc
+                logger.warning(
+                    "Plate solve failed with radius %.2f deg: %s",
+                    attempt_radius,
+                    exc,
+                )
+        if last_exc:
+            raise last_exc
+        raise SolveError("Plate solve failed with no attempts")
+
     def capture_with_confirmation(
         self,
         target_name: str,
@@ -79,7 +221,7 @@ class SequentialCaptureService:
         filter_name: str = "L",
         binning: int = 1,
         confirmation_exposure_seconds: float = 5.0,
-        confirmation_binning: int = 2,
+        confirmation_binning: int = 1,
         confirmation_max_attempts: int = 3,
         centering_tolerance_arcsec: float | None = None,
     ) -> dict[str, Any]:
@@ -119,15 +261,62 @@ class SequentialCaptureService:
 
         # Step 1: Get fresh ephemeris from Horizons (fallback to Scout if needed)
         try:
-            ephemeris = self.horizons.get_current_position(candidate_id)
+            now = datetime.utcnow()
+            window_minutes = settings.horizons_session_window_minutes
+            step_minutes = settings.horizons_session_step_minutes
+            rows = self.horizons.fetch_ephemeris(
+                target_designation=candidate_id,
+                start_time=now,
+                stop_time=now + timedelta(minutes=window_minutes),
+                step_minutes=step_minutes,
+            )
+            if not rows:
+                raise RuntimeError("Horizons returned no ephemeris rows")
+            candidate = self.db.exec(
+                select(NeoCandidate).where(NeoCandidate.id == candidate_id)
+            ).first()
+            if candidate:
+                self._upsert_ephemeris_rows(candidate, rows, source="HORIZONS")
+                logger.info(
+                    "Stored %d Horizons ephemeris points for %s (window=%dm step=%dm)",
+                    len(rows),
+                    candidate_id,
+                    window_minutes,
+                    step_minutes,
+                )
+            ephemeris = min(rows, key=lambda row: abs((row["epoch"] - now).total_seconds()))
             predicted_ra = ephemeris["ra_deg"]
             predicted_dec = ephemeris["dec_deg"]
             rate_arcsec_per_min = self._estimate_rate_arcsec_per_min(ephemeris)
+            predicted_hms, predicted_dms = self._format_ra_dec(predicted_ra, predicted_dec)
             logger.info(
-                "Horizons ephemeris: RA=%.6f, Dec=%.6f",
+                "Horizons ephemeris: RA=%.6f (%s), Dec=%.6f (%s)",
                 predicted_ra,
+                predicted_hms,
                 predicted_dec,
+                predicted_dms,
             )
+            max_altitude = self._max_target_altitude()
+            elevation = ephemeris.get("elevation_deg")
+            if (
+                max_altitude is not None
+                and elevation is not None
+                and float(elevation) >= max_altitude
+            ):
+                logger.warning(
+                    "Target %s too close to zenith (elevation %.1f° >= %.1f°); skipping.",
+                    candidate_id,
+                    float(elevation),
+                    max_altitude,
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        f"Target elevation {float(elevation):.1f}° exceeds limit "
+                        f"{max_altitude:.1f}°"
+                    ),
+                    "confirmation_attempts": 0,
+                }
         except Exception as e:
             logger.warning("Horizons query failed for %s: %s", candidate_id, e)
             try:
@@ -135,11 +324,35 @@ class SequentialCaptureService:
                 predicted_ra = ephemeris["ra_deg"]
                 predicted_dec = ephemeris["dec_deg"]
                 rate_arcsec_per_min = self._estimate_rate_arcsec_per_min(ephemeris)
+                predicted_hms, predicted_dms = self._format_ra_dec(predicted_ra, predicted_dec)
                 logger.info(
-                    "Scout ephemeris: RA=%.6f, Dec=%.6f",
+                    "Scout ephemeris: RA=%.6f (%s), Dec=%.6f (%s)",
                     predicted_ra,
+                    predicted_hms,
                     predicted_dec,
+                    predicted_dms,
                 )
+                max_altitude = self._max_target_altitude()
+                elevation = ephemeris.get("elevation_deg")
+                if (
+                    max_altitude is not None
+                    and elevation is not None
+                    and float(elevation) >= max_altitude
+                ):
+                    logger.warning(
+                        "Target %s too close to zenith (elevation %.1f° >= %.1f°); skipping.",
+                        candidate_id,
+                        float(elevation),
+                        max_altitude,
+                    )
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Target elevation {float(elevation):.1f}° exceeds limit "
+                            f"{max_altitude:.1f}°"
+                        ),
+                        "confirmation_attempts": 0,
+                    }
             except Exception as scout_exc:
                 logger.error("Failed to query ephemerides for %s: %s", candidate_id, scout_exc)
                 return {
@@ -155,157 +368,175 @@ class SequentialCaptureService:
         )
         center_arcsec = tolerances["center_arcsec"]
         acquire_arcsec = tolerances["acquire_arcsec"]
+        pixel_scale = None
+        if settings.astrometry_pixel_scale_arcsec:
+            pixel_scale = settings.astrometry_pixel_scale_arcsec
+        elif settings.camera_pixel_size_um and settings.telescope_focal_length_mm:
+            pixel_scale = 206.265 * settings.camera_pixel_size_um / settings.telescope_focal_length_mm
+        scale_low, scale_high = self._compute_scale_bounds(
+            pixel_scale,
+            settings.confirmation_scale_low_arcsec,
+            settings.confirmation_scale_high_arcsec,
+        )
         confirmation_attempts = 0
         final_ra = predicted_ra
         final_dec = predicted_dec
+        confirmation_success = False
+        confirmation_result: dict[str, Any] | None = None
 
-        for attempt in range(1, confirmation_max_attempts + 1):
-            confirmation_attempts = attempt
-            logger.info(f"Confirmation attempt {attempt}/{confirmation_max_attempts}")
+        # Confirmation capture/solve disabled temporarily; keep stubs for later re-enable.
+        confirmation_bypass = True
+        logger.info("Confirmation capture skipped (temporary bypass).")
+        try:
+            slew_ra, slew_dec = self._to_mount_coords(final_ra, final_dec)
+            slew_hms, slew_dms = self._format_ra_dec(slew_ra, slew_dec)
+            if settings.nina_slew_frame.strip().lower() != "icrs":
+                icrs_hms, icrs_dms = self._format_ra_dec(final_ra, final_dec)
+                logger.info(
+                    "Slewing to RA=%.6f (%s), Dec=%.6f (%s) (mount frame=%s from ICRS %.6f (%s), %.6f (%s))",
+                    slew_ra,
+                    slew_hms,
+                    slew_dec,
+                    slew_dms,
+                    settings.nina_slew_frame,
+                    final_ra,
+                    icrs_hms,
+                    final_dec,
+                    icrs_dms,
+                )
+            else:
+                logger.info(
+                    "Slewing to RA=%.6f (%s), Dec=%.6f (%s)",
+                    slew_ra,
+                    slew_hms,
+                    slew_dec,
+                    slew_dms,
+                )
+            self.nina.slew(slew_ra, slew_dec)
+            self.nina.wait_for_mount_ready(timeout=180.0)
+            logger.info("Slew complete; proceeding with science exposure.")
+        except Exception as e:
+            logger.error("Slew failed: %s", e)
+            return {
+                "success": False,
+                "error": f"Slew failed: {e}",
+                "confirmation_attempts": 0,
+            }
 
-            # Slew to predicted position
+        confirmation_success = True
+        confirmation_result = {
+            "success": True,
+            "capture_id": None,
+            "fits_path": None,
+            "solved": False,
+            "association_id": None,
+            "confirmation_attempts": 0,
+            "predicted_ra_deg": predicted_ra,
+            "predicted_dec_deg": predicted_dec,
+            "confirmation_only": False,
+        }
+
+        if confirmation_success and settings.test_mode_slew_only and not confirmation_bypass:
             try:
-                logger.info(f"Slewing to RA={final_ra:.6f}, Dec={final_dec:.6f}")
-                self.nina.slew(final_ra, final_dec)
-                self.nina.wait_for_mount_ready(timeout=180.0)
-                if settings.test_mode_slew_only:
-                    logger.info("Test mode active: slew complete, skipping exposures.")
-                    return {
-                        "success": True,
-                        "capture_id": None,
-                        "fits_path": None,
-                        "solved": False,
-                        "association_id": None,
-                        "confirmation_attempts": attempt,
-                        "predicted_ra_deg": predicted_ra,
-                        "predicted_dec_deg": predicted_dec,
-                        "slew_only": True,
-                    }
-            except Exception as e:
-                logger.error(f"Slew failed on attempt {attempt}: {e}")
-                if attempt == confirmation_max_attempts:
-                    return {
-                        "success": False,
-                        "error": f"Slew failed: {e}",
-                        "confirmation_attempts": attempt,
-                    }
-                continue
-
-            # Capture confirmation image
-            try:
-                confirm_target_name = f"{target_name}-CONFIRM"
-                logger.info(f"Capturing confirmation image: {confirm_target_name}")
+                science_capture_start = time.time()
+                logger.info("Capturing science image: %s", target_name)
                 self.nina.wait_for_camera_idle(timeout=60.0)
                 self.nina.start_exposure(
-                    filter_name="L",
-                    binning=confirmation_binning,
-                    exposure_seconds=confirmation_exposure_seconds,
-                    target=confirm_target_name,
-                    request_solve=False,  # Never rely on NINA solving
+                    filter_name=filter_name,
+                    binning=binning,
+                    exposure_seconds=exposure_seconds,
+                    target=target_name,
+                    request_solve=False,
                 )
-                self.nina.wait_for_camera_idle(
-                    timeout=confirmation_exposure_seconds + 30.0
-                )
+                self.nina.wait_for_camera_idle(timeout=exposure_seconds + 30.0)
             except Exception as e:
-                logger.error(f"Confirmation capture failed on attempt {attempt}: {e}")
-                if attempt == confirmation_max_attempts:
-                    return {
-                        "success": False,
-                        "error": f"Confirmation capture failed: {e}",
-                        "confirmation_attempts": attempt,
-                    }
-                continue
-
-            # Wait for confirmation FITS file
-            confirm_path = poll_for_fits_file(
-                target_name=confirm_target_name,
-                fits_directory=settings.nina_images_path,
-                timeout=30.0,
-            )
-            if not confirm_path:
-                logger.error(f"Confirmation FITS file not found on attempt {attempt}")
-                if attempt == confirmation_max_attempts:
-                    return {
-                        "success": False,
-                        "error": "Confirmation image not created",
-                        "confirmation_attempts": attempt,
-                    }
-                continue
-
-            # Wait for file write to complete
-            if not wait_for_file_size_stable(confirm_path, stable_duration=1.0, timeout=10.0):
-                logger.warning("Confirmation file size did not stabilize, continuing anyway")
-
-            # Solve confirmation image
-            try:
-                logger.info(f"Solving confirmation image: {confirm_path}")
-                solve_result = solve_fits(
-                    fits_path=confirm_path,
-                    ra_hint=final_ra,
-                    dec_hint=final_dec,
-                )
-                solved_ra = solve_result["solution"]["ra_deg"]
-                solved_dec = solve_result["solution"]["dec_deg"]
-                logger.info(f"Confirmation solved: RA={solved_ra:.6f}, Dec={solved_dec:.6f}")
-            except Exception as e:
-                logger.error(f"Confirmation solve failed on attempt {attempt}: {e}")
-                if attempt == confirmation_max_attempts:
-                    return {
-                        "success": False,
-                        "error": f"Confirmation solve failed: {e}",
-                        "confirmation_attempts": attempt,
-                    }
-                continue
-
-            # Calculate offset
-            offset_arcsec = self._calculate_separation_arcsec(
-                predicted_ra, predicted_dec, solved_ra, solved_dec
-            )
-            logger.info(
-                "Confirmation offset: %.1f arcsec (center<=%.1f, acquire<=%.1f)",
-                offset_arcsec,
-                center_arcsec,
-                acquire_arcsec,
-            )
-
-            # Check if centered / in-frame
-            if offset_arcsec <= center_arcsec:
-                logger.info(f"✓ Centered after {attempt} attempt(s), offset={offset_arcsec:.1f}\"")
-                final_ra = solved_ra
-                final_dec = solved_dec
-                break
-            if offset_arcsec <= acquire_arcsec:
-                logger.info(
-                    "✓ In-frame after %d attempt(s), offset=%.1f\" (not fully centered)",
-                    attempt,
-                    offset_arcsec,
-                )
-                final_ra = solved_ra
-                final_dec = solved_dec
-                break
-
-            # Not centered - update position for next attempt
-            logger.warning(
-                f"Not centered: offset={offset_arcsec:.1f}\" > {acquire_arcsec:.1f}\". "
-                f"Re-slewing to solved position for next attempt."
-            )
-            final_ra = solved_ra
-            final_dec = solved_dec
-
-            if attempt == confirmation_max_attempts:
+                logger.error("Science capture failed: %s", e)
                 return {
                     "success": False,
-                    "error": f"Failed to center after {confirmation_max_attempts} attempts (final offset={offset_arcsec:.1f}\")",
-                    "confirmation_attempts": attempt,
-                    "predicted_ra_deg": predicted_ra,
-                    "predicted_dec_deg": predicted_dec,
-                    "solved_ra_deg": solved_ra,
-                    "solved_dec_deg": solved_dec,
+                    "error": f"Science capture failed: {e}",
+                    "confirmation_attempts": confirmation_attempts,
+                }
+
+            science_path = poll_for_fits_file(
+                target_name=target_name,
+                fits_directory=settings.nina_images_path,
+                timeout=exposure_seconds + 60.0,
+                min_mtime=science_capture_start - 1.0,
+            )
+            if not science_path:
+                logger.error("Science FITS file not found")
+                return {
+                    "success": False,
+                    "error": "Science image not created",
+                    "confirmation_attempts": confirmation_attempts,
+                }
+            if not wait_for_file_size_stable(science_path, stable_duration=1.0, timeout=10.0):
+                logger.warning("Science file size did not stabilize, continuing anyway")
+
+            logger.info("Science exposure saved: %s", science_path)
+            try:
+                solve_base_radius = float(settings.confirmation_solve_radius_deg)
+                science_scale_low, science_scale_high = scale_low, scale_high
+                if pixel_scale:
+                    science_scale_low = pixel_scale * 0.9
+                    science_scale_high = pixel_scale * 1.1
+                solve_result, _ = self._solve_with_progressive_radius(
+                    fits_path=science_path,
+                    ra_hint=predicted_ra,
+                    dec_hint=predicted_dec,
+                    base_radius_deg=solve_base_radius,
+                    downsample=settings.confirmation_solve_downsample,
+                    sigma=settings.confirmation_solve_sigma,
+                    scale_low_arcsec=science_scale_low,
+                    scale_high_arcsec=science_scale_high,
+                    max_radius_deg=1.2,
+                    timeout_seconds=settings.astrometry_solve_timeout,
+                    radius_steps=[0.2, 0.3, 0.4],
+                    timeout_steps=[45, 60, 90],
+                )
+                solved_raw_ra = solve_result["solution"]["ra_deg"]
+                solved_raw_dec = solve_result["solution"]["dec_deg"]
+                solved_epoch = solve_result["solution"].get("epoch")
+                solved_ra, solved_dec = self._to_icrs_from_epoch(
+                    solved_raw_ra,
+                    solved_raw_dec,
+                    solved_epoch,
+                )
+                solved_pixscale = solve_result["solution"].get("pixscale")
+                if solved_pixscale and science_scale_low and science_scale_high:
+                    if not (science_scale_low <= solved_pixscale <= science_scale_high):
+                        raise RuntimeError("Science plate solve pixel scale out of range")
+                hint_sep_arcsec = self._calculate_separation_arcsec(
+                    predicted_ra, predicted_dec, solved_ra, solved_dec
+                )
+                max_hint_arcsec = solve_base_radius * 3600.0
+                if hint_sep_arcsec > max_hint_arcsec:
+                    raise RuntimeError("Science plate solve outside hint radius")
+                solved_hms, solved_dms = self._format_ra_dec(solved_ra, solved_dec)
+                logger.info(
+                    "Science plate solve success (ICRS): RA=%.6f (%s), Dec=%.6f (%s)",
+                    solved_ra,
+                    solved_hms,
+                    solved_dec,
+                    solved_dms,
+                )
+                if confirmation_result:
+                    confirmation_result["fits_path"] = str(science_path)
+                logger.info("Science plate solve success; test mode stopping session.")
+                return confirmation_result or {"success": True, "confirmation_only": True}
+            except Exception as e:
+                logger.error("Science plate solve failed: %s", e)
+                return {
+                    "success": False,
+                    "error": f"Science plate solve failed: {e}",
+                    "confirmation_attempts": confirmation_attempts,
                 }
 
         # Step 3: Create capture record for main exposure
         capture = CaptureLog(
+            kind="science",
             target=target_name,
+            path="",
             started_at=datetime.utcnow(),
             predicted_ra_deg=final_ra,
             predicted_dec_deg=final_dec,
@@ -321,6 +552,7 @@ class SequentialCaptureService:
 
         # Step 4: Take main science exposure
         try:
+            main_capture_start = time.time()
             logger.info(f"Capturing main science image: {target_name}")
             self.nina.wait_for_camera_idle(timeout=60.0)
             self.nina.start_exposure(
@@ -347,6 +579,7 @@ class SequentialCaptureService:
             target_name=target_name,
             fits_directory=settings.nina_images_path,
             timeout=exposure_seconds + 60.0,  # Exposure time + buffer
+            min_mtime=main_capture_start - 1.0,
         )
         if not fits_path:
             logger.error("Main FITS file not found")
@@ -404,11 +637,22 @@ class SequentialCaptureService:
         try:
             logger.info("Detecting sources and associating with predicted position")
             association = self.analysis.auto_associate(
-                capture_id=capture.id,
+                capture=capture,
                 tolerance_arcsec=10.0,
             )
 
             if association:
+                measurement_id = None
+                try:
+                    measurement = self.analysis.record_measurement_from_association(
+                        db=self.db,
+                        capture=capture,
+                        association=association,
+                        exposure_seconds=exposure_seconds,
+                    )
+                    measurement_id = measurement.id
+                except Exception as exc:
+                    logger.error("Failed to store measurement for capture %s: %s", capture.id, exc)
                 logger.info(
                     f"✓ Association created: id={association.id}, "
                     f"residual={association.residual_arcsec:.2f}\""
@@ -419,6 +663,7 @@ class SequentialCaptureService:
                     "fits_path": str(fits_path),
                     "solved": True,
                     "association_id": association.id,
+                    "measurement_id": measurement_id,
                     "confirmation_attempts": confirmation_attempts,
                     "predicted_ra_deg": final_ra,
                     "predicted_dec_deg": final_dec,
@@ -505,6 +750,56 @@ class SequentialCaptureService:
             return abs(float(ra_rate))
         return (float(ra_rate) ** 2 + float(dec_rate) ** 2) ** 0.5
 
+    def _upsert_ephemeris_rows(
+        self,
+        candidate: NeoCandidate,
+        rows: list[dict[str, Any]],
+        source: str = "HORIZONS",
+    ) -> None:
+        if not rows:
+            return
+        epochs = [row["epoch"] for row in rows]
+        existing = self.db.exec(
+            select(NeoEphemeris)
+            .where(NeoEphemeris.candidate_id == candidate.id)
+            .where(NeoEphemeris.source == source)
+            .where(NeoEphemeris.epoch.in_(epochs))
+        ).all()
+        existing_by_epoch = {eph.epoch: eph for eph in existing}
+        for row in rows:
+            ra_rate = row.get("ra_rate_arcsec_min")
+            dec_rate = row.get("dec_rate_arcsec_min")
+            rate = None
+            if ra_rate is not None and dec_rate is not None:
+                rate = (float(ra_rate) ** 2 + float(dec_rate) ** 2) ** 0.5
+            payload = {
+                "ra_deg": row["ra_deg"],
+                "dec_deg": row["dec_deg"],
+                "ra_rate_arcsec_min": ra_rate,
+                "dec_rate_arcsec_min": dec_rate,
+                "rate_arcsec_per_min": rate,
+                "azimuth_deg": row.get("azimuth_deg"),
+                "elevation_deg": row.get("elevation_deg"),
+                "airmass": row.get("airmass"),
+                "v_mag_predicted": row.get("v_mag"),
+                "uncertainty_3sigma_arcsec": row.get("uncertainty_3sigma_arcsec"),
+                "source": source,
+            }
+            existing_row = existing_by_epoch.get(row["epoch"])
+            if existing_row:
+                for key, value in payload.items():
+                    setattr(existing_row, key, value)
+                self.db.add(existing_row)
+            else:
+                eph = NeoEphemeris(
+                    candidate_id=candidate.id,
+                    trksub=candidate.trksub,
+                    epoch=row["epoch"],
+                    **payload,
+                )
+                self.db.add(eph)
+        self.db.commit()
+
     @staticmethod
     def _compute_tolerances(
         rate_arcsec_per_min: float | None,
@@ -579,6 +874,18 @@ class SequentialCaptureService:
             "center_px": float(center_px),
             "acquire_px": float(acquire_px),
         }
+
+    @staticmethod
+    def _compute_scale_bounds(
+        pixel_scale: float | None,
+        fallback_low: float | None,
+        fallback_high: float | None,
+    ) -> tuple[float | None, float | None]:
+        if fallback_low is not None and fallback_high is not None:
+            return fallback_low, fallback_high
+        if pixel_scale and pixel_scale > 0:
+            return pixel_scale * 0.5, pixel_scale * 2.0
+        return fallback_low, fallback_high
 
 
 __all__ = ["SequentialCaptureService"]
