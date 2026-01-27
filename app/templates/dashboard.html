@@ -64,24 +64,19 @@
       <template x-if="recentCaptures.length === 0">
         <p class="empty-state">No captures yet</p>
       </template>
+      <div class="captures-head" x-show="recentCaptures.length > 0">
+        <span>Image</span>
+        <span>Solved</span>
+        <span>Associated</span>
+        <span>Offset</span>
+        <span>Time</span>
+      </div>
       <template x-for="capture in recentCaptures" :key="capture.id">
         <div class="capture-item">
-          <span class="capture-icon" x-text="capture.has_wcs ? '✓' : '✗'"></span>
-          <span class="capture-target" x-text="capture.target"></span>
-          <span class="capture-info">
-            <template x-if="capture.has_wcs">
-              Solved
-              <template x-if="capture.association">
-                , Associated (residual <span x-text="capture.association.residual_arcsec.toFixed(1)"></span>")
-              </template>
-              <template x-if="!capture.association">
-                , No association
-              </template>
-            </template>
-            <template x-if="!capture.has_wcs">
-              Not solved
-            </template>
-          </span>
+          <span class="capture-image mono" x-text="capture.image_name || capture.target"></span>
+          <span class="capture-status" x-text="capture.has_wcs ? '✓' : '—'"></span>
+          <span class="capture-status" x-text="capture.association_ok ? '✓' : '—'"></span>
+          <span class="capture-offset" x-text="formatOffset(capture.offset_arcsec)"></span>
           <span class="capture-time" x-text="formatTime(capture.started_at)"></span>
         </div>
       </template>
@@ -307,6 +302,18 @@
   gap: 0.75rem;
 }
 
+.captures-head {
+  display: grid;
+  grid-template-columns: 1fr 90px 110px 120px 120px;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 0.75rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .empty-state {
   color: #9ca3af;
   font-style: italic;
@@ -315,7 +322,8 @@
 }
 
 .capture-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 90px 110px 120px 120px;
   align-items: center;
   gap: 1rem;
   padding: 0.75rem;
@@ -323,23 +331,31 @@
   border-radius: 0.375rem;
 }
 
-.capture-icon {
-  font-size: 1.25rem;
-}
-
-.capture-target {
+.capture-image {
   font-weight: 600;
-  min-width: 100px;
 }
 
-.capture-info {
-  flex: 1;
-  color: #6b7280;
+.capture-status {
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.capture-offset {
+  color: #4b5563;
 }
 
 .capture-time {
   color: #9ca3af;
   font-size: 0.875rem;
+}
+
+@media (max-width: 800px) {
+  .captures-head,
+  .capture-item {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
 }
 
 .log-list {
@@ -480,7 +496,7 @@ function dashboard() {
           this.recentCaptures = [];
           return;
         }
-        const response = await fetch(`/api/captures?limit=10&session_id=${sessionId}`);
+        const response = await fetch(`/api/captures?limit=10&session_id=${sessionId}&completed_only=1`);
         const data = await response.json();
         this.recentCaptures = data.captures || [];
       } catch (error) {
@@ -608,6 +624,11 @@ function dashboard() {
       if (!isoString) return 'N/A';
       const date = new Date(isoString);
       return date.toLocaleTimeString();
+    },
+
+    formatOffset(value) {
+      if (value === null || value === undefined) return '—';
+      return `${value.toFixed(1)}"`;
     },
 
     formatLogTime(isoString) {

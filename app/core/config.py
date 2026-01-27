@@ -121,7 +121,12 @@ class Settings(BaseSettings):
     psv_output_dir: str = "/data/psv"
     psv_auto_generate: bool = False
     astrometry_default_seeing_arcsec: float = 2.5
-    astrometry_pixel_scale_arcsec: float = 2.4
+    astrometry_pixel_scale_arcsec: float = 2.39
+    astrometry_max_hint_separation_arcsec: float | None = 300.0
+    photometry_aperture_radius_px: float = 4.0
+    photometry_annulus_r_in_px: float = 8.0
+    photometry_annulus_r_out_px: float = 12.0
+    photometry_min_cal_stars: int = 5
     telescope_focal_length_mm: float | None = None
     camera_sensor_width_mm: float | None = None
     camera_sensor_height_mm: float | None = None

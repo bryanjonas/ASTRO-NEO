@@ -57,6 +57,7 @@ Notes:
   - 0.2 → 0.3 → 0.4 degrees
   - timeouts: 45s → 60s → 90s
 - Scale bounds are locked to ±10% of computed pixel scale when available.
+- Solves are rejected when the solved center is more than **300 arcsec** from the hint.
 - WCS headers are written back into the FITS.
 
 ## 8. Association & PSV Output
@@ -67,7 +68,8 @@ Notes:
   - matches nearest within tolerance
   - writes `CandidateAssociation`
 - Measurements are stored only when a capture is **solved and associated**.
-- Magnitudes on new measurements are populated from Horizons predicted V magnitude.
+- Magnitudes are now **photometrically measured** from the image using catalog stars in the `.corr` file.
+- If no photometric magnitude can be computed, the measurement is stored with a null magnitude.
 - PSV bundles are generated **manually** via the PSV Builder page (auto-generation is disabled).
 - PSV bundles are written to `/data/psv`.
 

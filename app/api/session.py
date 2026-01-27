@@ -255,16 +255,28 @@ def stop_session(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
     if not session:
         raise HTTPException(status_code=404, detail="No active session found")
 
-    session.status = "stopped"
-    session.end_time = datetime.utcnow()
+    session.status = "stopping"
     db.commit()
 
+    nina = NinaBridgeService()
     try:
-        nina = NinaBridgeService()
+        logger.info(
+            "Stop requested for session %s; waiting for any active exposure to finish.",
+            session.id,
+        )
+        nina.wait_for_camera_idle(timeout=settings.nina_timeout)
+    except Exception as exc:
+        logger.warning("Timed out waiting for camera to go idle: %s", exc)
+
+    try:
         nina.stop_sequence()
         nina.stop_guiding()
     except Exception as exc:
         logger.warning("Failed to stop NINA sequence/guide: %s", exc)
+
+    session.status = "stopped"
+    session.end_time = datetime.utcnow()
+    db.commit()
 
     logger.info(f"Stopped session {session.id}")
 

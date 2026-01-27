@@ -64,6 +64,7 @@
     <div class="controls">
       <button class="btn-outline" @click="selectReady()">Select Ready</button>
       <button class="btn-outline" @click="clearSelection()">Clear</button>
+      <button class="btn-outline" @click="refreshData()">Refresh</button>
       <button class="btn-primary" :disabled="selectedTargets.length === 0 || creating" @click="createBundle()">
         <span x-text="creating ? 'Generating...' : 'Generate PSV'"></span>
       </button>
@@ -292,6 +293,11 @@ function psvDashboard() {
 
     clearSelection() {
       this.selectedTargets = [];
+    },
+
+    async refreshData() {
+      await Promise.all([this.loadTargets(), this.loadFiles()]);
+      this.statusMessage = 'Refreshed.';
     },
 
     async createBundle() {

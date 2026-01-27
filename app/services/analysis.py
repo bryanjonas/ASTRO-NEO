@@ -475,7 +475,17 @@ class AnalysisService:
         if filter_name:
             band = str(filter_name)
 
-        predicted_mag = self._predict_mag_from_ephemeris(db, capture)
+        measured_mag, mag_sigma, measured_band = self._measure_photometric_mag(
+            capture=capture,
+            association=association,
+        )
+        if measured_band:
+            band = measured_band
+        if measured_mag is None:
+            logger.warning(
+                "Photometric magnitude unavailable for capture %s; magnitude will be omitted",
+                capture.id,
+            )
 
         meas = Measurement(
             capture_id=capture.id,
@@ -485,8 +495,8 @@ class AnalysisService:
             dec_deg=association.dec_deg,
             ra_uncert_arcsec=ra_uncert,
             dec_uncert_arcsec=dec_uncert,
-            magnitude=predicted_mag,
-            mag_sigma=None,
+            magnitude=measured_mag,
+            mag_sigma=mag_sigma,
             band=band,
             exposure_seconds=exposure_seconds,
             tracking_mode=None,
@@ -509,6 +519,188 @@ class AnalysisService:
             association.dec_deg,
         )
         return meas
+
+    def _measure_photometric_mag(
+        self,
+        *,
+        capture: CaptureLog,
+        association: CandidateAssociation,
+    ) -> tuple[float | None, float | None, str | None]:
+        path = Path(capture.path)
+        if not path.exists():
+            return None, None, None
+
+        corr_path = path.with_suffix(".corr")
+        if not corr_path.exists():
+            logger.warning("No .corr file for photometry: %s", corr_path)
+            return None, None, None
+
+        try:
+            data = fits.getdata(path)
+        except Exception as exc:
+            logger.warning("Failed to load FITS data for photometry: %s", exc)
+            return None, None, None
+
+        if data is None:
+            return None, None, None
+
+        data = np.asarray(data, dtype=float)
+
+        try:
+            wcs = WCS(str(path.with_suffix(".wcs")))
+        except Exception:
+            try:
+                wcs = WCS(fits.getheader(path))
+            except Exception as exc:
+                logger.warning("Failed to load WCS for photometry: %s", exc)
+                return None, None, None
+
+        catalog_stars, band = self._load_catalog_photometry(corr_path)
+        if not catalog_stars:
+            logger.warning("No catalog stars with magnitudes found in %s", corr_path)
+            return None, None, None
+
+        aperture = settings.photometry_aperture_radius_px
+        annulus_in = settings.photometry_annulus_r_in_px
+        annulus_out = settings.photometry_annulus_r_out_px
+
+        zp_values: list[float] = []
+        for star in catalog_stars:
+            flux = self._aperture_flux(
+                data,
+                star["x"],
+                star["y"],
+                aperture,
+                annulus_in,
+                annulus_out,
+            )
+            if flux is None or flux <= 0:
+                continue
+            mag = star.get("mag")
+            if mag is None or not np.isfinite(mag):
+                continue
+            zp_values.append(float(mag) + 2.5 * math.log10(flux))
+
+        if len(zp_values) < settings.photometry_min_cal_stars:
+            logger.warning(
+                "Insufficient calibration stars for photometry: %s/%s",
+                len(zp_values),
+                settings.photometry_min_cal_stars,
+            )
+            return None, None, None
+
+        zp = float(np.median(zp_values))
+        zp_std = float(np.std(zp_values)) if len(zp_values) > 1 else None
+
+        try:
+            target_x, target_y = wcs.world_to_pixel_values(
+                association.ra_deg, association.dec_deg
+            )
+        except Exception as exc:
+            logger.warning("Failed to convert association coords to pixels: %s", exc)
+            return None, None, None
+
+        target_flux = self._aperture_flux(
+            data,
+            float(target_x),
+            float(target_y),
+            aperture,
+            annulus_in,
+            annulus_out,
+        )
+        if target_flux is None or target_flux <= 0:
+            logger.warning("Target flux non-positive; cannot compute magnitude")
+            return None, None, None
+
+        mag = zp - 2.5 * math.log10(target_flux)
+        return mag, zp_std, band
+
+    @staticmethod
+    def _load_catalog_photometry(corr_path: Path) -> tuple[list[dict[str, Any]], str | None]:
+        try:
+            with fits.open(corr_path) as hdul:
+                if len(hdul) < 2 or hdul[1].data is None:
+                    return [], None
+                data = hdul[1].data
+                columns = [name.lower() for name in data.columns.names]
+                mag_candidates = [
+                    "index_mag",
+                    "mag",
+                    "index_mag_g",
+                    "mag_g",
+                    "gmag",
+                    "index_mag_r",
+                    "mag_r",
+                    "rmag",
+                    "magv",
+                    "mag_v",
+                ]
+                mag_col = None
+                for candidate in mag_candidates:
+                    if candidate in columns:
+                        mag_col = candidate
+                        break
+                if mag_col is None:
+                    for name in columns:
+                        if "mag" in name:
+                            mag_col = name
+                            break
+                if mag_col is None:
+                    return [], None
+
+                band = None
+                if "g" in mag_col:
+                    band = "G"
+                elif "r" in mag_col:
+                    band = "R"
+                elif "v" in mag_col:
+                    band = "V"
+
+                stars: list[dict[str, Any]] = []
+                for row in data:
+                    try:
+                        stars.append(
+                            {
+                                "x": float(row["field_x"]),
+                                "y": float(row["field_y"]),
+                                "mag": float(row[mag_col]),
+                            }
+                        )
+                    except Exception:
+                        continue
+                return stars, band
+        except Exception as exc:
+            logger.warning("Failed to read catalog photometry from %s: %s", corr_path, exc)
+            return [], None
+
+    @staticmethod
+    def _aperture_flux(
+        data: np.ndarray,
+        x: float,
+        y: float,
+        radius: float,
+        annulus_in: float,
+        annulus_out: float,
+    ) -> float | None:
+        h, w = data.shape
+        if not (0 <= x < w and 0 <= y < h):
+            return None
+
+        y_indices, x_indices = np.ogrid[:h, :w]
+        distances = np.sqrt((x_indices - x) ** 2 + (y_indices - y) ** 2)
+
+        aperture_mask = distances <= radius
+        annulus_mask = (distances >= annulus_in) & (distances <= annulus_out)
+
+        if not np.any(aperture_mask):
+            return None
+
+        aperture_sum = float(np.sum(data[aperture_mask]))
+        background = 0.0
+        if np.any(annulus_mask):
+            background = float(np.median(data[annulus_mask]))
+        aperture_area = float(np.sum(aperture_mask))
+        return aperture_sum - background * aperture_area
 
     def _predict_mag_from_ephemeris(
         self,

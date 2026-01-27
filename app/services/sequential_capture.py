@@ -413,7 +413,12 @@ class SequentialCaptureService:
                     slew_dms,
                 )
             self.nina.slew(slew_ra, slew_dec)
-            self.nina.wait_for_mount_ready(timeout=180.0)
+            self.nina.wait_for_mount_ready(timeout=60.0)
+            try:
+                self.nina.start_guiding()
+                logger.info("Guiding started.")
+            except Exception as exc:
+                logger.warning("Failed to start guiding: %s", exc)
             logger.info("Slew complete; proceeding with science exposure.")
         except Exception as e:
             logger.error("Slew failed: %s", e)
@@ -457,11 +462,23 @@ class SequentialCaptureService:
                     "confirmation_attempts": confirmation_attempts,
                 }
 
+            exclude_paths = {
+                row[0]
+                for row in self.db.exec(
+                    select(CaptureLog.path)
+                    .where(CaptureLog.target == target_name)
+                    .where(CaptureLog.path != "")
+                    .order_by(CaptureLog.started_at.desc())
+                    .limit(5)
+                )
+                if row[0]
+            }
             science_path = poll_for_fits_file(
                 target_name=target_name,
                 fits_directory=settings.nina_images_path,
                 timeout=exposure_seconds + 60.0,
                 min_mtime=science_capture_start - 1.0,
+                exclude_paths=exclude_paths or None,
             )
             if not science_path:
                 logger.error("Science FITS file not found")
@@ -575,11 +592,23 @@ class SequentialCaptureService:
             }
 
         # Step 5: Wait for main FITS file
+        exclude_paths = {
+            row[0]
+            for row in self.db.exec(
+                select(CaptureLog.path)
+                .where(CaptureLog.target == target_name)
+                .where(CaptureLog.path != "")
+                .order_by(CaptureLog.started_at.desc())
+                .limit(5)
+            )
+            if row[0]
+        }
         fits_path = poll_for_fits_file(
             target_name=target_name,
             fits_directory=settings.nina_images_path,
             timeout=exposure_seconds + 60.0,  # Exposure time + buffer
             min_mtime=main_capture_start - 1.0,
+            exclude_paths=exclude_paths or None,
         )
         if not fits_path:
             logger.error("Main FITS file not found")
@@ -605,14 +634,73 @@ class SequentialCaptureService:
         # Step 6: Plate solve main image
         try:
             logger.info(f"Solving main science image: {fits_path}")
+            scale_low = None
+            scale_high = None
+            if settings.astrometry_pixel_scale_arcsec:
+                scale_low = settings.astrometry_pixel_scale_arcsec * 0.9
+                scale_high = settings.astrometry_pixel_scale_arcsec * 1.1
             solve_result = solve_fits(
                 fits_path=fits_path,
                 ra_hint=final_ra,
                 dec_hint=final_dec,
+                scale_low_arcsec=scale_low,
+                scale_high_arcsec=scale_high,
             )
+            solved_raw_ra = solve_result["solution"]["ra_deg"]
+            solved_raw_dec = solve_result["solution"]["dec_deg"]
+            solved_epoch = solve_result["solution"].get("epoch")
+            solved_ra, solved_dec = self._to_icrs_from_epoch(
+                solved_raw_ra,
+                solved_raw_dec,
+                solved_epoch,
+            )
+            max_sep = settings.astrometry_max_hint_separation_arcsec
+            if max_sep is not None:
+                sep_arcsec = self._calculate_separation_arcsec(
+                    final_ra,
+                    final_dec,
+                    solved_ra,
+                    solved_dec,
+                )
+                try:
+                    mount_info = self.nina.mount_info()
+                    mount_ra = float(mount_info.get("ra_deg")) if mount_info.get("ra_deg") is not None else None
+                    mount_dec = float(mount_info.get("dec_deg")) if mount_info.get("dec_deg") is not None else None
+                    mount_icrs_ra = None
+                    mount_icrs_dec = None
+                    if mount_ra is not None and mount_dec is not None:
+                        mount_icrs_ra, mount_icrs_dec = self._jnow_to_icrs(mount_ra, mount_dec)
+                    sep_pred_mount = (
+                        self._calculate_separation_arcsec(final_ra, final_dec, mount_icrs_ra, mount_icrs_dec)
+                        if mount_icrs_ra is not None and mount_icrs_dec is not None
+                        else None
+                    )
+                    sep_mount_solved = (
+                        self._calculate_separation_arcsec(mount_icrs_ra, mount_icrs_dec, solved_ra, solved_dec)
+                        if mount_icrs_ra is not None and mount_icrs_dec is not None
+                        else None
+                    )
+                    logger.info(
+                        "Science solve offsets: predicted=(%.6f, %.6f) mount_icrs=(%s, %s) solved=(%.6f, %.6f) sep_pred_solved=%.1f\" sep_pred_mount=%s sep_mount_solved=%s",
+                        final_ra,
+                        final_dec,
+                        f"{mount_icrs_ra:.6f}" if mount_icrs_ra is not None else "n/a",
+                        f"{mount_icrs_dec:.6f}" if mount_icrs_dec is not None else "n/a",
+                        solved_ra,
+                        solved_dec,
+                        sep_arcsec,
+                        f"{sep_pred_mount:.1f}\"" if sep_pred_mount is not None else "n/a",
+                        f"{sep_mount_solved:.1f}\"" if sep_mount_solved is not None else "n/a",
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to log science solve offsets: %s", exc)
+                if sep_arcsec > max_sep:
+                    raise RuntimeError(
+                        f"Science plate solve outside hint tolerance ({sep_arcsec:.1f}\" > {max_sep:.1f}\")"
+                    )
             capture.has_wcs = True
-            capture.solved_ra_deg = solve_result["solution"]["ra_deg"]
-            capture.solved_dec_deg = solve_result["solution"]["dec_deg"]
+            capture.solved_ra_deg = solved_ra
+            capture.solved_dec_deg = solved_dec
             self.db.commit()
             logger.info(
                 f"Main image solved: RA={capture.solved_ra_deg:.6f}, Dec={capture.solved_dec_deg:.6f}"

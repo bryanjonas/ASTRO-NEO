@@ -23,6 +23,7 @@ def poll_for_fits_file(
     timeout: float = 60.0,
     poll_interval: float = 0.1,
     min_mtime: float | None = None,
+    exclude_paths: set[str] | None = None,
 ) -> Optional[Path]:
     """
     Poll for a FITS file matching the target name.
@@ -69,6 +70,10 @@ def poll_for_fits_file(
         if min_mtime is not None:
             matching_files = [
                 path for path in matching_files if path.stat().st_mtime >= min_mtime
+            ]
+        if exclude_paths:
+            matching_files = [
+                path for path in matching_files if str(path) not in exclude_paths
             ]
 
         if matching_files:
