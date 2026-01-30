@@ -82,15 +82,22 @@ class AnalysisService:
         self,
         path: Path,
         wcs: WCS,
-        target_ra: float,
-        target_dec: float,
-        exclusion_radius_arcsec: float = 20.0
+        target_ra: float | None = None,
+        target_dec: float | None = None,
+        exclusion_radius_arcsec: float = 0.0
     ) -> Tuple[List[dict[str, Any]], int]:
         """
         Detect sources after subtracting field stars.
 
         Uses astrometry.net .corr file to subtract catalog stars,
         then detects remaining sources (like the asteroid).
+
+        Args:
+            path: Path to FITS file
+            wcs: WCS solution
+            target_ra: Optional target RA in degrees (for exclusion zone)
+            target_dec: Optional target Dec in degrees (for exclusion zone)
+            exclusion_radius_arcsec: Don't subtract within this radius of target (default 0 = no exclusion)
 
         Returns:
             Tuple of (detected sources, number of stars subtracted)
@@ -195,7 +202,10 @@ class AnalysisService:
         """
         Attempt to automatically associate a capture with its target ephemeris.
 
-        Uses star subtraction for improved centroid accuracy when .corr file exists.
+        Follows proper workflow separation:
+        A. Detect sources blindly (no ephemeris)
+        B. Astrometry already solved (WCS provided)
+        C. Query ephemeris and compare predictions to measurements
 
         Args:
             db: Database session
@@ -206,17 +216,42 @@ class AnalysisService:
         Returns:
             CandidateAssociation if successful, None otherwise
         """
-        if not capture.target or capture.target == "unknown":
-            logger.debug("No target specified, cannot auto-associate")
+        # STEP A: Detect sources blindly (NO ephemeris data used)
+        # This ensures detection is independent of predictions
+        stars_subtracted = 0
+        if use_star_subtraction:
+            # Subtract ALL catalog stars (no exclusion zone)
+            detections, stars_subtracted = self.detect_sources_with_star_subtraction(
+                Path(capture.path),
+                wcs,
+                target_ra=None,           # No target position
+                target_dec=None,          # No exclusion zone
+                exclusion_radius_arcsec=0.0  # Subtract everything
+            )
+        else:
+            detections = self.detect_sources(Path(capture.path), wcs)
+
+        if not detections:
+            logger.warning(f"No sources detected in {capture.path}")
             return None
 
-        # 1. Find Ephemeris (nearest to capture time)
+        logger.info(f"Detected {len(detections)} sources blindly (no ephemeris bias)")
+
+        # STEP B: Astrometry already solved
+        # All detections now have independent (RA, Dec) measurements from WCS
+
+        # STEP C: NOW query ephemeris (after blind detection is complete)
+        if not capture.target or capture.target == "unknown":
+            logger.debug("No target specified, cannot compare to ephemeris")
+            return None
+
         ephems = db.exec(select(NeoEphemeris).where(NeoEphemeris.trksub == capture.target)).all()
 
         if not ephems:
             logger.warning(f"No ephemeris found for target {capture.target}")
             return None
 
+        # Find ephemeris point nearest to capture time
         best_eph = None
         min_diff = float("inf")
         for eph in ephems:
@@ -229,28 +264,9 @@ class AnalysisService:
             logger.warning(f"Nearest ephemeris is {min_diff:.0f}s away (> 300s limit)")
             return None
 
-        logger.info(f"Using ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
+        logger.info(f"Comparing to ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
 
-        # 2. Detect Sources (with or without star subtraction)
-        stars_subtracted = 0
-        if use_star_subtraction:
-            detections, stars_subtracted = self.detect_sources_with_star_subtraction(
-                Path(capture.path),
-                wcs,
-                best_eph.ra_deg,
-                best_eph.dec_deg,
-                exclusion_radius_arcsec=20.0
-            )
-        else:
-            detections = self.detect_sources(Path(capture.path), wcs)
-
-        if not detections:
-            logger.warning(f"No sources detected in {capture.path}")
-            return None
-
-        logger.info(f"Detected {len(detections)} sources")
-
-        # 3. Find Best Match
+        # STEP C continued: Compare independent measurements to predictions
         tolerance_arcsec = 10.0
         match = self.find_best_match(
             detections,
@@ -266,7 +282,7 @@ class AnalysisService:
             )
             return None
 
-        # 4. Calculate Residual
+        # Calculate residual (the scientific product: measured - predicted)
         residual_arcsec = self._calculate_residual(
             match["ra_deg"], match["dec_deg"],
             best_eph.ra_deg, best_eph.dec_deg
@@ -277,7 +293,7 @@ class AnalysisService:
             f"with residual {residual_arcsec:.2f}\" (SNR={match.get('snr', 0):.1f})"
         )
 
-        # 5. Create Association with quality metrics
+        # Create Association with quality metrics
         assoc = CandidateAssociation(
             capture_id=capture.id,
             ra_deg=match["ra_deg"],

@@ -76,18 +76,74 @@ This structured control loop ensures that automation never stalls on plate solve
 - Each container takes exactly one exposure, enabling motion tracking and precise per-frame logging. Sequence progress is surfaced via `nina_status.sequence.progress`.
 - Sequence definition details (HMS/DMS conversion, container strategy, error behavior) follow NINA’s Advanced Sequencer requirements.
 
-## 8. File Consumers & Downstream Processing
+## 8. Workflow Separation: Slew/Expose vs. Association
+
+The system maintains strict separation between two distinct workflows to ensure scientific integrity:
+
+### 8.1 Slew/Expose Workflow (Pre-Image Capture)
+**Purpose**: Point telescope and capture images
+**Ephemeris Use**: Legitimate - ephemeris predictions are REQUIRED to point the telescope before the image exists
+
+**Files**: `app/services/acquisition.py`, `app/services/capture_loop.py`, `app/services/prediction.py`
+
+**Workflow**:
+1. `EphemerisPredictionService.predict()` → Fetches topocentric coordinates from JPL Horizons
+2. `NinaBridgeService.slew(ra_pred, dec_pred)` → Points telescope to predicted position
+3. Confirmation exposure (5s binned) → Fast verification
+4. Plate solve confirmation → Verify pointing accuracy
+5. Science exposure → Writes FITS file with embedded metadata
+
+This workflow correctly uses ephemeris predictions to guide telescope pointing, as there is no alternative way to aim the instrument before the observation.
+
+### 8.2 Association Workflow (Post-Image Analysis)
+**Purpose**: Detect objects in images and compare measurements to predictions
+**Ephemeris Use**: Only for comparison AFTER independent detection and astrometry
+
+**Files**: `app/services/analysis.py`, `app/services/star_subtraction.py`
+
+**Workflow** (follows A→B→C pattern):
+
+**A. Detect Sources Blindly** (NO ephemeris data used)
+- Load `.corr` catalog stars from astrometry.net plate solve
+- Subtract ALL catalog stars (no exclusion zones)
+- Run DAOStarFinder on cleaned image with 3σ threshold
+- Result: (x, y, flux, peak, SNR) for all detected sources
+
+**B. Astrometry Solving** (already completed)
+- WCS solution converts pixel coordinates → (RA, Dec)
+- All detections now have independent sky coordinates
+- Result: (RA, Dec, flux, SNR) for all sources
+
+**C. Query Ephemeris and Compare** (ONLY NOW)
+- Load ephemeris from database (±5 minute time match)
+- Search detections within 10″ of predicted position
+- Calculate residual = observed position - predicted position
+- Result: `CandidateAssociation` record with scientific residual
+
+**Critical Design Principle**: The association workflow does NOT use ephemeris predictions to bias detection or star subtraction. This ensures:
+- Detection is independent of predictions (not circular)
+- Field stars near the predicted position ARE subtracted (no false positives)
+- Residuals represent true measurement accuracy
+- The workflow produces scientifically valid astrometric measurements
+
+**Previous Implementation Issue** (fixed 2025-01-30):
+- Prior code queried ephemeris FIRST, then used predicted position to create a 20″ exclusion zone in star subtraction
+- This created circular logic: predictions influenced what was detected
+- Stars within 20″ of the prediction were NOT subtracted, potentially causing false matches
+- Restructured `auto_associate()` to follow proper A→B→C order
+
+## 9. File Consumers & Downstream Processing
 - `sequence_processor` handles NINA-solved images, noting WCS headers and persisting `AstrometricSolution`.
 - `astrometry-worker` runs `solve-field` when NINA lacks a solution, using RA/Dec hints from the target descriptor.
 - Captures feed into ADES generation; each record includes target name, exposure info, and plate solve metadata. ADES files submit to MPC once enough frames are solved.
 - `SESSION_STATE` ensures exposures are traceable even before files arrive—every event logs `target`, `index`, `started_at`, `predicted_ra_deg`, `predicted_dec_deg`, `platesolve` result, and a placeholder `path`.
 
-## 9. Testing & Evidence
+## 10. Testing & Evidence
 - Real hardware sweeps (2025-12-13) prove NINA accepts minimal parameters, saves files under `/data/fits/YYYY-MM-DD`, and never returns file paths.
 - File monitor tests confirm detection patterns and correlation logic works with target-named filenames (`MINIMAL-TEST_2025-12-13_19-19-15__2.00s_0000.fits`).
 - `scripts/nina_api_monitor.py` exercises status, slew, and capture endpoints while logging errors such as “No capture processed” (to keep automation aware of transient rejects).
 
-## 10. Remaining Work & Operators' Hooks
+## 11. Remaining Work & Operators' Hooks
 - Tune the new backlog correlation heuristics (target/exposure/timestamp tolerances) to handle edge cases such as multi-night sessions or renamed folders, and surface diagnostics if multiple FITS candidates match a single capture.
 - Monitor the pending-solve queue health: if solves repeatedly fail after the configured retries, the UI now shows `solver_status=error`, but operators still need to investigate hardware/seeing issues or rerun solves manually.
 - Verify plate solving for confirmation images: ensure the `-CONFIRM` frames continue to request `solve=true` and that NINA/automation still report offsets correctly; add regression tests if necessary.
@@ -96,7 +152,16 @@ This structured control loop ensures that automation never stalls on plate solve
 - Ensure `SESSION_STATE` continues recording solver status transitions so the dashboard's "Exposure X/Y solved/failed" summary stays accurate and front-end events can surface per-exposure banners.
 - Use this document as the single source for LLM reasoning; all prior design notes have been archived to `documentation/archive` for historical reference.
 
-### 10.1 Recent Fixes (2025-12-19)
+### 11.1 Recent Fixes
+
+#### 2025-01-30: Association Workflow Restructuring
+- **Fixed circular detection logic**: Restructured `auto_associate()` in `app/services/analysis.py` to follow proper scientific workflow (A→B→C: Detect blindly → Solve astrometry → Compare to ephemeris)
+- **Removed ephemeris bias from star subtraction**: Modified `CatalogStarSubtractor.subtract_stars()` to make target coordinates optional (default: no exclusion zone), eliminating the 20″ exclusion zone that previously prevented catalog star subtraction near predicted positions
+- **Ensured independent measurements**: Star subtraction now processes ALL catalog stars by default, ensuring detections are not biased by ephemeris predictions
+- **Updated function signatures**: Made `target_ra`, `target_dec`, and `exclusion_radius_arcsec` optional in both `star_subtraction.py` and `detect_sources_with_star_subtraction()` to support blind detection
+- **Documented workflow separation**: Added Section 8 to LLM_SYSTEM_DESCRIPTION.md clearly distinguishing slew/expose workflow (legitimate ephemeris use) from association workflow (ephemeris only for comparison)
+
+#### 2025-12-19
 - **Fixed plate-solve backlog**: The solver now writes WCS headers back to the original FITS file (not just `.wcs` sidecar), ensuring `has_wcs` detection works correctly and solved files propagate to `AstrometricSolution`.
 - **Enhanced error logging**: Plate solve failures now include full exception type, message, and traceback in logs; retry queue status logged with attempt counts and remaining queue size.
 - **WCS propagation**: Added `_copy_wcs_to_fits()` function that copies all WCS keywords from `.wcs` file back to original FITS header, making solved images compatible with downstream processing.

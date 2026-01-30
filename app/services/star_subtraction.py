@@ -64,9 +64,9 @@ class CatalogStarSubtractor:
     def subtract_stars(
         self,
         data: np.ndarray,
-        target_ra: float,
-        target_dec: float,
-        exclusion_radius_arcsec: float = 20.0,
+        target_ra: float | None = None,
+        target_dec: float | None = None,
+        exclusion_radius_arcsec: float = 0.0,
         star_fwhm_px: float = 4.0
     ) -> tuple[np.ndarray, int]:
         """
@@ -74,9 +74,9 @@ class CatalogStarSubtractor:
 
         Args:
             data: Image data array
-            target_ra: Target RA in degrees
-            target_dec: Target Dec in degrees
-            exclusion_radius_arcsec: Don't subtract within this radius of target
+            target_ra: Optional target RA in degrees (for exclusion zone)
+            target_dec: Optional target Dec in degrees (for exclusion zone)
+            exclusion_radius_arcsec: Don't subtract within this radius of target (default 0 = no exclusion)
             star_fwhm_px: FWHM of stars in pixels (for Gaussian model)
 
         Returns:
@@ -99,20 +99,27 @@ class CatalogStarSubtractor:
             logger.debug("No catalog stars to subtract")
             return data, 0
 
-        # Convert target to pixels
-        try:
-            target_x, target_y = wcs.world_to_pixel_values(target_ra, target_dec)
-        except Exception as e:
-            logger.error(f"Failed to convert target position to pixels: {e}")
-            return data, 0
+        # Convert target to pixels and calculate exclusion zone (if target provided)
+        target_x, target_y = None, None
+        exclusion_radius_px = 0.0
 
-        # Get pixel scale
-        pixel_scale = self._get_pixel_scale(wcs)
-        if pixel_scale == 0:
-            logger.warning("Could not determine pixel scale, using default exclusion")
-            exclusion_radius_px = 50  # Default fallback
-        else:
-            exclusion_radius_px = exclusion_radius_arcsec / pixel_scale
+        if target_ra is not None and target_dec is not None and exclusion_radius_arcsec > 0:
+            try:
+                target_x, target_y = wcs.world_to_pixel_values(target_ra, target_dec)
+
+                # Get pixel scale
+                pixel_scale = self._get_pixel_scale(wcs)
+                if pixel_scale == 0:
+                    logger.warning("Could not determine pixel scale, using default exclusion")
+                    exclusion_radius_px = 50  # Default fallback
+                else:
+                    exclusion_radius_px = exclusion_radius_arcsec / pixel_scale
+
+                logger.debug(f"Using exclusion zone: {exclusion_radius_arcsec}\" ({exclusion_radius_px:.1f}px) around ({target_ra:.5f}, {target_dec:.5f})")
+            except Exception as e:
+                logger.warning(f"Failed to convert target position to pixels: {e}. Proceeding without exclusion zone.")
+                target_x, target_y = None, None
+                exclusion_radius_px = 0.0
 
         # Subtract each star
         subtracted = data.copy()
@@ -121,11 +128,12 @@ class CatalogStarSubtractor:
         for star in catalog_stars:
             x, y = star['x'], star['y']
 
-            # Skip if near target
-            dist = np.sqrt((x - target_x)**2 + (y - target_y)**2)
-            if dist < exclusion_radius_px:
-                logger.debug(f"Skipping star at ({x:.1f}, {y:.1f}) - too close to target (dist={dist:.1f}px)")
-                continue
+            # Skip if near target (only if exclusion zone is active)
+            if target_x is not None and target_y is not None and exclusion_radius_px > 0:
+                dist = np.sqrt((x - target_x)**2 + (y - target_y)**2)
+                if dist < exclusion_radius_px:
+                    logger.debug(f"Skipping star at ({x:.1f}, {y:.1f}) - too close to target (dist={dist:.1f}px)")
+                    continue
 
             # Skip if star is outside image bounds
             if not (0 <= x < data.shape[1] and 0 <= y < data.shape[0]):
