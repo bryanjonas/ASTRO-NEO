@@ -86,13 +86,39 @@ class NinaBridgeService:
 
     def set_tracking(self, mode: int) -> str:
         return self._request("GET", "/equipment/mount/tracking", {"mode": mode})
-        
+
     def get_tracking(self) -> str:
         # Note: Real NINA API doesn't have a simple "get tracking" endpoint in the same way,
-        # usually you poll status. But for now we'll assume we can't easily get it or 
+        # usually you poll status. But for now we'll assume we can't easily get it or
         # we'd need to parse the full status.
         # For this bridge, let's assume we rely on the main status loop.
         return "Unknown"
+
+    def sync_mount(self, ra_deg: float | None = None, dec_deg: float | None = None) -> str:
+        """
+        Sync the mount to the specified coordinates.
+
+        If RA/Dec are provided, syncs to those coordinates directly.
+        If omitted, NINA will plate solve the current image and sync to the solved position.
+
+        Args:
+            ra_deg: Right ascension in degrees (J2000/ICRS)
+            dec_deg: Declination in degrees (J2000/ICRS)
+
+        Returns:
+            Success message from NINA
+
+        Raises:
+            Exception: If mount is not connected, is parked, or sync fails
+        """
+        params = {}
+        if ra_deg is not None and dec_deg is not None:
+            params["ra"] = ra_deg
+            params["dec"] = dec_deg
+        elif ra_deg is not None or dec_deg is not None:
+            raise ValueError("Both RA and Dec must be provided, or both omitted for plate solve sync")
+
+        return self._request("GET", "/equipment/mount/sync", params)
 
     # --- Camera ---
 
@@ -340,9 +366,28 @@ class NinaBridgeService:
         """Stop the current sequence."""
         return self._request("GET", "/sequence/stop")
 
-    def start_guiding(self) -> str:
-        """Start the guider if infrastructure is available."""
-        return self._request("GET", "/equipment/guider/start")
+    def guider_info(self) -> dict[str, Any] | None:
+        """Return guider info if the endpoint exists, otherwise None."""
+        info = self._try_request("GET", "/equipment/guider/info")
+        return info if isinstance(info, dict) else None
+
+    def start_guiding_best_effort(self, timeout: float = 2.0) -> bool:
+        """Fire-and-forget guider start; do not block capture on timeouts."""
+        info = self.guider_info()
+        if info:
+            if info.get("IsGuiding") or info.get("IsRunning"):
+                logger.debug("Guider already running; skipping start call.")
+                return True
+        try:
+            self._request("GET", "/equipment/guider/start", timeout=timeout)
+            return True
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "timed out" in msg:
+                logger.warning("Guiding start timed out; assuming in-progress.")
+                return False
+            logger.warning("Guiding start failed: %s", exc)
+            return False
 
     def stop_guiding(self) -> str:
         """Stop the guider (called after exposures complete)."""

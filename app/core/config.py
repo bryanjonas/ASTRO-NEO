@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     astrometry_scale_high_arcsec: float | None = None
     astrometry_search_radius_deg: float | None = 0.3
     confirmation_solve_radius_deg: float = 0.2
-    confirmation_solve_downsample: int = 2
+    confirmation_solve_downsample: int = 3
     confirmation_solve_sigma: float | None = 4.5
     confirmation_scale_low_arcsec: float | None = 2.16
     confirmation_scale_high_arcsec: float | None = 2.64
@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     workflow_center_fraction: float = 0.01
     workflow_center_floor_arcsec: float = 10.0
     workflow_slew_settle_time_sec: float = 15.0
+    # Confirmation capture with mount sync
+    confirmation_enabled: bool = True
+    confirmation_exposure_seconds: float = 5.0
+    confirmation_binning: int = 2
+    confirmation_blind_solve: bool = True  # Use blind solve instead of hinted
+    confirmation_sync_mount: bool = True  # Sync mount after solve
+    confirmation_max_offset_arcsec: float = 300.0  # Re-slew if offset exceeds this (5 arcmin)
+    confirmation_reslew_enabled: bool = True  # Re-slew if too far from ephemeris
     astrometry_min_exposure_seconds: float = 5.0
     astrometry_max_exposure_seconds: float = 180.0
     astrometry_min_frames: int = 4

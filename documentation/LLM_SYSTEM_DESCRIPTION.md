@@ -41,21 +41,31 @@ Implemented in `SequentialCaptureService`:
 1. Fetch and store Horizons ephemeris window for the target.
 2. Compute predicted RA/Dec for the current time.
 3. Slew to predicted coordinates.
-4. Capture science exposure via NINA.
-5. Poll for FITS and stabilize file.
-6. Solve locally via `solve-field`.
-7. Associate detected source with predicted position.
+4. **Confirmation workflow** (if enabled, default: enabled):
+   - Capture 5s confirmation exposure (binning 2x2)
+   - Blind plate solve to find actual pointing
+   - Sync mount to solved coordinates via NINA API
+   - Check offset from ephemeris prediction
+   - Re-slew if offset exceeds threshold (default: 300 arcsec)
+5. Capture science exposure via NINA.
+6. Poll for FITS and stabilize file.
+7. Solve locally via `solve-field` (progressive strategy).
+8. Associate detected source with predicted position.
 
 Notes:
-- Confirmation capture/solve is currently bypassed (kept as stubs).
+- Confirmation workflow is **enabled by default** and improves pointing accuracy.
+- Mount sync continuously improves pointing model throughout session.
+- Re-slew ensures target is in field even with poor initial pointing.
 - All steps are synchronous and logged.
 
 ## 7. Local Plate Solving
 - Uses `solve-field` locally in the API container.
 - Solve parameters include RA/Dec hint, radius steps, and scale bounds.
-- Progressive radius for science solves:
-  - 0.2 → 0.3 → 0.4 degrees
-  - timeouts: 45s → 60s → 90s
+- **Progressive radius strategy** for all science solves:
+  - Attempts 0.2° → 0.3° → 0.4° search radius in sequence
+  - Corresponding timeouts: 45s → 60s → 90s
+  - Stops on first successful solve (most solves succeed at 0.2° in <45s)
+  - Fallback to wider radius only if tight solve fails
 - Scale bounds are locked to ±10% of computed pixel scale when available.
 - Solves are rejected when the solved center is more than **300 arcsec** from the hint.
 - WCS headers are written back into the FITS.

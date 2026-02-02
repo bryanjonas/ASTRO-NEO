@@ -94,9 +94,9 @@ class AnalysisService:
         self,
         path: Path,
         wcs: WCS,
-        target_ra: float,
-        target_dec: float,
-        exclusion_radius_arcsec: float = 20.0
+        target_ra: float | None = None,
+        target_dec: float | None = None,
+        exclusion_radius_arcsec: float = 0.0
     ) -> Tuple[List[dict[str, Any]], int]:
         """
         Detect sources after subtracting field stars.
@@ -104,8 +104,20 @@ class AnalysisService:
         Uses astrometry.net .corr file to subtract catalog stars,
         then detects remaining sources (like the asteroid).
 
+        Args:
+            path: Path to FITS file
+            wcs: WCS solution
+            target_ra: Optional target RA in degrees (for exclusion zone)
+            target_dec: Optional target Dec in degrees (for exclusion zone)
+            exclusion_radius_arcsec: Don't subtract within this radius of target (default 0 = no exclusion)
+
         Returns:
             Tuple of (detected sources, number of stars subtracted)
+
+        Note:
+            For proper blind detection (no ephemeris bias), call with
+            target_ra=None, target_dec=None, exclusion_radius_arcsec=0.0
+            This ensures all catalog stars are subtracted equally.
         """
         try:
             data = fits.getdata(path)
@@ -118,16 +130,22 @@ class AnalysisService:
 
         data = np.asarray(data, dtype=float)
 
-        # Subtract catalog stars
+        # Subtract catalog stars (blind mode if no target specified)
         subtractor = CatalogStarSubtractor(path)
         cleaned_data, stars_subtracted = subtractor.subtract_stars(
             data, target_ra, target_dec, exclusion_radius_arcsec
         )
-        logger.info(
-            "Star subtraction complete: removed=%d exclusion_radius=%.1f\"",
-            stars_subtracted,
-            exclusion_radius_arcsec,
-        )
+        if target_ra is None:
+            logger.info(
+                "Star subtraction complete (blind mode): removed=%d stars",
+                stars_subtracted,
+            )
+        else:
+            logger.info(
+                "Star subtraction complete: removed=%d exclusion_radius=%.1f\"",
+                stars_subtracted,
+                exclusion_radius_arcsec,
+            )
 
         # Detect sources in cleaned image with lower threshold
         mean, median, std = sigma_clipped_stats(cleaned_data, sigma=3.0)
@@ -221,7 +239,10 @@ class AnalysisService:
         """
         Attempt to automatically associate a capture with its target ephemeris.
 
-        Uses star subtraction for improved centroid accuracy when .corr file exists.
+        Follows proper workflow separation to avoid circular logic:
+        A. Detect sources blindly (no ephemeris influence)
+        B. Astrometry already solved (WCS provided)
+        C. Query ephemeris and compare predictions to measurements
 
         Args:
             db: Database session
@@ -268,7 +289,43 @@ class AnalysisService:
             capture.path,
         )
 
-        # 1. Find Ephemeris (nearest to capture time)
+        # =====================================================================
+        # STEP A: Detect sources BLINDLY (no ephemeris data used)
+        # This is critical for scientific validity - detection must be
+        # independent of predictions to avoid circular logic.
+        # =====================================================================
+        stars_subtracted = 0
+        if use_star_subtraction:
+            # Subtract ALL catalog stars (no exclusion zone)
+            detections, stars_subtracted = self.detect_sources_with_star_subtraction(
+                Path(capture.path),
+                wcs,
+                target_ra=None,              # No predicted position
+                target_dec=None,             # No exclusion zone
+                exclusion_radius_arcsec=0.0  # Subtract everything
+            )
+        else:
+            detections = self.detect_sources(Path(capture.path), wcs)
+
+        if not detections:
+            logger.warning(f"No sources detected in {capture.path}")
+            return None
+
+        logger.info(
+            "Detected %d sources blindly (no ephemeris bias, stars_subtracted=%d)",
+            len(detections),
+            stars_subtracted,
+        )
+
+        # =====================================================================
+        # STEP B: Astrometry already solved
+        # All detections now have independent (RA, Dec) measurements from WCS
+        # =====================================================================
+
+        # =====================================================================
+        # STEP C: NOW query ephemeris (AFTER blind detection is complete)
+        # Compare independent measurements to predictions
+        # =====================================================================
         ephems = db.exec(
             select(NeoEphemeris)
             .where(NeoEphemeris.trksub == capture.target)
@@ -316,35 +373,12 @@ class AnalysisService:
                 after.epoch if after else None,
             )
         else:
-            logger.info(f"Using ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
+            logger.info(f"Comparing to ephemeris from {best_eph.epoch} (Δt={min_diff:.1f}s)")
 
         logger.info(
-            "Ephemeris position: RA=%.6f Dec=%.6f",
+            "Ephemeris prediction: RA=%.6f Dec=%.6f",
             use_ra,
             use_dec,
-        )
-
-        # 2. Detect Sources (with or without star subtraction)
-        stars_subtracted = 0
-        if use_star_subtraction:
-            detections, stars_subtracted = self.detect_sources_with_star_subtraction(
-                Path(capture.path),
-                wcs,
-                best_eph.ra_deg,
-                best_eph.dec_deg,
-                exclusion_radius_arcsec=20.0
-            )
-        else:
-            detections = self.detect_sources(Path(capture.path), wcs)
-
-        if not detections:
-            logger.warning(f"No sources detected in {capture.path}")
-            return None
-
-        logger.info(
-            "Detected %d sources (stars_subtracted=%s)",
-            len(detections),
-            stars_subtracted,
         )
 
         # 3. Find Best Match
@@ -793,7 +827,7 @@ class AnalysisService:
 
         scales = proj_plane_pixel_scales(wcs)
         scale_arcsec = float(np.mean(scales)) * 3600.0
-        radius_px = max(5.0, radius_arcsec / scale_arcsec)
+        radius_px = max(5.0, radius_arcsec / scale_arcsec) * 5.0  # 5x larger diameter
 
         pred_x, pred_y = wcs.wcs_world2pix(predicted_ra, predicted_dec, 0)
         match_x, match_y = wcs.wcs_world2pix(matched_ra, matched_dec, 0)
@@ -804,8 +838,8 @@ class AnalysisService:
 
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.imshow(data, cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-        ax.add_patch(plt.Circle((pred_x, pred_y), radius_px, color="yellow", fill=False, linewidth=2))
-        ax.add_patch(plt.Circle((match_x, match_y), radius_px, color="cyan", fill=False, linewidth=2))
+        ax.add_patch(plt.Circle((pred_x, pred_y), radius_px, color="yellow", fill=False, linewidth=0.5))
+        ax.add_patch(plt.Circle((match_x, match_y), radius_px, color="cyan", fill=False, linewidth=0.5))
         legend_handles = [
             plt.Line2D([0], [0], color="yellow", marker="o", markerfacecolor="none", linestyle=""),
             plt.Line2D([0], [0], color="cyan", marker="o", markerfacecolor="none", linestyle=""),

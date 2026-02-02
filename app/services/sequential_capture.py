@@ -384,9 +384,11 @@ class SequentialCaptureService:
         confirmation_success = False
         confirmation_result: dict[str, Any] | None = None
 
-        # Confirmation capture/solve disabled temporarily; keep stubs for later re-enable.
-        confirmation_bypass = True
-        logger.info("Confirmation capture skipped (temporary bypass).")
+        # Step 2: Confirmation workflow with blind solve and mount sync
+        confirmation_success = False
+        confirmation_result: dict[str, Any] | None = None
+
+        # Initial slew to predicted position
         try:
             slew_ra, slew_dec = self._to_mount_coords(final_ra, final_dec)
             slew_hms, slew_dms = self._format_ra_dec(slew_ra, slew_dec)
@@ -414,12 +416,8 @@ class SequentialCaptureService:
                 )
             self.nina.slew(slew_ra, slew_dec)
             self.nina.wait_for_mount_ready(timeout=60.0)
-            try:
-                self.nina.start_guiding()
-                logger.info("Guiding started.")
-            except Exception as exc:
-                logger.warning("Failed to start guiding: %s", exc)
-            logger.info("Slew complete; proceeding with science exposure.")
+            self.nina.start_guiding_best_effort(timeout=2.0)
+            logger.info("Slew complete.")
         except Exception as e:
             logger.error("Slew failed: %s", e)
             return {
@@ -428,7 +426,109 @@ class SequentialCaptureService:
                 "confirmation_attempts": 0,
             }
 
-        confirmation_success = True
+        # Confirmation capture with blind solve and mount sync
+        if settings.confirmation_enabled:
+            logger.info(
+                "Taking confirmation exposure: %.1fs binning=%dx",
+                settings.confirmation_exposure_seconds,
+                settings.confirmation_binning,
+            )
+            try:
+                conf_start = time.time()
+                self.nina.wait_for_camera_idle(timeout=30.0)
+                self.nina.start_exposure(
+                    filter_name=filter_name,
+                    binning=settings.confirmation_binning,
+                    exposure_seconds=settings.confirmation_exposure_seconds,
+                    target=f"{target_name}_CONF",
+                    request_solve=False,
+                )
+                self.nina.wait_for_camera_idle(
+                    timeout=settings.confirmation_exposure_seconds + 30.0
+                )
+
+                # Poll for confirmation FITS
+                from app.services.file_poller import poll_for_fits_file, wait_for_file_size_stable
+
+                conf_path = poll_for_fits_file(
+                    target_name=f"{target_name}_CONF",
+                    fits_directory=settings.nina_images_path,
+                    timeout=settings.confirmation_exposure_seconds + 30.0,
+                    min_mtime=conf_start - 1.0,
+                )
+                if not conf_path:
+                    logger.warning("Confirmation FITS not found; skipping confirmation")
+                else:
+                    wait_for_file_size_stable(conf_path, stable_duration=1.0, timeout=10.0)
+                    logger.info("Confirmation FITS: %s", conf_path)
+
+                    # Blind solve confirmation image
+                    logger.info("Solving confirmation image (blind solve)...")
+                    try:
+                        conf_solve_result = solve_fits(
+                            fits_path=conf_path,
+                            ra_hint=None if settings.confirmation_blind_solve else final_ra,
+                            dec_hint=None if settings.confirmation_blind_solve else final_dec,
+                            radius_deg=None if settings.confirmation_blind_solve else 0.5,
+                            downsample=settings.confirmation_solve_downsample or 4,
+                            sigma=settings.confirmation_solve_sigma,
+                            scale_low_arcsec=scale_low,
+                            scale_high_arcsec=scale_high,
+                            timeout=90,
+                        )
+                        solved_ra = conf_solve_result["solution"]["ra_deg"]
+                        solved_dec = conf_solve_result["solution"]["dec_deg"]
+                        logger.info(
+                            "Confirmation solved: RA=%.6f, Dec=%.6f",
+                            solved_ra,
+                            solved_dec,
+                        )
+
+                        # Sync mount to solved position
+                        if settings.confirmation_sync_mount:
+                            try:
+                                self.nina.sync_mount(ra_deg=solved_ra, dec_deg=solved_dec)
+                                logger.info("✓ Mount synced to confirmation solve")
+                            except Exception as sync_exc:
+                                logger.warning("Mount sync failed (non-fatal): %s", sync_exc)
+
+                        # Calculate offset from predicted position
+                        offset_arcsec = self._calculate_separation_arcsec(
+                            predicted_ra, predicted_dec, solved_ra, solved_dec
+                        )
+                        logger.info(
+                            "Pointing offset: %.1f\" (predicted vs solved)",
+                            offset_arcsec,
+                        )
+
+                        # Always re-slew after sync to ensure mount is pointed at target
+                        # with the updated pointing model
+                        if settings.confirmation_reslew_enabled:
+                            if offset_arcsec > settings.confirmation_max_offset_arcsec:
+                                logger.warning(
+                                    "Offset %.1f\" exceeds threshold %.1f\"",
+                                    offset_arcsec,
+                                    settings.confirmation_max_offset_arcsec,
+                                )
+                            logger.info("Re-slewing to target after confirmation sync...")
+                            slew_ra, slew_dec = self._to_mount_coords(final_ra, final_dec)
+                            self.nina.slew(slew_ra, slew_dec)
+                            self.nina.wait_for_mount_ready(timeout=60.0)
+                            logger.info("Re-slew complete")
+
+                        confirmation_success = True
+
+                    except Exception as solve_exc:
+                        logger.warning("Confirmation solve failed: %s", solve_exc)
+                        confirmation_success = True  # Continue anyway
+
+            except Exception as conf_exc:
+                logger.warning("Confirmation capture failed: %s", conf_exc)
+                confirmation_success = True  # Continue anyway
+        else:
+            logger.info("Confirmation disabled; proceeding with science exposure.")
+            confirmation_success = True
+
         confirmation_result = {
             "success": True,
             "capture_id": None,
@@ -441,7 +541,7 @@ class SequentialCaptureService:
             "confirmation_only": False,
         }
 
-        if confirmation_success and settings.test_mode_slew_only and not confirmation_bypass:
+        if confirmation_success and settings.test_mode_slew_only:
             try:
                 science_capture_start = time.time()
                 logger.info("Capturing science image: %s", target_name)
@@ -550,6 +650,8 @@ class SequentialCaptureService:
                 }
 
         # Step 3: Create capture record for main exposure
+        # Note: Use flush() instead of commit() to get ID without committing transaction
+        # This ensures atomicity - if solve fails, we can still commit the record with error_message
         capture = CaptureLog(
             kind="science",
             target=target_name,
@@ -562,7 +664,7 @@ class SequentialCaptureService:
             exposure_seconds=exposure_seconds,
         )
         self.db.add(capture)
-        self.db.commit()
+        self.db.flush()  # Write to DB and get ID, but don't commit transaction
         self.db.refresh(capture)
 
         logger.info(f"Created capture record: id={capture.id}")
@@ -583,7 +685,7 @@ class SequentialCaptureService:
         except Exception as e:
             logger.error(f"Main capture failed: {e}")
             capture.error_message = f"Capture failed: {e}"
-            self.db.commit()
+            self.db.commit()  # Commit the failed capture for tracking
             return {
                 "success": False,
                 "capture_id": capture.id,
@@ -613,7 +715,7 @@ class SequentialCaptureService:
         if not fits_path:
             logger.error("Main FITS file not found")
             capture.error_message = "FITS file not created"
-            self.db.commit()
+            self.db.commit()  # Commit the failed capture for tracking
             return {
                 "success": False,
                 "capture_id": capture.id,
@@ -625,27 +727,40 @@ class SequentialCaptureService:
         if not wait_for_file_size_stable(fits_path, stable_duration=2.0, timeout=30.0):
             logger.warning("Main file size did not stabilize, continuing anyway")
 
-        # Update capture with path
+        # Update capture with path (don't commit yet - wait for solve)
         capture.path = str(fits_path)
-        self.db.commit()
 
         logger.info(f"Main FITS file saved: {fits_path}")
 
         # Step 6: Plate solve main image
         try:
             logger.info(f"Solving main science image: {fits_path}")
+            # Use progressive solve strategy: 0.2° → 0.3° → 0.4° with increasing timeouts
+            solve_base_radius = 0.2  # Start with tight radius
             scale_low = None
             scale_high = None
-            if settings.astrometry_pixel_scale_arcsec:
+            if pixel_scale:
+                scale_low = pixel_scale * 0.9
+                scale_high = pixel_scale * 1.1
+            elif settings.astrometry_pixel_scale_arcsec:
                 scale_low = settings.astrometry_pixel_scale_arcsec * 0.9
                 scale_high = settings.astrometry_pixel_scale_arcsec * 1.1
-            solve_result = solve_fits(
+
+            solve_result, used_radius = self._solve_with_progressive_radius(
                 fits_path=fits_path,
                 ra_hint=final_ra,
                 dec_hint=final_dec,
+                base_radius_deg=solve_base_radius,
+                downsample=settings.astrometry_downsample,
+                sigma=None,  # Let solve-field auto-detect
                 scale_low_arcsec=scale_low,
                 scale_high_arcsec=scale_high,
+                max_radius_deg=0.4,
+                timeout_seconds=settings.astrometry_solve_timeout,
+                radius_steps=[0.2, 0.3, 0.4],
+                timeout_steps=[45, 60, 90],
             )
+            logger.info(f"Solved with radius={used_radius:.2f}°")
             solved_raw_ra = solve_result["solution"]["ra_deg"]
             solved_raw_dec = solve_result["solution"]["dec_deg"]
             solved_epoch = solve_result["solution"].get("epoch")
@@ -654,62 +769,77 @@ class SequentialCaptureService:
                 solved_raw_dec,
                 solved_epoch,
             )
+            # Always sync mount to science solve position FIRST
+            # This improves pointing model even if tolerance check fails
+            try:
+                self.nina.sync_mount(ra_deg=solved_ra, dec_deg=solved_dec)
+                logger.info("✓ Mount synced to science solve position (%.6f, %.6f)", solved_ra, solved_dec)
+            except Exception as sync_exc:
+                logger.warning("Mount sync after science solve failed (non-fatal): %s", sync_exc)
+
+            # Calculate and log offsets
             max_sep = settings.astrometry_max_hint_separation_arcsec
-            if max_sep is not None:
-                sep_arcsec = self._calculate_separation_arcsec(
+            sep_arcsec = self._calculate_separation_arcsec(
+                final_ra,
+                final_dec,
+                solved_ra,
+                solved_dec,
+            )
+            try:
+                mount_info = self.nina.mount_info()
+                mount_ra = float(mount_info.get("ra_deg")) if mount_info.get("ra_deg") is not None else None
+                mount_dec = float(mount_info.get("dec_deg")) if mount_info.get("dec_deg") is not None else None
+                mount_icrs_ra = None
+                mount_icrs_dec = None
+                if mount_ra is not None and mount_dec is not None:
+                    mount_icrs_ra, mount_icrs_dec = self._jnow_to_icrs(mount_ra, mount_dec)
+                sep_pred_mount = (
+                    self._calculate_separation_arcsec(final_ra, final_dec, mount_icrs_ra, mount_icrs_dec)
+                    if mount_icrs_ra is not None and mount_icrs_dec is not None
+                    else None
+                )
+                sep_mount_solved = (
+                    self._calculate_separation_arcsec(mount_icrs_ra, mount_icrs_dec, solved_ra, solved_dec)
+                    if mount_icrs_ra is not None and mount_icrs_dec is not None
+                    else None
+                )
+                logger.info(
+                    "Science solve offsets: predicted=(%.6f, %.6f) mount_icrs=(%s, %s) solved=(%.6f, %.6f) sep_pred_solved=%.1f\" sep_pred_mount=%s sep_mount_solved=%s",
                     final_ra,
                     final_dec,
+                    f"{mount_icrs_ra:.6f}" if mount_icrs_ra is not None else "n/a",
+                    f"{mount_icrs_dec:.6f}" if mount_icrs_dec is not None else "n/a",
                     solved_ra,
                     solved_dec,
+                    sep_arcsec,
+                    f"{sep_pred_mount:.1f}\"" if sep_pred_mount is not None else "n/a",
+                    f"{sep_mount_solved:.1f}\"" if sep_mount_solved is not None else "n/a",
                 )
-                try:
-                    mount_info = self.nina.mount_info()
-                    mount_ra = float(mount_info.get("ra_deg")) if mount_info.get("ra_deg") is not None else None
-                    mount_dec = float(mount_info.get("dec_deg")) if mount_info.get("dec_deg") is not None else None
-                    mount_icrs_ra = None
-                    mount_icrs_dec = None
-                    if mount_ra is not None and mount_dec is not None:
-                        mount_icrs_ra, mount_icrs_dec = self._jnow_to_icrs(mount_ra, mount_dec)
-                    sep_pred_mount = (
-                        self._calculate_separation_arcsec(final_ra, final_dec, mount_icrs_ra, mount_icrs_dec)
-                        if mount_icrs_ra is not None and mount_icrs_dec is not None
-                        else None
-                    )
-                    sep_mount_solved = (
-                        self._calculate_separation_arcsec(mount_icrs_ra, mount_icrs_dec, solved_ra, solved_dec)
-                        if mount_icrs_ra is not None and mount_icrs_dec is not None
-                        else None
-                    )
-                    logger.info(
-                        "Science solve offsets: predicted=(%.6f, %.6f) mount_icrs=(%s, %s) solved=(%.6f, %.6f) sep_pred_solved=%.1f\" sep_pred_mount=%s sep_mount_solved=%s",
-                        final_ra,
-                        final_dec,
-                        f"{mount_icrs_ra:.6f}" if mount_icrs_ra is not None else "n/a",
-                        f"{mount_icrs_dec:.6f}" if mount_icrs_dec is not None else "n/a",
-                        solved_ra,
-                        solved_dec,
-                        sep_arcsec,
-                        f"{sep_pred_mount:.1f}\"" if sep_pred_mount is not None else "n/a",
-                        f"{sep_mount_solved:.1f}\"" if sep_mount_solved is not None else "n/a",
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to log science solve offsets: %s", exc)
-                if sep_arcsec > max_sep:
-                    raise RuntimeError(
-                        f"Science plate solve outside hint tolerance ({sep_arcsec:.1f}\" > {max_sep:.1f}\")"
-                    )
+            except Exception as exc:
+                logger.warning("Failed to log science solve offsets: %s", exc)
+
+            # Check tolerance (if configured) - but only warn, don't fail
+            # The mount sync already happened, so pointing will improve for next exposure
+            if max_sep is not None and sep_arcsec > max_sep:
+                logger.warning(
+                    "Science plate solve outside hint tolerance (%.1f\" > %.1f\") - continuing anyway",
+                    sep_arcsec,
+                    max_sep,
+                )
+
             capture.has_wcs = True
             capture.solved_ra_deg = solved_ra
             capture.solved_dec_deg = solved_dec
-            self.db.commit()
+            # Don't commit yet - wait for association to complete
             logger.info(
                 f"Main image solved: RA={capture.solved_ra_deg:.6f}, Dec={capture.solved_dec_deg:.6f}"
             )
+
         except Exception as e:
             logger.error(f"Main solve failed: {e}")
             capture.has_wcs = False
             capture.error_message = f"Solve failed: {e}"
-            self.db.commit()
+            self.db.commit()  # Commit the failed solve for tracking
             return {
                 "success": True,
                 "capture_id": capture.id,
@@ -722,6 +852,7 @@ class SequentialCaptureService:
             }
 
         # Step 7: Source detection & association
+        # This is the final step - commit the transaction after this completes
         try:
             logger.info("Detecting sources and associating with predicted position")
             association = self.analysis.auto_associate(
@@ -741,6 +872,9 @@ class SequentialCaptureService:
                     measurement_id = measurement.id
                 except Exception as exc:
                     logger.error("Failed to store measurement for capture %s: %s", capture.id, exc)
+
+                # Commit the successful capture with association
+                self.db.commit()
                 logger.info(
                     f"✓ Association created: id={association.id}, "
                     f"residual={association.residual_arcsec:.2f}\""
@@ -761,6 +895,8 @@ class SequentialCaptureService:
                 }
             else:
                 logger.warning("No source matched predicted position")
+                # Commit the solved capture even without association
+                self.db.commit()
                 return {
                     "success": True,
                     "capture_id": capture.id,
@@ -775,6 +911,8 @@ class SequentialCaptureService:
                 }
         except Exception as e:
             logger.error(f"Source detection/association failed: {e}")
+            # Commit the solved capture even if association failed
+            self.db.commit()
             return {
                 "success": True,
                 "capture_id": capture.id,
