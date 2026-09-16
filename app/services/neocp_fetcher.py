@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.db.session import get_session
+from app.db.session import get_session, init_db
 from app.models import NeoObservationPayload, NeoCPSnapshot
 from app.services.neocp import (
     CandidatePayload,
@@ -335,6 +335,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    init_db()
     service = NeoCPFetcherService(
         interval_seconds=args.interval,
         use_local_sample=args.local or None,

@@ -1,4 +1,4 @@
-"""Star subtraction using astrometry.net catalog correlation data."""
+"""Star subtraction using astrometry.net catalog correlation data and Gaia."""
 
 from __future__ import annotations
 
@@ -9,8 +9,13 @@ from typing import Any
 import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 
 logger = logging.getLogger(__name__)
+
+# Default magnitude limit for Gaia query (fainter = more stars but slower)
+DEFAULT_GAIA_MAG_LIMIT = 18.0
 
 
 class CatalogStarSubtractor:
@@ -26,7 +31,40 @@ class CatalogStarSubtractor:
         self.corr_path = self.fits_path.with_suffix('.corr')
         self.wcs_path = self.fits_path.with_suffix('.wcs')
 
-    def get_catalog_stars(self) -> list[dict[str, Any]]:
+    def get_catalog_stars(self, use_gaia: bool = False, mag_limit: float = DEFAULT_GAIA_MAG_LIMIT) -> list[dict[str, Any]]:
+        """
+        Extract catalog star positions from .corr file, optionally supplemented by Gaia.
+
+        Args:
+            use_gaia: If True, query Gaia for additional stars beyond .corr file
+            mag_limit: Magnitude limit for Gaia query (default 18.0)
+
+        Returns:
+            List of star dicts with x, y, ra, dec (and optionally mag)
+        """
+        stars = []
+
+        # First, get stars from .corr file (astrometry.net matches)
+        corr_stars = self._get_corr_stars()
+        stars.extend(corr_stars)
+        corr_count = len(corr_stars)
+
+        # Optionally query Gaia for more stars
+        if use_gaia:
+            gaia_stars = self._query_gaia_stars(mag_limit=mag_limit)
+            if gaia_stars:
+                # Merge, avoiding duplicates (within 3 arcsec)
+                merged = self._merge_star_lists(stars, gaia_stars, match_radius_arcsec=3.0)
+                new_count = len(merged) - len(stars)
+                stars = merged
+                logger.info(f"Added {new_count} Gaia stars (mag<{mag_limit}) to {corr_count} .corr stars = {len(stars)} total")
+
+        if not stars:
+            logger.debug("No catalog stars found")
+
+        return stars
+
+    def _get_corr_stars(self) -> list[dict[str, Any]]:
         """Extract catalog star positions from .corr file."""
         if not self.corr_path.exists():
             logger.debug(f"No .corr file found at {self.corr_path}")
@@ -52,6 +90,7 @@ class CatalogStarSubtractor:
                         'y': float(row['field_y']),
                         'ra': float(row['index_ra']),
                         'dec': float(row['index_dec']),
+                        'source': 'corr',
                     })
 
                 logger.info(f"Loaded {len(stars)} catalog stars from {self.corr_path.name}")
@@ -61,13 +100,139 @@ class CatalogStarSubtractor:
             logger.warning(f"Could not read .corr file: {e}")
             return []
 
+    def _query_gaia_stars(self, mag_limit: float = DEFAULT_GAIA_MAG_LIMIT) -> list[dict[str, Any]]:
+        """
+        Query Gaia DR3 for stars in the field of view.
+
+        Returns stars with pixel positions computed from WCS.
+        """
+        if not self.wcs_path.exists():
+            logger.debug("No WCS file, cannot query Gaia")
+            return []
+
+        try:
+            from astroquery.gaia import Gaia
+            Gaia.MAIN_GAIA_TABLE = "gaiadr3.gaia_source"
+            Gaia.ROW_LIMIT = 10000  # Reasonable limit
+        except ImportError:
+            logger.warning("astroquery not available, cannot query Gaia")
+            return []
+
+        try:
+            wcs = WCS(str(self.wcs_path))
+
+            # Get image dimensions from WCS
+            naxis1 = wcs.pixel_shape[0] if wcs.pixel_shape else 4000
+            naxis2 = wcs.pixel_shape[1] if wcs.pixel_shape else 4000
+
+            # Get field center and size
+            center_x, center_y = naxis1 / 2, naxis2 / 2
+            center_sky = wcs.pixel_to_world(center_x, center_y)
+            center_ra = center_sky.ra.deg
+            center_dec = center_sky.dec.deg
+
+            # Estimate field radius (diagonal / 2)
+            pixel_scale = self._get_pixel_scale(wcs)
+            if pixel_scale == 0:
+                pixel_scale = 2.4  # Default fallback
+            diagonal_px = np.sqrt(naxis1**2 + naxis2**2)
+            field_radius_arcsec = (diagonal_px / 2) * pixel_scale
+            field_radius_deg = field_radius_arcsec / 3600.0
+
+            logger.debug(
+                f"Querying Gaia: center=({center_ra:.4f}, {center_dec:.4f}) "
+                f"radius={field_radius_deg:.3f}° mag<{mag_limit}"
+            )
+
+            # Query Gaia
+            query = f"""
+            SELECT ra, dec, phot_g_mean_mag
+            FROM gaiadr3.gaia_source
+            WHERE 1=CONTAINS(
+                POINT('ICRS', ra, dec),
+                CIRCLE('ICRS', {center_ra}, {center_dec}, {field_radius_deg})
+            )
+            AND phot_g_mean_mag < {mag_limit}
+            ORDER BY phot_g_mean_mag ASC
+            """
+
+            job = Gaia.launch_job_async(query, verbose=False)
+            result = job.get_results()
+
+            if result is None or len(result) == 0:
+                logger.debug("Gaia query returned no results")
+                return []
+
+            # Convert to pixel coordinates
+            stars = []
+            for row in result:
+                ra = float(row['ra'])
+                dec = float(row['dec'])
+                mag = float(row['phot_g_mean_mag'])
+
+                try:
+                    x, y = wcs.world_to_pixel_values(ra, dec)
+                    # Only include stars within image bounds
+                    if 0 <= x < naxis1 and 0 <= y < naxis2:
+                        stars.append({
+                            'x': float(x),
+                            'y': float(y),
+                            'ra': ra,
+                            'dec': dec,
+                            'mag': mag,
+                            'source': 'gaia',
+                        })
+                except Exception:
+                    continue
+
+            logger.info(f"Gaia query returned {len(stars)} stars in field (mag<{mag_limit})")
+            return stars
+
+        except Exception as e:
+            logger.warning(f"Gaia query failed: {e}")
+            return []
+
+    def _merge_star_lists(
+        self,
+        list1: list[dict[str, Any]],
+        list2: list[dict[str, Any]],
+        match_radius_arcsec: float = 3.0
+    ) -> list[dict[str, Any]]:
+        """Merge two star lists, avoiding duplicates within match radius."""
+        if not list1:
+            return list2
+        if not list2:
+            return list1
+
+        # Build coordinate arrays for list1
+        ra1 = np.array([s['ra'] for s in list1])
+        dec1 = np.array([s['dec'] for s in list1])
+
+        merged = list(list1)  # Start with all of list1
+
+        for star in list2:
+            ra2, dec2 = star['ra'], star['dec']
+            # Check distance to all stars in list1
+            cos_dec = np.cos(np.radians(dec2))
+            d_ra = (ra1 - ra2) * cos_dec
+            d_dec = dec1 - dec2
+            dist_arcsec = np.sqrt(d_ra**2 + d_dec**2) * 3600.0
+
+            # Only add if no match within radius
+            if np.all(dist_arcsec > match_radius_arcsec):
+                merged.append(star)
+
+        return merged
+
     def subtract_stars(
         self,
         data: np.ndarray,
         target_ra: float | None = None,
         target_dec: float | None = None,
         exclusion_radius_arcsec: float = 0.0,
-        star_fwhm_px: float = 4.0
+        star_fwhm_px: float = 4.0,
+        use_gaia: bool = False,
+        gaia_mag_limit: float = DEFAULT_GAIA_MAG_LIMIT,
     ) -> tuple[np.ndarray, int]:
         """
         Subtract catalog stars from image.
@@ -78,6 +243,8 @@ class CatalogStarSubtractor:
             target_dec: Optional target Dec in degrees (for exclusion zone)
             exclusion_radius_arcsec: Don't subtract within this radius of target (default 0 = no exclusion)
             star_fwhm_px: FWHM of stars in pixels (for Gaussian model)
+            use_gaia: If True, query Gaia for additional stars beyond .corr file
+            gaia_mag_limit: Magnitude limit for Gaia query (default 18.0)
 
         Returns:
             Tuple of (cleaned image data, number of stars subtracted)
@@ -98,8 +265,8 @@ class CatalogStarSubtractor:
             logger.error(f"Failed to load WCS: {e}")
             return data, 0
 
-        # Get catalog stars
-        catalog_stars = self.get_catalog_stars()
+        # Get catalog stars (optionally supplemented by Gaia)
+        catalog_stars = self.get_catalog_stars(use_gaia=use_gaia, mag_limit=gaia_mag_limit)
         if not catalog_stars:
             logger.debug("No catalog stars to subtract")
             return data, 0

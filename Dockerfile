@@ -19,15 +19,19 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md /app/
 
+# Copy local wheels to avoid PyPI download timeouts
+COPY wheels/ /app/wheels/
+
 # Create dummy app structure to allow installing dependencies
 # This ensures that changes to source code don't invalidate the dependency cache
+# Use --find-links to prefer local wheels but allow downloading dependencies
 RUN mkdir -p app && touch app/__init__.py && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir --find-links=/app/wheels --timeout=300 .
 
 COPY app /app/app
 
 # Re-install the package to include the actual source code
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --find-links=/app/wheels --timeout=300 .
 
 COPY . /app
 

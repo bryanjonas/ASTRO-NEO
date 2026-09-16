@@ -11,6 +11,7 @@ This module has been simplified as part of the minimum_func architecture:
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -28,6 +29,23 @@ from app.services.reporting import ReportService
 from app.services.sequential_capture import SequentialCaptureService
 
 logger = logging.getLogger(__name__)
+
+_stop_event = threading.Event()
+
+
+def request_stop() -> None:
+    """Signal the capture loop to stop after the current exposure."""
+    _stop_event.set()
+
+
+def clear_stop() -> None:
+    """Clear the stop signal before starting a new session."""
+    _stop_event.clear()
+
+
+def is_stop_requested() -> bool:
+    """Check whether a stop has been requested."""
+    return _stop_event.is_set()
 
 
 @dataclass
@@ -114,8 +132,8 @@ class AutomationService:
 
         target_name = (
             target.get("name")
-            or target.get("trksub")
             or target.get("candidate_id")
+            or target.get("trksub")
             or "Unknown"
         )
 
@@ -168,17 +186,10 @@ class AutomationService:
 
             # Execute each exposure in the plan
             for i in range(plan.count):
-                if session_id is not None:
-                    with get_session() as status_session:
-                        active = status_session.exec(
-                            select(ObservingSession)
-                            .where(ObservingSession.id == session_id)
-                            .where(ObservingSession.status == "active")
-                        ).first()
-                    if not active:
-                        logger.info("Stop requested; ending plan execution for %s", plan.name)
-                        stop_requested = True
-                        break
+                if _stop_event.is_set():
+                    logger.info("Stop requested; ending plan execution for %s", plan.name)
+                    stop_requested = True
+                    break
                 logger.info(f"Starting exposure {i+1}/{plan.count} for {plan.name}")
 
                 try:

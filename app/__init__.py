@@ -63,7 +63,9 @@ def create_app() -> FastAPI:
                     )
                     session.commit()
                 active_sessions = session.exec(
-                    select(ObservingSession).where(ObservingSession.status == "active")
+                    select(ObservingSession).where(
+                        ObservingSession.status.in_(["active", "stopping"])
+                    )
                 ).all()
                 if active_sessions:
                     now = datetime.utcnow()

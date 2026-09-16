@@ -18,7 +18,7 @@ from app.db.session import get_session_dep
 from app.core.config import settings
 from app.models.neocp import NeoCandidate, NeoEphemeris
 from app.models.session import ObservingSession
-from app.services.automation import AutomationService
+from app.services.automation import AutomationService, clear_stop, request_stop
 from app.services.nina_client import NinaBridgeService
 from app.services.whatsup import WhatsUpService
 
@@ -136,7 +136,7 @@ def start_session(
 
         best_target = visible_targets[0]
         target_id = best_target.id
-        target_name = best_target.trksub
+        target_name = best_target.id  # Use id (e.g. "16") not trksub (e.g. "(16)")
 
         logger.info(
             "Auto-selected target: %s (vmag=%s)",
@@ -159,6 +159,7 @@ def start_session(
     logger.info(f"Created session {session.id} for target {target_name}")
 
     # Build target plan and execute
+    clear_stop()
     try:
         automation = AutomationService(db_session=db)
 
@@ -207,10 +208,10 @@ def start_session(
             "completed_at": result["completed_at"]
         }
         db.refresh(session)
-        if session.status == "stopped":
+        if session.status in ("stopped", "stopping") or result.get("stopped"):
             logger.info("Session %s stopped by user request", session.id)
-            if not session.end_time:
-                session.end_time = datetime.utcnow()
+            session.status = "stopped"
+            session.end_time = session.end_time or datetime.utcnow()
             db.commit()
             return {
                 "success": False,
@@ -249,14 +250,21 @@ def stop_session(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
     """Stop the currently active session."""
     session = db.exec(
         select(ObservingSession)
-        .where(ObservingSession.status == "active")
+        .where(ObservingSession.status.in_(["active", "stopping"]))
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="No active session found")
 
-    session.status = "stopping"
-    db.commit()
+    # Signal the capture loop to stop via in-memory event (avoids DB contention)
+    request_stop()
+
+    try:
+        session.status = "stopping"
+        db.commit()
+    except Exception as exc:
+        logger.warning("Could not set status to 'stopping' (will retry): %s", exc)
+        db.rollback()
 
     nina = NinaBridgeService()
     try:
@@ -274,9 +282,14 @@ def stop_session(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Failed to stop NINA sequence/guide: %s", exc)
 
-    session.status = "stopped"
-    session.end_time = datetime.utcnow()
-    db.commit()
+    try:
+        db.refresh(session)
+        session.status = "stopped"
+        session.end_time = session.end_time or datetime.utcnow()
+        db.commit()
+    except Exception as exc:
+        logger.warning("Could not finalize session stop: %s", exc)
+        db.rollback()
 
     logger.info(f"Stopped session {session.id}")
 
@@ -292,7 +305,7 @@ def get_status(db: Session = Depends(get_session_dep)) -> SessionStatusResponse:
     """Get current session status."""
     session = db.exec(
         select(ObservingSession)
-        .where(ObservingSession.status == "active")
+        .where(ObservingSession.status.in_(["active", "stopping"]))
         .order_by(ObservingSession.start_time.desc())
     ).first()
 

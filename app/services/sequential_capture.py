@@ -275,15 +275,27 @@ class SequentialCaptureService:
             candidate = self.db.exec(
                 select(NeoCandidate).where(NeoCandidate.id == candidate_id)
             ).first()
-            if candidate:
-                self._upsert_ephemeris_rows(candidate, rows, source="HORIZONS")
+            # Auto-create candidate if it doesn't exist (for known numbered asteroids)
+            if not candidate:
                 logger.info(
-                    "Stored %d Horizons ephemeris points for %s (window=%dm step=%dm)",
-                    len(rows),
+                    "Creating NeoCandidate for %s (not found in database)",
                     candidate_id,
-                    window_minutes,
-                    step_minutes,
                 )
+                candidate = NeoCandidate(
+                    id=candidate_id,
+                    trksub=candidate_id,  # Use same value for trksub
+                )
+                self.db.add(candidate)
+                self.db.commit()
+                self.db.refresh(candidate)
+            self._upsert_ephemeris_rows(candidate, rows, source="HORIZONS")
+            logger.info(
+                "Stored %d Horizons ephemeris points for %s (window=%dm step=%dm)",
+                len(rows),
+                candidate_id,
+                window_minutes,
+                step_minutes,
+            )
             ephemeris = min(rows, key=lambda row: abs((row["epoch"] - now).total_seconds()))
             predicted_ra = ephemeris["ra_deg"]
             predicted_dec = ephemeris["dec_deg"]
@@ -448,8 +460,6 @@ class SequentialCaptureService:
                 )
 
                 # Poll for confirmation FITS
-                from app.services.file_poller import poll_for_fits_file, wait_for_file_size_stable
-
                 conf_path = poll_for_fits_file(
                     target_name=f"{target_name}_CONF",
                     fits_directory=settings.nina_images_path,
@@ -650,8 +660,7 @@ class SequentialCaptureService:
                 }
 
         # Step 3: Create capture record for main exposure
-        # Note: Use flush() instead of commit() to get ID without committing transaction
-        # This ensures atomicity - if solve fails, we can still commit the record with error_message
+        # Commit immediately so the write lock is released before the long plate solve.
         capture = CaptureLog(
             kind="science",
             target=target_name,
@@ -664,7 +673,7 @@ class SequentialCaptureService:
             exposure_seconds=exposure_seconds,
         )
         self.db.add(capture)
-        self.db.flush()  # Write to DB and get ID, but don't commit transaction
+        self.db.commit()
         self.db.refresh(capture)
 
         logger.info(f"Created capture record: id={capture.id}")

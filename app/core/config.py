@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     observability_recent_hours: int = 24
     observability_refresh_minutes: int = 15
     observability_top_n: int = 5
-    neocp_prefetch_top_n: int = 10
+    neocp_prefetch_top_n: int = 0  # Disable Scout prefetch for numbered asteroids
     observability_execute_top_n: int = 5
     weather_snapshot_ttl_minutes: int = 15
     weather_api_timeout: float = 10.0
@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     astrometry_scale_high_arcsec: float | None = None
     astrometry_search_radius_deg: float | None = 0.3
     confirmation_solve_radius_deg: float = 0.2
-    confirmation_solve_downsample: int = 3
+    confirmation_solve_downsample: int = 2
     confirmation_solve_sigma: float | None = 4.5
     confirmation_scale_low_arcsec: float | None = 2.16
     confirmation_scale_high_arcsec: float | None = 2.64
@@ -145,6 +145,26 @@ class Settings(BaseSettings):
     confirmation_sync_mount: bool = True  # Sync mount after solve
     confirmation_max_offset_arcsec: float = 300.0  # Re-slew if offset exceeds this (5 arcmin)
     confirmation_reslew_enabled: bool = True  # Re-slew if too far from ephemeris
+    # Association rigor parameters
+    association_sigma_multiplier: float = 3.0  # k-sigma for match radius
+    association_min_radius_arcsec: float = 2.0  # Floor to avoid over-tightening
+    association_timing_uncertainty_sec: float = 0.5  # Timing error (NTP typical)
+    # WCS quality thresholds (arcsec)
+    wcs_rms_good: float = 0.5
+    wcs_rms_acceptable: float = 1.0
+    wcs_rms_marginal: float = 2.0
+    # Morphology gates
+    detection_sharpness_min: float = 0.2
+    detection_sharpness_max: float = 1.0
+    detection_roundness_max: float = 0.5
+    detection_snr_min: float = 3.0
+    # Scoring penalties
+    association_near_star_penalty: float = 1.0
+    association_low_snr_penalty: float = 0.5
+    association_z_score_max: float = 5.0  # Reject if z-score exceeds this
+    # Star subtraction settings
+    star_subtraction_use_gaia: bool = True  # Query Gaia for additional stars
+    star_subtraction_gaia_mag_limit: float = 18.0  # Magnitude limit for Gaia query
     astrometry_min_exposure_seconds: float = 5.0
     astrometry_max_exposure_seconds: float = 180.0
     astrometry_min_frames: int = 4
