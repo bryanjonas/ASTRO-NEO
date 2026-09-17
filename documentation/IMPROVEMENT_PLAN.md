@@ -37,13 +37,32 @@ This one-line infrastructure bug — not scoring quality, not solver tuning, not
 6. **`39d3a32`** — `wait_for_mount_ready`/`wait_for_camera_idle` had no error handling around their poll requests, so a single dropped HTTP call to NINA aborted the entire wait immediately. Also, on a camera-idle timeout, nothing ever told NINA to abort the stuck exposure, so the next attempt would likely fail the same way. Both now tolerate transient poll failures (retry within the timeout window) and the camera-idle timeout now sends `abort-exposure` before giving up. **Not tested against live hardware** — verified via syntax check and clean container restart only.
 7. **`625a599`** — wired the existing `WeatherService` into `/api/session/start` as a hard safety gate: refuses to start if wind/precipitation/humidity/cloud cover exceed configured thresholds. Fails open (allows the session) if no weather sensor is configured or a fetch fails with no cached data, to avoid breaking sites with no weather monitoring set up. **`config/site_local.yml` on this box has no `weather_sensors` entry, so this gate is currently dormant** — add an entry like `weather_sensors: [{name: "open-meteo", type: "open-meteo"}]` (no API key needed, uses your site's lat/long) to activate it. **Not tested end-to-end** (would require calling `/api/session/start`, which reaches hardware-control code) — verified via syntax check and clean container restart only.
 
-**Commits `4de9f55` through `376e0ba` (items 1-4, from 2026-09-16) are pushed to `origin/known_targets`. Commits `23d7aa8`, `16bc72a`, `39d3a32`, `625a599` (items 5-7 plus the WSL doc note) are local on MELE only — not yet pushed.**
+All commits through `31bf0d6` are pushed to `origin/known_targets`.
 
-### Remaining Phase 0 items (deferred this session, by your choice)
+### Remaining Phase 0 items
 
-- **No authentication on any endpoint**, including session start/stop and equipment/site config — any device on the LAN can control the physical mount. Deferred because it changes how you access the dashboard day-to-day; worth a short discussion on approach (shared secret? IP allowlist? something else?) before implementing.
+- **No authentication on any endpoint**, including session start/stop and equipment/site config — any device on the LAN can control the physical mount. **You've decided against adding auth.**
 - The real MPC submission channel (email via local SMTP, or an actual MPC API integration) is still not built — `submit()` now reports honestly when it can't deliver, but nothing can actually deliver yet. Decide whether automated submission is wanted at all, or whether the manual PSV Builder page remains the intended path permanently.
 - **Host-level: WSL doesn't stay up overnight** (see the OPEN section above) — deprioritized at your request, but worth revisiting since it undermines everything else.
+
+### Streamlining pass, 2026-09-17 (your request: "what else would streamline this app and its process")
+
+Separated into workflow friction (manual steps the app could do itself) vs. codebase complexity. Started with the highest-leverage workflow item:
+
+1. **`81e120e`** — **Auto-advance to the next target.** `/api/session/start` used to run exactly one target's plan and stop, requiring you to manually re-click "Start Session" after every single target all night. It now runs a background thread that keeps advancing to the next best not-yet-attempted visible target as each one finishes, until the ranked list is exhausted, weather turns unsafe, `automation_max_consecutive_target_failures` (default 2) targets in a row error out, or a stop is requested. A `manual_target_override` still observes exactly one target, unchanged. Each target still gets its own `ObservingSession` row — the chain is just several such rows created in sequence by one thread instead of one per HTTP request. **Not tested end-to-end** (reaches hardware-control code) — verified via syntax checks and clean container restarts only.
+2. **`7733fb9`** — **Found and fixed a second major bug while building #1**: `WhatsUpService.get_ranked_targets`'s sort key was inverted (`-vmag` ascending sorts faintest-first, not brightest-first as intended). Confirmed with concrete data. This fed both the old single-target auto-select and the new auto-advance chain, meaning **the system has been preferentially choosing the hardest, faintest, worst-SNR targets available** rather than the easiest ones — plausibly a real contributor to poor results even on nights everything else worked. Fixed to sort ascending on vmag directly.
+
+**Not yet pushed** — `7733fb9` and `81e120e` are local on MELE only.
+
+**Natural follow-up not yet done:** the dashboard doesn't show chain progress (e.g. "target 2 of 5 tonight") since that state lives only in the background thread's memory, not the DB. Worth adding if the auto-advance chain proves out in practice.
+
+**Remaining streamlining ideas from the original list**, not yet started:
+- Manual WhatsUp refresh required before every session/chain (easy to forget).
+- PSV bundle generation is manual-only (nothing flags "this target has enough frames to submit").
+- No overnight alerting on session/chain failure.
+- Two disconnected target-ranking systems still exist (`WhatsUpService` live path vs. the more sophisticated `ObservabilityService`, not fully wired in) — worth converging now that the live path's ranking bug is fixed.
+- Dead code (`task_queue.py`, `monitor.py`/`monitoring.py`, `set_ignore_weather`) still unremoved.
+- Duplicated ~150-line test-mode capture path in `sequential_capture.py` still unmerged.
 
 ---
 
