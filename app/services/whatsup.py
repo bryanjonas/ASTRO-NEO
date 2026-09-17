@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -124,18 +125,39 @@ class WhatsUpService:
             "submit": "Submit",
         }
 
-        with httpx.Client(timeout=settings.whatsup_timeout) as client:
-            response = client.get(WHATSUP_URL, headers=HEADERS)
-            response.raise_for_status()
-            doc = html.fromstring(response.text)
-            token_nodes = doc.xpath("//input[@name='authenticity_token']/@value")
-            if not token_nodes:
-                raise RuntimeError("WhatsUp CSRF token not found")
-            payload["authenticity_token"] = token_nodes[0]
+        max_attempts = 3
+        last_exc: Exception | None = None
+        response: httpx.Response | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with httpx.Client(timeout=settings.whatsup_timeout) as client:
+                    get_response = client.get(WHATSUP_URL, headers=HEADERS)
+                    get_response.raise_for_status()
+                    doc = html.fromstring(get_response.text)
+                    token_nodes = doc.xpath("//input[@name='authenticity_token']/@value")
+                    if not token_nodes:
+                        raise RuntimeError("WhatsUp CSRF token not found")
+                    payload["authenticity_token"] = token_nodes[0]
 
-            response = client.post(WHATSUP_URL, headers=HEADERS, data=payload)
-            response.raise_for_status()
+                    response = client.post(WHATSUP_URL, headers=HEADERS, data=payload)
+                    response.raise_for_status()
+                break
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "WhatsUp request failed (attempt %d/%d): %s",
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                if attempt < max_attempts:
+                    time.sleep(2**attempt)  # 2s, 4s
+        else:
+            raise RuntimeError(
+                f"WhatsUp request failed after {max_attempts} attempts"
+            ) from last_exc
 
+        assert response is not None
         doc = html.fromstring(response.text)
         tables = doc.xpath("//table")
         if not tables:
