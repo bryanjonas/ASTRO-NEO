@@ -31,10 +31,12 @@ config/horizon/
 # Data artifacts
 /data/
 mock_nina_data/
-postgres_data/
 
 # Node/other
 node_modules/
 
 test_images/
 #documentation/
+
+# Ops
+ops/backup.log
