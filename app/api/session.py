@@ -20,6 +20,7 @@ from app.models.neocp import NeoCandidate, NeoEphemeris
 from app.models.session import ObservingSession
 from app.services.automation import AutomationService, clear_stop, request_stop
 from app.services.nina_client import NinaBridgeService
+from app.services.weather import WeatherService
 from app.services.whatsup import WhatsUpService
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -120,6 +121,22 @@ def start_session(
             "success": False,
             "error": "An active session already exists. Stop it first.",
             "session_id": existing.id
+        }
+
+    # Weather safety gate: refuse to slew/expose in unsafe conditions. If no
+    # weather sensor is configured, or a fetch fails with no cached data,
+    # weather_status is None and we fail open (unknown, not "unsafe") --
+    # this matches prior behavior for sites with no weather monitoring set up.
+    weather_service = WeatherService(db)
+    weather_status = weather_service.get_status()
+    if weather_status is not None and not weather_status.is_safe:
+        logger.warning(
+            "Refusing to start session: unsafe weather (%s)",
+            ", ".join(weather_status.reasons),
+        )
+        return {
+            "success": False,
+            "error": f"Unsafe weather conditions: {', '.join(weather_status.reasons)}",
         }
 
     # Determine target
