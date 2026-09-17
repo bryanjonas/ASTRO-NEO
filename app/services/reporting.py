@@ -418,7 +418,10 @@ class ReportService:
         return "\n".join(lines)
 
     def submit_report(self, payload: str, channel: str = "email", measurement_ids: List[int] = []) -> SubmissionLog:
-        """Submit the report via the specified channel."""
+        """Validate and archive a report. This method does NOT deliver anything --
+        it only generates the payload, validates it, and records a SubmissionLog
+        row. Actual delivery (email/MPC API) is handled by SubmissionService,
+        which sets the final status after this returns."""
         # Validate if ADES
         validation_status = "Not Validated"
         if payload.strip().startswith("<"):
@@ -427,25 +430,20 @@ class ReportService:
             if not is_valid:
                 logging.warning(f"ADES Validation Failed: {msg}")
                 # We might want to block submission here, but for now just log it
-        
-        # Mock submission for now
-        status = "sent"
-        response = f"Mock submission successful. Validation: {validation_status}"
-        
-        if channel == "email":
-            # TODO: Implement email sending
-            pass
-        elif channel == "api":
-            # TODO: Implement MPC API
-            pass
-            
+
+        # This method only archives/validates -- it never actually delivers
+        # anything, regardless of `channel`. Report that honestly rather than
+        # claiming "sent".
+        status = "archived"
+        response = f"Archived, not yet delivered. Validation: {validation_status}"
+
         log = SubmissionLog(
             channel=channel,
             status=status,
             response=response,
             report_path=None, # We could save to disk
             measurement_ids=json.dumps(measurement_ids),
-            notes=f"Submitted {len(measurement_ids)} observations. {validation_status}"
+            notes=f"Archived {len(measurement_ids)} observations. {validation_status}"
         )
         
         if self.session:
@@ -456,15 +454,19 @@ class ReportService:
         return log
 
 
-def archive_report(measurements: List[Measurement], format: str = "ADES", session: Session | None = None) -> SubmissionLog:
-    """Legacy wrapper for archiving a report."""
+def archive_report(
+    measurements: List[Measurement],
+    format: str = "ADES",
+    channel: str = "archive",
+    session: Session | None = None,
+) -> SubmissionLog:
+    """Legacy wrapper for archiving a report. `channel` is accepted for callers
+    that want it recorded on the SubmissionLog, but this function never
+    delivers anything itself -- see submit_report()."""
     svc = ReportService(session)
     if format.upper() == "ADES":
         payload = svc.generate_ades(measurements)
     else:
         payload = svc.generate_mpc80(measurements)
-        
-    # "Archive" implies saving but not necessarily submitting?
-    # The original usage suggests it returns a log.
-    # Let's use submit_report with a special channel or just reuse it.
-    return svc.submit_report(payload, channel="archive", measurement_ids=[m.id for m in measurements if m.id])
+
+    return svc.submit_report(payload, channel=channel, measurement_ids=[m.id for m in measurements if m.id])

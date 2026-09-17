@@ -24,10 +24,12 @@ class SubmissionService:
     def submit(self, measurements: Iterable[Measurement], format: str = "ADES") -> SubmissionLog:
         log = archive_report(measurements, format=format, channel=settings.submission_channel, session=self.session)
         if settings.submission_channel == "email":
-            self._send_email(log)
-            log.status = "sent"
+            self._send_email(log)  # sets log.status itself (sent/not_configured/failed)
         else:
-            log.status = "pending"
+            log.status = "not_implemented"
+            log.response = json.dumps(
+                {"error": f"Submission channel '{settings.submission_channel}' is not implemented"}
+            )
         self._save_log(log)
         return log
 
