@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,40 @@ from app.services.horizons_client import HorizonsClient
 from app.services.scout_client import ScoutClient
 
 logger = logging.getLogger(__name__)
+
+# Throttles auto-refresh attempts triggered by session start/auto-advance
+# (see maybe_auto_refresh) so a chain repeatedly finding an empty target
+# list -- or multiple callers in quick succession -- can't hammer MPC's
+# WhatsUp endpoint. Deliberately NOT consulted by the read-only /ready
+# endpoint, which is polled every 5s by the dashboard; auto-refresh only
+# fires from an actual attempt to start or advance a session.
+_last_auto_refresh_attempt: datetime | None = None
+_auto_refresh_lock = threading.Lock()
+
+
+def maybe_auto_refresh(db: Session) -> bool:
+    """Attempt a throttled WhatsUp refresh (candidates + Horizons ephemeris).
+
+    Returns True if a refresh was attempted (regardless of whether it
+    succeeded), False if skipped because the cooldown hasn't elapsed.
+    """
+    global _last_auto_refresh_attempt
+    cooldown = timedelta(minutes=settings.whatsup_auto_refresh_cooldown_minutes)
+    with _auto_refresh_lock:
+        now = datetime.now(timezone.utc)
+        if (
+            _last_auto_refresh_attempt is not None
+            and now - _last_auto_refresh_attempt < cooldown
+        ):
+            return False
+        _last_auto_refresh_attempt = now
+
+    try:
+        WhatsUpService(db).refresh_targets_with_horizons()
+        logger.info("Auto-refresh: WhatsUp targets refreshed")
+    except Exception as exc:
+        logger.warning("Auto-refresh: WhatsUp refresh failed: %s", exc)
+    return True
 
 WHATSUP_URL = "https://minorplanetcenter.net/whatsup/index"
 

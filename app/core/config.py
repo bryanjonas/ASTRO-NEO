@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     whatsup_lunar_elongation_deg: int = 20
     whatsup_duration_hours: int = 1
     whatsup_object_type: str = "mp"
+    # Minimum time between auto-triggered WhatsUp refresh attempts (session
+    # start / auto-advance finding no targets), regardless of success or
+    # failure -- avoids hammering MPC's WhatsUp endpoint on repeated calls.
+    whatsup_auto_refresh_cooldown_minutes: float = 10.0
     # Target scoring weights (must sum to ~1.0)
     scoring_weight_mpc: float = 0.30
     scoring_weight_altitude: float = 0.25

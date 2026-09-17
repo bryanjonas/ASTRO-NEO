@@ -27,7 +27,7 @@ from app.services.automation import (
 )
 from app.services.nina_client import NinaBridgeService
 from app.services.weather import WeatherService
-from app.services.whatsup import WhatsUpService
+from app.services.whatsup import WhatsUpService, maybe_auto_refresh
 
 router = APIRouter(prefix="/session", tags=["session"])
 logger = logging.getLogger(__name__)
@@ -127,25 +127,44 @@ def _build_target_dict_from_candidate(db: Session, target_id: str) -> dict[str, 
     }
 
 
+def _first_available(
+    visible_targets: list[NeoCandidate], exclude_ids: set[str]
+) -> NeoCandidate | None:
+    for candidate in visible_targets:
+        if candidate.id not in exclude_ids:
+            return candidate
+    return None
+
+
 def _resolve_next_target(
     db: Session, exclude_ids: set[str]
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Pick the best-ranked visible target not already attempted this chain."""
+    """Pick the best-ranked visible target not already attempted this chain.
+
+    If none are available (list empty, or everything in it already
+    attempted), attempts one throttled auto-refresh before giving up --
+    this is what lets session start and the auto-advance chain work without
+    a manual "Refresh Targets" click, while a cooldown (see
+    whatsup.maybe_auto_refresh) keeps repeated calls from hammering MPC.
+    """
     visible_targets, error = _get_whatsup_targets(db)
-    if error:
-        return None, error
-    for candidate in visible_targets:
-        if candidate.id in exclude_ids:
-            continue
-        return {
-            "name": candidate.id,  # Use id (e.g. "16") not trksub (e.g. "(16)")
-            "candidate_id": candidate.id,
-            "ra_deg": candidate.ra_deg or 0.0,
-            "dec_deg": candidate.dec_deg or 0.0,
-            "vmag": candidate.vmag,
-            "score": 0.0,
-        }, None
-    return None, "No more unattempted visible targets"
+    candidate = _first_available(visible_targets, exclude_ids)
+
+    if candidate is None and maybe_auto_refresh(db):
+        visible_targets, error = _get_whatsup_targets(db)
+        candidate = _first_available(visible_targets, exclude_ids)
+
+    if candidate is None:
+        return None, error or "No more unattempted visible targets"
+
+    return {
+        "name": candidate.id,  # Use id (e.g. "16") not trksub (e.g. "(16)")
+        "candidate_id": candidate.id,
+        "ra_deg": candidate.ra_deg or 0.0,
+        "dec_deg": candidate.dec_deg or 0.0,
+        "vmag": candidate.vmag,
+        "score": 0.0,
+    }, None
 
 
 def _weather_blocks_start(db: Session) -> str | None:
