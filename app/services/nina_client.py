@@ -173,11 +173,21 @@ class NinaBridgeService:
         poll_interval: float = 1.0,
         settle_seconds: float = 3.0,
     ) -> None:
-        """Wait for mount slewing to stop, then apply a fixed settle window."""
+        """Wait for mount slewing to stop, then apply a fixed settle window.
+
+        A single dropped poll request (transient network blip, brief NINA
+        restart) must not abort the wait -- only a poll that fails all the
+        way to the deadline should give up.
+        """
         deadline = time.time() + timeout
         settle_deadline = 0.0
         while time.time() < deadline:
-            status = self._request("GET", "/equipment/mount/info")
+            try:
+                status = self._request("GET", "/equipment/mount/info")
+            except Exception as exc:
+                logger.warning("Mount status poll failed, will retry: %s", exc)
+                time.sleep(poll_interval)
+                continue
             if status.get("Slewing", False):
                 settle_deadline = 0.0
             else:
@@ -189,13 +199,31 @@ class NinaBridgeService:
         raise Exception("Mount is still slewing or settling after timeout")
 
     def wait_for_camera_idle(self, timeout: float = 120.0, poll_interval: float = 0.5) -> None:
-        """Ensure the camera is not currently exposing before starting a new capture."""
+        """Ensure the camera is not currently exposing before starting a new capture.
+
+        A single dropped poll request must not abort the wait -- only a poll
+        that fails all the way to the deadline should give up. On timeout,
+        attempt to abort whatever exposure NINA thinks is in progress so the
+        camera isn't left stuck for the next attempt.
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            info = self._request("GET", "/equipment/camera/info")
+            try:
+                info = self._request("GET", "/equipment/camera/info")
+            except Exception as exc:
+                logger.warning("Camera status poll failed, will retry: %s", exc)
+                time.sleep(poll_interval)
+                continue
             if not info.get("IsExposing", False):
                 return
             time.sleep(poll_interval)
+        try:
+            self.abort_exposure()
+            logger.warning(
+                "Camera never reached idle state before timeout; sent abort-exposure"
+            )
+        except Exception as exc:
+            logger.error("Camera timed out and abort-exposure also failed: %s", exc)
         raise Exception("Camera never reached idle state before exposure")
 
     # --- Focuser ---
