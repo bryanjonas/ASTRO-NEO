@@ -6,6 +6,14 @@ This plan is ordered by **impact and risk**, not by how interesting the work is.
 
 ---
 
+## OPEN — Host-level finding (2026-09-17): WSL does not stay up overnight
+
+Observed directly: the WSL instance MELE runs everything in was **down for roughly 19 hours overnight** (SSH and the app's port both refused; `dmesg`/`last reboot` show WSL's kernel booted at 19:02 on 2026-09-17, right when a reconnect attempt succeeded, with no fetcher cycles logged since 21:04 the previous night). `docker compose`'s `restart: unless-stopped` correctly brought the containers back up once WSL itself came back, but **every fix from the previous session — ingestion, nightly backup, fault-tolerant capture — only works while WSL is actually running.** The 3:17am backup never fired (`ops/backup.log` doesn't exist) because nothing was running at 3:17am.
+
+This is a Windows/WSL configuration issue (sleep settings, WSL's own idle-VM shutdown, or something else) outside this repo's control, and outside what's reachable over SSH into WSL itself (`/etc/wsl.conf` has nothing relevant — the controlling settings live Windows-side in `.wslconfig` or power settings). **Deprioritized for now at your request** — revisit once the pattern is clearer. Until it's addressed, treat any "the system has been quiet for N hours" observation as possibly this, not necessarily an application bug.
+
+---
+
 ## FIXED — Root cause of the reported outage (2026-09-16)
 
 **The target-ingestion pipeline had been completely dead since 2026-02-13, which is why no session had run since 2026-02-28.**
