@@ -145,6 +145,10 @@ class Settings(BaseSettings):
     confirmation_sync_mount: bool = True  # Sync mount after solve
     confirmation_max_offset_arcsec: float = 300.0  # Re-slew if offset exceeds this (5 arcmin)
     confirmation_reslew_enabled: bool = True  # Re-slew if too far from ephemeris
+    # Fault tolerance: give up on a target's remaining exposures after this many
+    # consecutive failures in a row, rather than either aborting on the first
+    # failure or retrying a genuinely broken mount/camera all night.
+    automation_max_consecutive_failures: int = 3
     # Association rigor parameters
     association_sigma_multiplier: float = 3.0  # k-sigma for match radius
     association_min_radius_arcsec: float = 2.0  # Floor to avoid over-tightening

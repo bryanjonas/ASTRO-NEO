@@ -179,12 +179,21 @@ class AutomationService:
         started_at = datetime.utcnow()
         results = []
         stop_requested = False
+        aborted_reason: str | None = None
+        consecutive_failures = 0
+        max_consecutive_failures = settings.automation_max_consecutive_failures
 
         # Create sequential capture service
         with get_session() as session:
             capture_service = SequentialCaptureService(db=session)
 
-            # Execute each exposure in the plan
+            # Execute each exposure in the plan. A single failed exposure
+            # (transient NINA hiccup, one bad solve) must not abort the rest
+            # of the night's plan -- we log it, record it, and move on. We
+            # only give up early if failures happen repeatedly in a row,
+            # since that usually means something is genuinely broken
+            # (mount disconnected, camera stuck) and retrying blindly would
+            # just waste the rest of the observing window.
             for i in range(plan.count):
                 if _stop_event.is_set():
                     logger.info("Stop requested; ending plan execution for %s", plan.name)
@@ -207,6 +216,7 @@ class AutomationService:
                     results.append(result)
 
                     if result["success"]:
+                        consecutive_failures = 0
                         if result.get("confirmation_only"):
                             logger.info("Confirmation exposure completed; stopping session.")
                             break
@@ -219,7 +229,7 @@ class AutomationService:
                     else:
                         error_msg = result.get("error") or "Exposure failed"
                         logger.error(f"✗ Exposure {i+1}/{plan.count} failed: {error_msg}")
-                        raise RuntimeError(error_msg)
+                        consecutive_failures += 1
                 except Exception as e:
                     logger.error(f"Exception during exposure {i+1}/{plan.count}: {e}", exc_info=True)
                     results.append(
@@ -229,7 +239,18 @@ class AutomationService:
                             "confirmation_attempts": 0,
                         }
                     )
-                    raise
+                    consecutive_failures += 1
+
+                if consecutive_failures >= max_consecutive_failures:
+                    aborted_reason = (
+                        f"{consecutive_failures} consecutive exposure failures"
+                    )
+                    logger.error(
+                        "Aborting plan for %s after %s; skipping remaining exposures",
+                        plan.name,
+                        aborted_reason,
+                    )
+                    break
 
         completed_at = datetime.utcnow()
 
@@ -287,6 +308,7 @@ class AutomationService:
             "results": results,
             "psv_bundle": psv_bundle,
             "stopped": stop_requested,
+            "aborted_reason": aborted_reason,
         }
 
 

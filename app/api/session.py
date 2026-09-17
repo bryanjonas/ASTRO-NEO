@@ -220,6 +220,21 @@ def start_session(
                 "target_name": target_name,
                 "result": result
             }
+        if result.get("aborted_reason"):
+            logger.warning(
+                "Session %s aborted early: %s", session.id, result["aborted_reason"]
+            )
+            session.status = "error"
+            session.end_time = datetime.utcnow()
+            db.commit()
+            return {
+                "success": False,
+                "error": result["aborted_reason"],
+                "session_id": session.id,
+                "target_name": target_name,
+                "result": result,
+            }
+
         session.status = "completed"
         session.end_time = datetime.utcnow()
         db.commit()
