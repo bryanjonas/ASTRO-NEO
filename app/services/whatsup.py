@@ -208,8 +208,10 @@ class WhatsUpService:
                 select(NeoCandidate).where(NeoCandidate.status == "WHATSUP")
             ).all()
         )
+        # Brightest (lowest vmag) first; unknown vmag last. The negation this
+        # replaced (-vmag, ascending) actually sorted faintest-first.
         candidates.sort(
-            key=lambda item: (item.vmag is None, -(item.vmag or 0.0)),
+            key=lambda item: (item.vmag is None, item.vmag if item.vmag is not None else 0.0),
         )
         return candidates[:limit]
 
