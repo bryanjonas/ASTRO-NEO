@@ -6,6 +6,7 @@ Database-backed session management using the observing_sessions table.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -14,11 +15,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlmodel import select
 
-from app.db.session import get_session_dep
+from app.db.session import get_session, get_session_dep
 from app.core.config import settings
 from app.models.neocp import NeoCandidate, NeoEphemeris
 from app.models.session import ObservingSession
-from app.services.automation import AutomationService, clear_stop, request_stop
+from app.services.automation import (
+    AutomationService,
+    clear_stop,
+    is_stop_requested,
+    request_stop,
+)
 from app.services.nina_client import NinaBridgeService
 from app.services.weather import WeatherService
 from app.services.whatsup import WhatsUpService
@@ -26,6 +32,11 @@ from app.services.whatsup import WhatsUpService
 router = APIRouter(prefix="/session", tags=["session"])
 logger = logging.getLogger(__name__)
 _LAST_READY_SIGNATURE: tuple[str, ...] | None = None
+# Set for the lifetime of a target chain (first target through the last).
+# Closes the brief DB-query race between one target's ObservingSession row
+# being marked completed/error and the next one being created, during which
+# a query for status == "active" would otherwise find nothing.
+_chain_active = threading.Event()
 
 
 class SessionStartRequest(BaseModel):
@@ -100,74 +111,64 @@ def session_ready(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
     return {"ready": True}
 
 
-@router.post("/start")
-def start_session(
-    request: SessionStartRequest,
-    db: Session = Depends(get_session_dep)
-) -> dict[str, Any]:
-    """Start a new observing session.
-
-    If manual_target_override is provided, uses that target.
-    Otherwise, auto-selects the highest-ranked visible target from observability scores.
-    """
-    # Check if there's already an active session
-    existing = db.exec(
-        select(ObservingSession)
-        .where(ObservingSession.status == "active")
+def _build_target_dict_from_candidate(db: Session, target_id: str) -> dict[str, Any] | None:
+    candidate = db.exec(
+        select(NeoCandidate).where(NeoCandidate.id == target_id)
     ).first()
+    if not candidate:
+        return None
+    return {
+        "name": target_id,
+        "candidate_id": target_id,
+        "ra_deg": candidate.ra_deg or 0.0,
+        "dec_deg": candidate.dec_deg or 0.0,
+        "vmag": candidate.vmag,
+        "score": 0.0,
+    }
 
-    if existing:
+
+def _resolve_next_target(
+    db: Session, exclude_ids: set[str]
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Pick the best-ranked visible target not already attempted this chain."""
+    visible_targets, error = _get_whatsup_targets(db)
+    if error:
+        return None, error
+    for candidate in visible_targets:
+        if candidate.id in exclude_ids:
+            continue
         return {
-            "success": False,
-            "error": "An active session already exists. Stop it first.",
-            "session_id": existing.id
-        }
+            "name": candidate.id,  # Use id (e.g. "16") not trksub (e.g. "(16)")
+            "candidate_id": candidate.id,
+            "ra_deg": candidate.ra_deg or 0.0,
+            "dec_deg": candidate.dec_deg or 0.0,
+            "vmag": candidate.vmag,
+            "score": 0.0,
+        }, None
+    return None, "No more unattempted visible targets"
 
-    # Weather safety gate: refuse to slew/expose in unsafe conditions. If no
-    # weather sensor is configured, or a fetch fails with no cached data,
-    # weather_status is None and we fail open (unknown, not "unsafe") --
-    # this matches prior behavior for sites with no weather monitoring set up.
-    weather_service = WeatherService(db)
-    weather_status = weather_service.get_status()
+
+def _weather_blocks_start(db: Session) -> str | None:
+    """Return a reason string if weather is unsafe, else None (safe or unknown)."""
+    weather_status = WeatherService(db).get_status()
     if weather_status is not None and not weather_status.is_safe:
-        logger.warning(
-            "Refusing to start session: unsafe weather (%s)",
-            ", ".join(weather_status.reasons),
-        )
-        return {
-            "success": False,
-            "error": f"Unsafe weather conditions: {', '.join(weather_status.reasons)}",
-        }
+        return f"Unsafe weather conditions: {', '.join(weather_status.reasons)}"
+    return None
 
-    # Determine target
-    if request.manual_target_override:
-        target_id = request.manual_target_override
-        target_name = request.manual_target_override
-    else:
-        visible_targets, error = _get_whatsup_targets(db)
-        if error:
-            return {
-                "success": False,
-                "error": error,
-            }
 
-        best_target = visible_targets[0]
-        target_id = best_target.id
-        target_name = best_target.id  # Use id (e.g. "16") not trksub (e.g. "(16)")
+def _run_session_for_target(
+    db: Session, target_dict: dict[str, Any]
+) -> tuple[ObservingSession, dict[str, Any]]:
+    """Create an ObservingSession row for one target and run its plan to completion."""
+    target_id = target_dict["candidate_id"]
+    target_name = target_dict["name"]
 
-        logger.info(
-            "Auto-selected target: %s (vmag=%s)",
-            target_name,
-            best_target.vmag,
-        )
-
-    # Create session record
     session = ObservingSession(
         start_time=datetime.utcnow(),
         status="active",
         target_mode="auto",
         selected_target=target_id,
-        stats={}
+        stats={},
     )
     db.add(session)
     db.commit()
@@ -175,106 +176,180 @@ def start_session(
 
     logger.info(f"Created session {session.id} for target {target_name}")
 
-    # Build target plan and execute
-    clear_stop()
-    try:
-        automation = AutomationService(db_session=db)
+    automation = AutomationService(db_session=db)
+    plan = automation.build_target_plan(target_dict)
 
-        # Get candidate data for plan building (need RA/Dec/Vmag)
-        candidate = db.exec(
-            select(NeoCandidate)
-            .where(NeoCandidate.id == target_id)
-        ).first()
+    logger.info(
+        f"Executing plan for {plan.name}: {plan.count}x{plan.exposure_seconds}s "
+        f"@ {plan.filter_name}, binning {plan.binning}"
+    )
 
-        if not candidate:
-            session.status = "error"
-            session.end_time = datetime.utcnow()
-            db.commit()
-            return {
-                "success": False,
-                "error": f"Target {target_id} not found in candidate table",
-                "session_id": session.id
-            }
+    result = automation.execute_target_plan(plan, session_id=session.id)
 
-        # Get observability for score
-        target_dict = {
-            "name": target_name,
-            "candidate_id": target_id,
-            "ra_deg": candidate.ra_deg or 0.0,
-            "dec_deg": candidate.dec_deg or 0.0,
-            "vmag": candidate.vmag,
-            "score": 0.0,
-        }
-
-        plan = automation.build_target_plan(target_dict)
-
-        logger.info(
-            f"Executing plan for {plan.name}: {plan.count}x{plan.exposure_seconds}s "
-            f"@ {plan.filter_name}, binning {plan.binning}"
+    db.refresh(session)
+    session.stats = {
+        "total_attempts": result["total_attempts"],
+        "successful_captures": result["successful_captures"],
+        "successful_associations": result["successful_associations"],
+        "started_at": result["started_at"],
+        "completed_at": result["completed_at"],
+    }
+    if session.status in ("stopped", "stopping") or result.get("stopped"):
+        logger.info("Session %s stopped by user request", session.id)
+        session.status = "stopped"
+        session.end_time = session.end_time or datetime.utcnow()
+    elif result.get("aborted_reason"):
+        logger.warning(
+            "Session %s aborted early: %s", session.id, result["aborted_reason"]
         )
-
-        # Execute the plan (this runs synchronously)
-        result = automation.execute_target_plan(plan, session_id=session.id)
-
-        # Update session stats
-        session.stats = {
-            "total_attempts": result["total_attempts"],
-            "successful_captures": result["successful_captures"],
-            "successful_associations": result["successful_associations"],
-            "started_at": result["started_at"],
-            "completed_at": result["completed_at"]
-        }
-        db.refresh(session)
-        if session.status in ("stopped", "stopping") or result.get("stopped"):
-            logger.info("Session %s stopped by user request", session.id)
-            session.status = "stopped"
-            session.end_time = session.end_time or datetime.utcnow()
-            db.commit()
-            return {
-                "success": False,
-                "stopped": True,
-                "session_id": session.id,
-                "target_name": target_name,
-                "result": result
-            }
-        if result.get("aborted_reason"):
-            logger.warning(
-                "Session %s aborted early: %s", session.id, result["aborted_reason"]
-            )
-            session.status = "error"
-            session.end_time = datetime.utcnow()
-            db.commit()
-            return {
-                "success": False,
-                "error": result["aborted_reason"],
-                "session_id": session.id,
-                "target_name": target_name,
-                "result": result,
-            }
-
-        session.status = "completed"
-        session.end_time = datetime.utcnow()
-        db.commit()
-
-        return {
-            "success": True,
-            "session_id": session.id,
-            "target_name": target_name,
-            "result": result
-        }
-
-    except Exception as e:
-        logger.error(f"Session execution failed: {e}", exc_info=True)
         session.status = "error"
         session.end_time = datetime.utcnow()
-        session.stats = {"error": str(e)}
-        db.commit()
+    else:
+        session.status = "completed"
+        session.end_time = datetime.utcnow()
+    db.commit()
+    return session, result
 
+
+def _run_target_chain(first_target: dict[str, Any], auto_advance: bool) -> None:
+    """Runs in a background thread: executes the first target, then -- if
+    auto_advance -- keeps advancing to the next best not-yet-attempted
+    visible target until the ranked list is exhausted, a stop is requested,
+    weather turns unsafe, or too many targets in a row end in error (usually
+    a sign something is genuinely broken, e.g. the mount is disconnected).
+    """
+    attempted: set[str] = set()
+    target_dict: dict[str, Any] | None = first_target
+    consecutive_target_failures = 0
+
+    _chain_active.set()
+    try:
+        while target_dict is not None:
+            attempted.add(target_dict["candidate_id"])
+            target_name = target_dict["name"]
+
+            try:
+                with get_session() as db:
+                    session, _result = _run_session_for_target(db, target_dict)
+            except Exception:
+                logger.error(
+                    "Unhandled error running session for %s; ending chain",
+                    target_name,
+                    exc_info=True,
+                )
+                break
+
+            if session.status == "stopped":
+                logger.info("Target chain stopped by user request after %s", target_name)
+                break
+
+            if session.status == "error":
+                consecutive_target_failures += 1
+            else:
+                consecutive_target_failures = 0
+
+            if not auto_advance:
+                break
+
+            if consecutive_target_failures >= settings.automation_max_consecutive_target_failures:
+                logger.error(
+                    "Ending target chain after %d consecutive target failures",
+                    consecutive_target_failures,
+                )
+                break
+
+            if is_stop_requested():
+                logger.info("Target chain ending: stop requested")
+                break
+
+            with get_session() as db:
+                weather_block = _weather_blocks_start(db)
+                if weather_block:
+                    logger.warning("Target chain ending: %s", weather_block)
+                    break
+                target_dict, reason = _resolve_next_target(db, attempted)
+
+            if target_dict is None:
+                logger.info("Target chain complete: %s", reason)
+                break
+    finally:
+        _chain_active.clear()
+
+    logger.info("Target chain finished.")
+
+
+@router.post("/start")
+def start_session(
+    request: SessionStartRequest,
+    db: Session = Depends(get_session_dep)
+) -> dict[str, Any]:
+    """Start a new observing session.
+
+    If manual_target_override is provided, observes only that target.
+    Otherwise, auto-selects the highest-ranked visible target and then
+    automatically advances through the remaining ranked targets as each one
+    finishes, until the list is exhausted, weather turns unsafe, too many
+    targets in a row fail, or a stop is requested.
+
+    Runs the actual capture chain in a background thread, so this call
+    returns immediately -- poll /api/session/status for live progress.
+    """
+    # Check if there's already an active session
+    existing = db.exec(
+        select(ObservingSession)
+        .where(ObservingSession.status == "active")
+    ).first()
+
+    if existing or _chain_active.is_set():
         return {
             "success": False,
-            "error": str(e),
-            "session_id": session.id
+            "error": "An active session already exists. Stop it first.",
+            "session_id": existing.id if existing else None,
         }
+
+    # Weather safety gate: refuse to slew/expose in unsafe conditions. If no
+    # weather sensor is configured, or a fetch fails with no cached data,
+    # weather_status is None and we fail open (unknown, not "unsafe") --
+    # this matches prior behavior for sites with no weather monitoring set up.
+    weather_block = _weather_blocks_start(db)
+    if weather_block:
+        logger.warning("Refusing to start session: %s", weather_block)
+        return {"success": False, "error": weather_block}
+
+    # Determine the first target
+    if request.manual_target_override:
+        target_dict = _build_target_dict_from_candidate(db, request.manual_target_override)
+        if not target_dict:
+            return {
+                "success": False,
+                "error": f"Target {request.manual_target_override} not found in candidate table",
+            }
+        auto_advance = False
+    else:
+        target_dict, error = _resolve_next_target(db, exclude_ids=set())
+        if error:
+            return {"success": False, "error": error}
+        auto_advance = True
+        logger.info(
+            "Auto-selected target: %s (vmag=%s)",
+            target_dict["name"],
+            target_dict["vmag"],
+        )
+
+    clear_stop()
+    thread = threading.Thread(
+        target=_run_target_chain,
+        args=(target_dict, auto_advance),
+        daemon=True,
+        name="target-chain",
+    )
+    thread.start()
+
+    return {
+        "success": True,
+        "target_name": target_dict["name"],
+        "auto_advance": auto_advance,
+    }
 
 
 @router.post("/stop")

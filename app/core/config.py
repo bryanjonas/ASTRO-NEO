@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     # consecutive failures in a row, rather than either aborting on the first
     # failure or retrying a genuinely broken mount/camera all night.
     automation_max_consecutive_failures: int = 3
+    # Auto-advance: when auto-selecting targets, stop advancing to the next
+    # target after this many targets in a row end in error -- usually a sign
+    # something is genuinely broken (mount disconnected) rather than a
+    # target-specific issue.
+    automation_max_consecutive_target_failures: int = 2
     # Association rigor parameters
     association_sigma_multiplier: float = 3.0  # k-sigma for match radius
     association_min_radius_arcsec: float = 2.0  # Floor to avoid over-tightening
