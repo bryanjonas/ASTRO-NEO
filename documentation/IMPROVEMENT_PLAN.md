@@ -64,10 +64,13 @@ All commits through `11b9857` are pushed to `origin/known_targets`.
 
 **Declined:** overnight alerting on session/chain failure (email/webhook/etc. when something dies unattended) — you decided you don't need separate alerts.
 
+5. **`274dd3a`** — **Dead code removed**: `task_queue.py` (`TASK_QUEUE`, zero references anywhere), `NinaBridgeService.set_ignore_weather` (zero callers, leftover from the removed NINA "bridge" architecture). Also removed `app/api/monitor.py` + `app/services/monitoring.py` (`POST /monitor/ingest`, `GET /monitor/reschedule`) — **these were live, registered endpoints**, not unreachable code, but a half-built external-monitoring integration nothing internal ever called or consumed; removed with your explicit confirmation since it changes API surface. Verified: clean container restart, and the removed endpoint now correctly 404s.
+
+All commits through `274dd3a` are pushed to `origin/known_targets`.
+
 **Remaining streamlining ideas from the original list**, not yet started:
 - Two disconnected target-ranking systems still exist (`WhatsUpService` live path vs. the more sophisticated `ObservabilityService`, not fully wired in) — worth converging now that the live path's ranking bug is fixed.
-- Dead code (`task_queue.py`, `monitor.py`/`monitoring.py`, `set_ignore_weather`) still unremoved.
-- Duplicated ~150-line test-mode capture path in `sequential_capture.py` still unmerged.
+- Duplicated ~150-line test-mode capture path in `sequential_capture.py` still unmerged — this one's a refactor of *active* capture logic (not dead code), so it carries real regression risk and deserves its own careful pass.
 
 ---
 
