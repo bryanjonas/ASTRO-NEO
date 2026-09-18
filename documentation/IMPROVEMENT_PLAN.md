@@ -68,8 +68,11 @@ All commits through `11b9857` are pushed to `origin/known_targets`.
 
 All commits through `274dd3a` are pushed to `origin/known_targets`.
 
-**Remaining streamlining ideas from the original list**, not yet started:
-- Two disconnected target-ranking systems still exist (`WhatsUpService` live path vs. the more sophisticated `ObservabilityService`, not fully wired in) — worth converging now that the live path's ranking bug is fixed.
+6. **`a214146`** — **Converged the two ranking systems, by enhancement rather than replacement.** `ObservabilityService`/`observability_engine.py` has never actually run in this deployment (`neoobservability` has 0 rows, container never started) — decided against resurrecting it onto the same hot path that already had five other untested changes stacked on it tonight. Instead blended MPC's own urgency score (`NeoCandidate.score`, already populated) into the already-live `get_ranked_targets`: a target with score=100 gets a `whatsup_score_bonus_mag` (default 3.0) magnitude "brightness discount," so an urgent-but-fainter target can outrank a non-urgent brighter one without score alone overriding brightness. Unknown-vmag targets still sort last regardless of score. `ObservabilityService` code is left in place, unused, if the more sophisticated scheduling is wanted later. Verified with a standalone reproduction of the exact sort key against representative data (confirmed the intended ordering in all three cases) plus a clean container restart — not exercised against live WHATSUP-status rows, since none currently exist.
+
+All commits through `a214146` are pushed to `origin/known_targets`.
+
+**Remaining streamlining idea from the original list**, not yet started:
 - Duplicated ~150-line test-mode capture path in `sequential_capture.py` still unmerged — this one's a refactor of *active* capture logic (not dead code), so it carries real regression risk and deserves its own careful pass.
 
 ---
