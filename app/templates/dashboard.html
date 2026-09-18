@@ -8,7 +8,13 @@
       <h1>ASTRO-NEO</h1>
     </div>
   <div class="session-controls">
-    <a class="btn btn-secondary" href="/dashboard/psv">PSV Builder</a>
+    <a class="btn btn-secondary" href="/dashboard/psv">
+      PSV Builder
+      <span class="psv-ready-badge" x-show="psvReadyTargets.length > 0" x-text="psvReadyTargets.length"></span>
+    </a>
+    <p class="session-note psv-ready-note" x-show="psvReadyTargets.length > 0">
+      <span x-text="psvReadyTargets.length"></span> target<span x-show="psvReadyTargets.length !== 1">s</span> ready to submit: <span x-text="psvReadyTargets.map((t) => t.target).join(', ')"></span>
+    </p>
     <template x-if="!sessionStatus.active">
       <button
         class="btn btn-primary"
@@ -187,6 +193,7 @@
 
 .session-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
 }
 
@@ -435,6 +442,26 @@
   font-size: 0.85rem;
   color: #6b7280;
 }
+
+.psv-ready-note {
+  flex-basis: 100%;
+  margin-top: 0;
+}
+
+.psv-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.35rem;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
 </style>
 
 <script>
@@ -461,6 +488,7 @@ function dashboard() {
     starting: false,
     stopping: false,
     refreshingTargets: false,
+    psvReadyTargets: [],
 
     init() {
       this.loadStatus();
@@ -468,6 +496,7 @@ function dashboard() {
       this.loadLogs();
       this.loadAvailableTargets();
       this.loadSessionReady();
+      this.loadPsvReadyTargets();
 
       // Poll for updates every 5 seconds
       setInterval(() => {
@@ -477,6 +506,22 @@ function dashboard() {
         this.loadAvailableTargets();
         this.loadSessionReady();
       }, 5000);
+
+      // PSV readiness changes slowly (roughly once per exposure at most) --
+      // check on a longer interval so this doesn't add load to every 5s tick.
+      setInterval(() => {
+        this.loadPsvReadyTargets();
+      }, 30000);
+    },
+
+    async loadPsvReadyTargets() {
+      try {
+        const response = await fetch('/api/psv/targets');
+        const data = await response.json();
+        this.psvReadyTargets = (data.targets || []).filter((t) => t.ready);
+      } catch (error) {
+        console.error('Failed to load PSV readiness:', error);
+      }
     },
 
     async loadStatus() {
