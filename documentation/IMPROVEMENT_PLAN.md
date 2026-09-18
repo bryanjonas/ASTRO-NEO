@@ -58,8 +58,11 @@ All commits through `41f9233` are pushed to `origin/known_targets`.
 
 **Natural follow-up not yet done:** the dashboard doesn't show chain progress (e.g. "target 2 of 5 tonight") since that state lives only in the background thread's memory, not the DB. Worth adding if the auto-advance chain proves out in practice.
 
+4. **`11b9857`** — **Surface PSV readiness on the main dashboard.** `GET /api/psv/targets` already computed a solid multi-night readiness flag per target (≥2 qualifying nights, magnitude data, numbered object) — it just only showed as a green checkmark on the separate `/dashboard/psv` page, easy to forget to check. The main dashboard now polls it every 30s (separate from the 5s status poll, since readiness changes slowly) and shows a badge + one-line summary whenever a target is ready. No new backend logic, purely surfacing what already existed. Verified live: page renders correctly, real endpoint data confirmed (5 historical targets, all correctly showing not-ready).
+
+All commits through `11b9857` are pushed to `origin/known_targets`.
+
 **Remaining streamlining ideas from the original list**, not yet started:
-- PSV bundle generation is manual-only (nothing flags "this target has enough frames to submit").
 - No overnight alerting on session/chain failure.
 - Two disconnected target-ranking systems still exist (`WhatsUpService` live path vs. the more sophisticated `ObservabilityService`, not fully wired in) — worth converging now that the live path's ranking bug is fixed.
 - Dead code (`task_queue.py`, `monitor.py`/`monitoring.py`, `set_ignore_weather`) still unremoved.
