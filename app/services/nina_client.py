@@ -370,22 +370,6 @@ class NinaBridgeService:
             return False
         return True
 
-    def set_ignore_weather(self, ignore: bool) -> dict[str, bool]:
-        """Set the ignore_weather flag on the bridge."""
-        url = f"{self.base_url}/ignore_weather"
-        try:
-            response = httpx.post(url, json={"ignore_weather": ignore}, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as e:
-            logger.error("Failed to set ignore_weather: %s", e)
-            raise
-            
-        if not data.get("Success"):
-            raise Exception(f"NINA API Error: {data.get('Error')}")
-            
-        return data.get("Response")
-
     def start_sequence(self, payload: dict[str, Any]) -> str:
         """Start a sequence (or notify NINA about one)."""
         return self._request("POST", "/sequence/start", json=payload)
