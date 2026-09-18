@@ -37,6 +37,12 @@
   </div>
 </div>
 
+  <!-- Error banner (replaces blocking alert() popups) -->
+  <div class="error-banner" x-show="errorMessage">
+    <span x-text="errorMessage"></span>
+    <button class="error-dismiss" @click="dismissError()" aria-label="Dismiss">&times;</button>
+  </div>
+
   <!-- Current Session Status -->
   <div class="status-card" x-show="sessionStatus.active">
     <h2>Current Session</h2>
@@ -462,6 +468,30 @@
   font-size: 0.75rem;
   font-weight: 700;
 }
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 0.375rem;
+  color: #991b1b;
+  font-size: 0.9rem;
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: #991b1b;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
 </style>
 
 <script>
@@ -500,6 +530,22 @@ function dashboard() {
     stopping: false,
     refreshingTargets: false,
     psvReadyTargets: [],
+    errorMessage: null,
+    errorTimeoutId: null,
+
+    showError(message) {
+      this.errorMessage = message;
+      if (this.errorTimeoutId) clearTimeout(this.errorTimeoutId);
+      this.errorTimeoutId = setTimeout(() => this.dismissError(), 8000);
+    },
+
+    dismissError() {
+      this.errorMessage = null;
+      if (this.errorTimeoutId) {
+        clearTimeout(this.errorTimeoutId);
+        this.errorTimeoutId = null;
+      }
+    },
 
     init() {
       this.loadStatus();
@@ -621,7 +667,7 @@ function dashboard() {
       this.starting = true;
       try {
         if (this.selectedTargets.length > 1) {
-          alert('Select a single target to start a session.');
+          this.showError('Select a single target to start a session.');
           return;
         }
         const manualTarget = this.selectedTargets.length === 1 ? this.selectedTargets[0] : null;
@@ -635,11 +681,11 @@ function dashboard() {
         if (data.success) {
           await this.loadStatus();
         } else {
-          alert('Failed to start session: ' + (data.error || 'Unknown error'));
+          this.showError('Failed to start session: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
         console.error('Failed to start session:', error);
-        alert('Failed to start session: ' + error.message);
+        this.showError('Failed to start session: ' + error.message);
       } finally {
         this.starting = false;
       }
@@ -666,11 +712,11 @@ function dashboard() {
         if (data.success) {
           await this.loadStatus();
         } else {
-          alert('Failed to stop session: ' + (data.error || 'Unknown error'));
+          this.showError('Failed to stop session: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
         console.error('Failed to stop session:', error);
-        alert('Failed to stop session: ' + error.message);
+        this.showError('Failed to stop session: ' + error.message);
       } finally {
         this.stopping = false;
       }
