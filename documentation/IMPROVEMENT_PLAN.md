@@ -81,11 +81,12 @@ All commits through `a214146` are pushed to `origin/known_targets`.
 
 2. **`492112a`** — **Self-hosted Alpine.js.** `base.html` loaded Alpine.js + its persist plugin from `unpkg.com` on every page load, with no functional need for internet access to render a dashboard controlling local hardware. Downloaded the exact pinned versions already referenced (3.13.5) and committed them under `app/static/`, served by the existing `StaticFiles` mount. Verified live (safe — static serving only): both files serve byte-identical to the unpkg originals, and both `/dashboard` and `/dashboard/psv` (sharing `base.html`) now render with zero `unpkg.com` references.
 
-All commits through `492112a` are pushed to `origin/known_targets`.
+3. **`b4ad99e`** — **Replaced all 5 `alert()` calls with an inline, dismissible error banner.** Blocking modal popups are a poor fit for a dashboard meant to stay open for hours (steal focus, can't be seen from another tab). Added an `error-banner` element + `showError()`/`dismissError()` methods; auto-clears after 8s or can be dismissed immediately. Verified live: dashboard still renders with the new banner, dismiss button, and both methods present.
+
+All commits through `b4ad99e` are pushed to `origin/known_targets`.
 
 **Other dashboard findings from this pass, not yet done:**
-- All error feedback is a blocking `alert()` popup (5 places) — dated for something meant to stay open for hours; an inline banner would be less jarring.
-- No weather-status visibility on the dashboard, despite the hard weather gate added earlier tonight — a refused start currently only shows via the same blocking alert.
+- No weather-status visibility on the dashboard, despite the hard weather gate added earlier tonight — a refused start now shows via the new error banner (an improvement from the old alert), but current conditions still aren't displayed anywhere.
 - No auto-advance chain progress indicator (carried over from the auto-advance section above).
 
 ---
