@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # start / auto-advance finding no targets), regardless of success or
     # failure -- avoids hammering MPC's WhatsUp endpoint on repeated calls.
     whatsup_auto_refresh_cooldown_minutes: float = 10.0
+    # Magnitude-equivalent "brightness discount" a target with MPC score=100
+    # gets in ranking (see WhatsUpService.get_ranked_targets) -- lets an
+    # urgent-but-fainter target outrank a non-urgent brighter one without
+    # letting score alone override brightness.
+    whatsup_score_bonus_mag: float = 3.0
     # Target scoring weights (must sum to ~1.0)
     scoring_weight_mpc: float = 0.30
     scoring_weight_altitude: float = 0.25

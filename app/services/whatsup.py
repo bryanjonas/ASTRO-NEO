@@ -243,11 +243,21 @@ class WhatsUpService:
                 select(NeoCandidate).where(NeoCandidate.status == "WHATSUP")
             ).all()
         )
-        # Brightest (lowest vmag) first; unknown vmag last. The negation this
-        # replaced (-vmag, ascending) actually sorted faintest-first.
-        candidates.sort(
-            key=lambda item: (item.vmag is None, item.vmag if item.vmag is not None else 0.0),
-        )
+        # Rank by brightness (lowest vmag first), but give MPC's own urgency
+        # score (0-100, e.g. newly-posted/high-uncertainty objects) a small
+        # "brightness discount" so an urgent-but-fainter target can outrank a
+        # non-urgent brighter one, without letting score alone override
+        # brightness entirely. A target with score=100 is treated as if
+        # whatsup_score_bonus_mag magnitudes brighter than it really is;
+        # score=0/None gets no adjustment. Unknown vmag still sorts last --
+        # can't usefully rank a target we have no brightness for.
+        def sort_key(item: NeoCandidate) -> tuple[bool, float]:
+            if item.vmag is None:
+                return True, 0.0
+            score_bonus = (item.score or 0) / 100.0 * settings.whatsup_score_bonus_mag
+            return False, item.vmag - score_bonus
+
+        candidates.sort(key=sort_key)
         return candidates[:limit]
 
     def ensure_horizons_cache(
