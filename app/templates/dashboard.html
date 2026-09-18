@@ -465,6 +465,17 @@
 </style>
 
 <script>
+// Backend timestamps are naive UTC (Python datetime.utcnow().isoformat()),
+// with no "Z" or offset suffix. A JS Date parses a marker-less ISO string
+// as *local* time, not UTC, silently shifting every displayed time by the
+// browser's UTC offset (e.g. a 9pm local capture shows up as ~2am). Treat
+// any timestamp with no explicit timezone marker as UTC.
+function toUtcDate(isoString) {
+  if (!isoString) return null;
+  const hasTimezone = /Z$|[+-]\d{2}:\d{2}$/.test(isoString);
+  return new Date(hasTimezone ? isoString : isoString + 'Z');
+}
+
 function dashboard() {
   return {
     sessionStatus: {
@@ -666,8 +677,8 @@ function dashboard() {
     },
 
     formatTime(isoString) {
-      if (!isoString) return 'N/A';
-      const date = new Date(isoString);
+      const date = toUtcDate(isoString);
+      if (!date) return 'N/A';
       return date.toLocaleTimeString();
     },
 
@@ -677,8 +688,8 @@ function dashboard() {
     },
 
     formatLogTime(isoString) {
-      if (!isoString) return '--:--:--';
-      const date = new Date(isoString);
+      const date = toUtcDate(isoString);
+      if (!date) return '--:--:--';
       return date.toLocaleTimeString();
     }
   };
