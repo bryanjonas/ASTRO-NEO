@@ -75,6 +75,18 @@ All commits through `a214146` are pushed to `origin/known_targets`.
 **Remaining streamlining idea from the original list**, not yet started:
 - Duplicated ~150-line test-mode capture path in `sequential_capture.py` still unmerged — this one's a refactor of *active* capture logic (not dead code), so it carries real regression risk and deserves its own careful pass.
 
+### Dashboard/UI pass, 2026-09-17 (your request: "improvements to the website/dashboard")
+
+1. **`8e0bfbd`** — **Fixed a real timezone display bug.** Every capture/log timestamp is stored as naive UTC (`datetime.utcnow()`) and serialized with no timezone marker — confirmed live, e.g. the API returns `"2026-02-21T02:10:15.163510"`. A JS `Date` parses a marker-less ISO string as *local* time, not UTC, so the dashboard was silently displaying every timestamp shifted by your UTC offset (a 9pm-local capture showed up as ~2am). Added `toUtcDate()` (appends `Z` only when no timezone marker is already present, so it won't double-shift an already-aware string if one ever appears) and routed `formatTime`/`formatLogTime` through it. Verified the exact logic with Node against naive, `Z`-suffixed, and offset-suffixed inputs — all three resolve correctly. Deployed, dashboard confirmed still rendering (200).
+
+All commits through `8e0bfbd` are pushed to `origin/known_targets`.
+
+**Other dashboard findings from this pass, not yet done:**
+- The dashboard depends on an external CDN (`unpkg.com`) to load Alpine.js — a MELE internet blip (which happened tonight) breaks the whole dashboard even though it controls equipment on the local LAN. Should self-host that JS file.
+- All error feedback is a blocking `alert()` popup (5 places) — dated for something meant to stay open for hours; an inline banner would be less jarring.
+- No weather-status visibility on the dashboard, despite the hard weather gate added earlier tonight — a refused start currently only shows via the same blocking alert.
+- No auto-advance chain progress indicator (carried over from the auto-advance section above).
+
 ---
 
 ## Phase 0 — Safety & data-loss (do first)
