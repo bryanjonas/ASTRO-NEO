@@ -62,8 +62,9 @@ All commits through `41f9233` are pushed to `origin/known_targets`.
 
 All commits through `11b9857` are pushed to `origin/known_targets`.
 
+**Declined:** overnight alerting on session/chain failure (email/webhook/etc. when something dies unattended) — you decided you don't need separate alerts.
+
 **Remaining streamlining ideas from the original list**, not yet started:
-- No overnight alerting on session/chain failure.
 - Two disconnected target-ranking systems still exist (`WhatsUpService` live path vs. the more sophisticated `ObservabilityService`, not fully wired in) — worth converging now that the live path's ranking bug is fixed.
 - Dead code (`task_queue.py`, `monitor.py`/`monitoring.py`, `set_ignore_weather`) still unremoved.
 - Duplicated ~150-line test-mode capture path in `sequential_capture.py` still unmerged.
