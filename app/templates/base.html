@@ -5,8 +5,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title if title else "ASTRO-NEO" }}</title>
-  <script src="https://unpkg.com/@alpinejs/persist@3.13.5/dist/cdn.min.js" defer></script>
-  <script src="https://unpkg.com/alpinejs@3.13.5" defer></script>
+  <!-- Self-hosted (not loaded from unpkg.com): this dashboard controls
+       local hardware and must keep working even if internet access from
+       MELE is degraded or down. -->
+  <script src="/static/alpine-persist-3.13.5.min.js" defer></script>
+  <script src="/static/alpine-3.13.5.min.js" defer></script>
 </head>
 
 <body class="page">
