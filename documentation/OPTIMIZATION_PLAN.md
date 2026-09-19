@@ -22,9 +22,11 @@ Where I can help once you have real data: reviewing specific captures/logs toget
 
 **Build real submission delivery.** Right now the entire pipeline terminates at "a `.ades.psv` file exists in `/data/psv`." `SubmissionService` was fixed two nights ago to stop *lying* about delivery, but it still can't actually deliver anything. Once Tier 1 has demonstrated the data is trustworthy, build the one real channel that's already half-scaffolded (`smtplib` in `submission.py` — MPC accepts ADES via email), and wire `SubmissionLog.status` through a real lifecycle so the dashboard can show "N nights ready to send" the same way it now shows "N targets ready to bundle."
 
-## Tier 3 — Protect what gets sent
+## Tier 3 — Protect what gets sent — **DONE 2026-09-19** (`ccda37a`)
 
-**Gate PSV/submission readiness on quality, not just quantity.** The association pipeline already computes real quality signals per frame (z-score, WCS RMS grade, morphology flags) — `psv.py`'s readiness check ignores all of it and just counts raw frame numbers. This is actually useful *during* Tier 1 too (it's a cheap way to see at a glance which nights are worth manually inspecting), not just a pre-Tier-2 gate. Cheap to do — the data already exists.
+**Gate PSV/submission readiness on quality, not just quantity.** Turned out the quality data (z-score, grade) was computed and logged but never actually *persisted* anywhere — this plan's original text ("the data already exists") was wrong on that point, caught while implementing. Added a migration (`CandidateAssociation.quality_grade`/`.z_score`), wired `auto_associate` to persist what it already computes, and gated both `/api/psv/targets` readiness and `/api/psv/bundle` generation on grade A/B only. Verified live: all existing historical data correctly now shows `good_obs: 0`/`ready: false` (it predates grading, so that's the honest answer, not a bug), and the bundle endpoint correctly 404s naming the required grade when nothing qualifies.
+
+**Side effect worth knowing about:** rebuilding the image for the migration (this session's first full rebuild, not just a bind-mount+restart) surfaced a real, unrelated live outage — `fastapi~=0.115` had silently drifted to fastapi 0.141.1/starlette 1.6.0 over time, breaking `TemplateResponse`'s old calling convention and 500ing both dashboard pages. Fixed (`f8c8ae7`) and pinned exact versions so a future rebuild can't repeat it silently. This is exactly the kind of thing tonight's Tier 6 test-harness idea would have caught before it ever hit a real page load.
 
 ## Tier 4 — De-risk the weakest remaining dependency
 
