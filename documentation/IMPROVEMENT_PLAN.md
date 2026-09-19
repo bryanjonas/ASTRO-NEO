@@ -85,10 +85,11 @@ All commits through `a214146` are pushed to `origin/known_targets`.
 
 4. **`35b28bd`** — **Surfaced weather status on the dashboard.** Added `GET /api/site/weather` (thin wrapper on `WeatherService.get_status()`) and a Weather card polled every 60s: safe/unsafe indicator with blocking reasons, raw metrics (wind/humidity/precip/cloud), last-checked time. Since `config/site_local.yml` has no `weather_sensors` entry, it currently and correctly shows "Weather monitoring not configured" with a pointer to what to add. Verified live end-to-end (safe to test: `get_status()` returns `None` with zero network calls when unconfigured) — endpoint returns `{"configured": false}`, dashboard renders correctly reflecting that.
 
-All commits through `35b28bd` are pushed to `origin/known_targets`.
+5. **`34b7400`** — **Added the auto-advance chain progress indicator.** Chain state lived only in the background thread's local variables. Added an in-memory `_chain_progress` dict (same pattern as `_chain_active`, doesn't need to survive a restart since the chain itself doesn't either) updated as `_run_target_chain` advances. Folded `chain_active`/`chain_auto_advance`/`chain_attempted_count`/`chain_remaining_count` into `GET /api/session/status` (already polled every 5s) rather than adding a new endpoint/fetch. The dashboard's Current Session card now also shows during the brief inter-target gap (when `chain_active` is true but the per-target `active` flag is momentarily false), with a line like "Auto-advancing — target 3 this chain (2 more queued)". Verified live end-to-end: the endpoint returns the new fields correctly, dashboard renders with the new markup present.
 
-**Remaining dashboard/streamlining item:**
-- No auto-advance chain progress indicator (carried over from the auto-advance section above).
+All commits through `34b7400` are pushed to `origin/known_targets`.
+
+**This closes out every item from tonight's streamlining and dashboard-improvement passes.** Remaining known item: the duplicated ~150-line test-mode capture path in `sequential_capture.py` (flagged earlier as a refactor of *active* capture logic, not dead code — real regression risk, deserves its own careful pass, not yet started).
 
 ---
 
