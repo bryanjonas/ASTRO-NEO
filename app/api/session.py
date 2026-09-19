@@ -38,6 +38,17 @@ _LAST_READY_SIGNATURE: tuple[str, ...] | None = None
 # a query for status == "active" would otherwise find nothing.
 _chain_active = threading.Event()
 
+# Chain progress for dashboard display (see get_status). Lives only in this
+# process's memory, same as _chain_active -- the chain itself doesn't
+# survive a restart either, so there's nothing to persist. Written only by
+# _run_target_chain's own thread; read by any request thread, so a reader
+# might see a value from a moment ago, which is fine for a progress display.
+_chain_progress: dict[str, Any] = {
+    "auto_advance": False,
+    "attempted_count": 0,
+    "remaining_count": None,
+}
+
 
 class SessionStartRequest(BaseModel):
     """Request to start an observing session."""
@@ -57,6 +68,13 @@ class SessionStatusResponse(BaseModel):
     total_captures: int = 0
     successful_captures: int = 0
     successful_associations: int = 0
+    # Auto-advance chain progress (see _chain_progress). chain_active can be
+    # true even when `active` above is false, in the brief gap between one
+    # target's session row completing and the next one being created.
+    chain_active: bool = False
+    chain_auto_advance: bool = False
+    chain_attempted_count: int = 0
+    chain_remaining_count: int | None = None
 
 
 def _get_whatsup_targets(db: Session) -> tuple[list[NeoCandidate], str | None]:
@@ -138,7 +156,7 @@ def _first_available(
 
 def _resolve_next_target(
     db: Session, exclude_ids: set[str]
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> tuple[dict[str, Any] | None, str | None, int]:
     """Pick the best-ranked visible target not already attempted this chain.
 
     If none are available (list empty, or everything in it already
@@ -146,6 +164,10 @@ def _resolve_next_target(
     this is what lets session start and the auto-advance chain work without
     a manual "Refresh Targets" click, while a cooldown (see
     whatsup.maybe_auto_refresh) keeps repeated calls from hammering MPC.
+
+    Returns (target_dict, error, remaining_count) -- remaining_count is how
+    many *other* unattempted candidates are left after this one, for the
+    dashboard's chain-progress display.
     """
     visible_targets, error = _get_whatsup_targets(db)
     candidate = _first_available(visible_targets, exclude_ids)
@@ -155,7 +177,9 @@ def _resolve_next_target(
         candidate = _first_available(visible_targets, exclude_ids)
 
     if candidate is None:
-        return None, error or "No more unattempted visible targets"
+        return None, error or "No more unattempted visible targets", 0
+
+    available_count = sum(1 for c in visible_targets if c.id not in exclude_ids)
 
     return {
         "name": candidate.id,  # Use id (e.g. "16") not trksub (e.g. "(16)")
@@ -164,7 +188,7 @@ def _resolve_next_target(
         "dec_deg": candidate.dec_deg or 0.0,
         "vmag": candidate.vmag,
         "score": 0.0,
-    }, None
+    }, None, max(0, available_count - 1)
 
 
 def _weather_blocks_start(db: Session) -> str | None:
@@ -242,10 +266,14 @@ def _run_target_chain(first_target: dict[str, Any], auto_advance: bool) -> None:
     consecutive_target_failures = 0
 
     _chain_active.set()
+    _chain_progress.update(
+        auto_advance=auto_advance, attempted_count=0, remaining_count=None
+    )
     try:
         while target_dict is not None:
             attempted.add(target_dict["candidate_id"])
             target_name = target_dict["name"]
+            _chain_progress["attempted_count"] = len(attempted)
 
             try:
                 with get_session() as db:
@@ -286,7 +314,8 @@ def _run_target_chain(first_target: dict[str, Any], auto_advance: bool) -> None:
                 if weather_block:
                     logger.warning("Target chain ending: %s", weather_block)
                     break
-                target_dict, reason = _resolve_next_target(db, attempted)
+                target_dict, reason, remaining_count = _resolve_next_target(db, attempted)
+                _chain_progress["remaining_count"] = remaining_count
 
             if target_dict is None:
                 logger.info("Target chain complete: %s", reason)
@@ -345,7 +374,7 @@ def start_session(
             }
         auto_advance = False
     else:
-        target_dict, error = _resolve_next_target(db, exclude_ids=set())
+        target_dict, error, _remaining_count = _resolve_next_target(db, exclude_ids=set())
         if error:
             return {"success": False, "error": error}
         auto_advance = True
@@ -435,8 +464,15 @@ def get_status(db: Session = Depends(get_session_dep)) -> SessionStatusResponse:
         .order_by(ObservingSession.start_time.desc())
     ).first()
 
+    chain_fields = dict(
+        chain_active=_chain_active.is_set(),
+        chain_auto_advance=_chain_progress["auto_advance"],
+        chain_attempted_count=_chain_progress["attempted_count"],
+        chain_remaining_count=_chain_progress["remaining_count"],
+    )
+
     if not session:
-        return SessionStatusResponse(active=False)
+        return SessionStatusResponse(active=False, **chain_fields)
 
     stats = session.stats or {}
 
@@ -448,7 +484,8 @@ def get_status(db: Session = Depends(get_session_dep)) -> SessionStatusResponse:
         status=session.status,
         total_captures=stats.get("total_attempts", 0),
         successful_captures=stats.get("successful_captures", 0),
-        successful_associations=stats.get("successful_associations", 0)
+        successful_associations=stats.get("successful_associations", 0),
+        **chain_fields,
     )
 
 

@@ -44,7 +44,7 @@
   </div>
 
   <!-- Current Session Status -->
-  <div class="status-card" x-show="sessionStatus.active">
+  <div class="status-card" x-show="sessionStatus.active || sessionStatus.chain_active">
     <h2>Current Session</h2>
     <div class="status-grid">
       <div class="status-item">
@@ -67,6 +67,9 @@
         <span class="status-value" x-text="sessionStatus.successful_associations || 0"></span>
       </div>
     </div>
+    <p class="session-note" x-show="sessionStatus.chain_auto_advance">
+      Auto-advancing — target <span x-text="sessionStatus.chain_attempted_count"></span> this chain<template x-if="sessionStatus.chain_remaining_count !== null"><span> (<span x-text="sessionStatus.chain_remaining_count"></span> more queued)</span></template>.
+    </p>
   </div>
 
   <!-- Weather -->
