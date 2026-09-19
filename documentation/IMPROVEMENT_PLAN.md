@@ -83,10 +83,11 @@ All commits through `a214146` are pushed to `origin/known_targets`.
 
 3. **`b4ad99e`** — **Replaced all 5 `alert()` calls with an inline, dismissible error banner.** Blocking modal popups are a poor fit for a dashboard meant to stay open for hours (steal focus, can't be seen from another tab). Added an `error-banner` element + `showError()`/`dismissError()` methods; auto-clears after 8s or can be dismissed immediately. Verified live: dashboard still renders with the new banner, dismiss button, and both methods present.
 
-All commits through `b4ad99e` are pushed to `origin/known_targets`.
+4. **`35b28bd`** — **Surfaced weather status on the dashboard.** Added `GET /api/site/weather` (thin wrapper on `WeatherService.get_status()`) and a Weather card polled every 60s: safe/unsafe indicator with blocking reasons, raw metrics (wind/humidity/precip/cloud), last-checked time. Since `config/site_local.yml` has no `weather_sensors` entry, it currently and correctly shows "Weather monitoring not configured" with a pointer to what to add. Verified live end-to-end (safe to test: `get_status()` returns `None` with zero network calls when unconfigured) — endpoint returns `{"configured": false}`, dashboard renders correctly reflecting that.
 
-**Other dashboard findings from this pass, not yet done:**
-- No weather-status visibility on the dashboard, despite the hard weather gate added earlier tonight — a refused start now shows via the new error banner (an improvement from the old alert), but current conditions still aren't displayed anywhere.
+All commits through `35b28bd` are pushed to `origin/known_targets`.
+
+**Remaining dashboard/streamlining item:**
 - No auto-advance chain progress indicator (carried over from the auto-advance section above).
 
 ---
