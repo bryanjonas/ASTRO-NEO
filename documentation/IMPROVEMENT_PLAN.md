@@ -34,6 +34,16 @@ Last session's retry-with-backoff for `WhatsUpService.fetch_targets` (`d5e9f15`)
 
 **`GET /api/session/ready` returned `{"ready": true}` for the first time this entire session.** Every fix across both nights — the ingestion outage, the fault-tolerant capture loop, the ranking bug, auto-advance, auto-refresh, this timeout — has been building toward this: the app is now, for the first time, actually in a state where starting a real observing session would work end-to-end.
 
+### First real session-start test, and one more bug found live
+
+With your explicit go-ahead, ran `POST /api/session/start` for real, watching logs live together. Target `1264` auto-selected, plan built (5×60s @ L), exposure 1 attempted — NINA correctly rejected the slew with "Mount not connected" (**safe: no real hardware was ever commanded**, NINA/mount just isn't connected right now). The retry/circuit-breaker logic from `79b4675` worked exactly as designed: 3 failed attempts, then a clean abort.
+
+But right after the abort, the background thread crashed with `sqlalchemy.orm.exc.DetachedInstanceError`. **Fixed in `6504091`**: `_run_target_chain` was checking `session.status` *after* the `with get_session()` block that created it had already closed -- SQLAlchemy expires ORM attributes on commit by default, so that access tried to lazy-reload on a detached instance. Captured `session.status` into a local variable while the session was still open. **Verified live**: re-ran the identical scenario and confirmed the full sequence -- 3 failures, abort, chain correctly searches for and finds no next target, "Target chain finished" -- now completes with no exception. `GET /api/session/status` confirmed clean state afterward.
+
+This is exactly why live-testing the hot path mattered: a bug that no amount of syntax checking or code review would have caught, since it only manifests when an ORM object crosses a session boundary at runtime.
+
+**Also observed, not yet addressed:** `POST /api/session/start` blocked for ~40s this time because `maybe_auto_refresh` (triggered synchronously inside the handler, before the background thread spawns) hit MPC's slow WhatsUp endpoint. This contradicts the "returns immediately" design intent from `81e120e` — worth revisiting: either move the very-first-target resolution into the background thread too, or accept that the initial call can occasionally take up to ~60s.
+
 ### Also fixed the same session (2026-09-16), in order
 
 1. **`4de9f55`** — the ingestion outage above.
