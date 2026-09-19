@@ -42,7 +42,12 @@ class Settings(BaseSettings):
     horizons_session_step_minutes: int = 1
     scout_api_url: str = "https://ssd-api.jpl.nasa.gov/scout.api"
     scout_timeout: float = 30.0
-    whatsup_timeout: float = 30.0
+    # MPC's WhatsUp form POST has been observed to consistently take ~37-38s
+    # to respond (confirmed live, twice, with and without an added delay
+    # between the GET and the POST -- it's genuine server-side processing
+    # time, not a rate limit or bot-defense heuristic). 30s was killing
+    # requests that would have succeeded; 60s gives real headroom.
+    whatsup_timeout: float = 60.0
     whatsup_refresh_minutes: int = 30
     whatsup_horizons_ttl_minutes: int = 10
     whatsup_max_objects: int = 5
