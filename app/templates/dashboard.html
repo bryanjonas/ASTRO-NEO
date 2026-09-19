@@ -69,6 +69,42 @@
     </div>
   </div>
 
+  <!-- Weather -->
+  <div class="status-card">
+    <h2>Weather</h2>
+    <template x-if="!weatherStatus.configured">
+      <p class="session-note">Weather monitoring not configured — add a <code>weather_sensors</code> entry to <code>config/site_local.yml</code> to enable the safety gate and this display.</p>
+    </template>
+    <template x-if="weatherStatus.configured">
+      <div>
+        <div class="status-item">
+          <span class="status-label">Safe to observe:</span>
+          <span class="status-value" :class="weatherStatus.safe ? 'weather-safe' : 'weather-unsafe'" x-text="weatherStatus.safe ? 'Yes' : 'No'"></span>
+        </div>
+        <p class="session-note weather-unsafe" x-show="weatherStatus.safe === false" x-text="'Blocking session start: ' + (weatherStatus.reasons || []).join(', ')"></p>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="status-label">Wind:</span>
+            <span class="status-value" x-text="formatWeatherValue(weatherStatus.wind_speed_mps, ' m/s')"></span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Cloud cover:</span>
+            <span class="status-value" x-text="formatWeatherValue(weatherStatus.cloud_cover_pct, '%')"></span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Precip chance:</span>
+            <span class="status-value" x-text="formatWeatherValue(weatherStatus.precipitation_probability_pct, '%')"></span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Humidity:</span>
+            <span class="status-value" x-text="formatWeatherValue(weatherStatus.relative_humidity_pct, '%')"></span>
+          </div>
+        </div>
+        <p class="session-note" x-show="weatherStatus.fetched_at">Last checked: <span x-text="formatTime(weatherStatus.fetched_at)"></span></p>
+      </div>
+    </template>
+  </div>
+
   <!-- Recent Captures -->
   <div class="captures-card">
     <h2>Recent Captures</h2>
@@ -492,6 +528,16 @@
   cursor: pointer;
   padding: 0 0.25rem;
 }
+
+.weather-safe {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.weather-unsafe {
+  color: #dc2626;
+  font-weight: 700;
+}
 </style>
 
 <script>
@@ -530,6 +576,7 @@ function dashboard() {
     stopping: false,
     refreshingTargets: false,
     psvReadyTargets: [],
+    weatherStatus: { configured: false },
     errorMessage: null,
     errorTimeoutId: null,
 
@@ -554,6 +601,7 @@ function dashboard() {
       this.loadAvailableTargets();
       this.loadSessionReady();
       this.loadPsvReadyTargets();
+      this.loadWeatherStatus();
 
       // Poll for updates every 5 seconds
       setInterval(() => {
@@ -569,6 +617,12 @@ function dashboard() {
       setInterval(() => {
         this.loadPsvReadyTargets();
       }, 30000);
+
+      // Weather is cached server-side (weather_snapshot_ttl_minutes, default
+      // 15) -- polling faster than that wouldn't show fresher data anyway.
+      setInterval(() => {
+        this.loadWeatherStatus();
+      }, 60000);
     },
 
     async loadPsvReadyTargets() {
@@ -579,6 +633,20 @@ function dashboard() {
       } catch (error) {
         console.error('Failed to load PSV readiness:', error);
       }
+    },
+
+    async loadWeatherStatus() {
+      try {
+        const response = await fetch('/api/site/weather');
+        this.weatherStatus = await response.json();
+      } catch (error) {
+        console.error('Failed to load weather status:', error);
+      }
+    },
+
+    formatWeatherValue(value, suffix) {
+      if (value === null || value === undefined) return '—';
+      return `${Math.round(value * 10) / 10}${suffix}`;
     },
 
     async loadStatus() {

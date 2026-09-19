@@ -11,10 +11,33 @@ from sqlmodel import Session, select, update
 
 from app.api.deps import get_db
 from app.models import SiteConfig
+from app.services.weather import WeatherService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/site", tags=["site"])
+
+
+@router.get("/weather")
+def get_weather(db: Session = Depends(get_db)) -> dict:
+    """Current weather status, for dashboard display and the session-start
+    safety gate. `configured=False` means no weather_sensors entry exists
+    in config/site_local.yml -- the gate fails open in that case."""
+    status = WeatherService(db).get_status()
+    if status is None:
+        return {"configured": False}
+    return {
+        "configured": True,
+        "safe": status.is_safe,
+        "reasons": status.reasons,
+        "fetched_at": status.fetched_at.isoformat(),
+        "temperature_c": status.temperature_c,
+        "wind_speed_mps": status.wind_speed_mps,
+        "relative_humidity_pct": status.relative_humidity_pct,
+        "precipitation_probability_pct": status.precipitation_probability_pct,
+        "precipitation_mm": status.precipitation_mm,
+        "cloud_cover_pct": status.cloud_cover_pct,
+    }
 
 
 class SiteConfigPayload(BaseModel):
