@@ -278,6 +278,10 @@ def _run_target_chain(first_target: dict[str, Any], auto_advance: bool) -> None:
             try:
                 with get_session() as db:
                     session, _result = _run_session_for_target(db, target_dict)
+                    # Capture what we need while the session is still open --
+                    # accessing an ORM attribute after the `with` block exits
+                    # (session closed/expired) raises DetachedInstanceError.
+                    session_status = session.status
             except Exception:
                 logger.error(
                     "Unhandled error running session for %s; ending chain",
@@ -286,11 +290,11 @@ def _run_target_chain(first_target: dict[str, Any], auto_advance: bool) -> None:
                 )
                 break
 
-            if session.status == "stopped":
+            if session_status == "stopped":
                 logger.info("Target chain stopped by user request after %s", target_name)
                 break
 
-            if session.status == "error":
+            if session_status == "error":
                 consecutive_target_failures += 1
             else:
                 consecutive_target_failures = 0
