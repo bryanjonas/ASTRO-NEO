@@ -9,7 +9,14 @@ description = "ASTRO-NEO orchestration services"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi~=0.115",
+    # Pinned exact, not ~=: "~=0.115" is far looser than it looks (allows
+    # anything up to 1.0) and a routine rebuild pulled fastapi 0.141.1 with
+    # starlette 1.6.0, which silently broke TemplateResponse's old calling
+    # convention -- a live outage caught only by chance during unrelated
+    # work. Pinned to the exact versions now confirmed working together;
+    # bump deliberately, not implicitly on the next rebuild.
+    "fastapi==0.141.1",
+    "starlette==1.6.0",
     "uvicorn[standard]~=0.30",
     "pydantic-settings~=2.4",
     "pyyaml~=6.0",

@@ -11,19 +11,13 @@ templates = Jinja2Templates(directory="app/templates")
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Render the dashboard."""
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request}
-    )
+    return templates.TemplateResponse(request, "dashboard.html")
 
 
 @router.get("/dashboard/psv", response_class=HTMLResponse)
 async def psv_dashboard(request: Request):
     """Render the PSV dashboard."""
-    return templates.TemplateResponse(
-        "psv.html",
-        {"request": request}
-    )
+    return templates.TemplateResponse(request, "psv.html")
 
 
 __all__ = ["router"]
