@@ -18,6 +18,13 @@ from app.services.reporting import ReportService
 
 router = APIRouter(prefix="/psv", tags=["psv"])
 
+# Association quality grades (from AnalysisService.find_best_match_scored,
+# via CandidateAssociation.quality_grade) accepted toward PSV readiness and
+# bundle generation. An unscored association (older distance-only fallback
+# match, or no association at all) doesn't count -- "ready" should mean the
+# data is good, not just that enough frames exist.
+ACCEPTED_QUALITY_GRADES = {"A", "B"}
+
 
 class PsvBundleRequest(BaseModel):
     targets: list[str] = Field(default_factory=list)
@@ -53,6 +60,9 @@ def list_psv_targets(
             candidate_map[cand.trksub] = cand
 
     association_ids = {assoc.capture_id for assoc in associations if assoc.capture_id}
+    quality_by_capture: dict[int, str | None] = {
+        assoc.capture_id: assoc.quality_grade for assoc in associations if assoc.capture_id
+    }
     targets: dict[str, dict[str, Any]] = {}
 
     for row in measurements:
@@ -67,6 +77,7 @@ def list_psv_targets(
                 "vmag_sum": 0.0,
                 "vmag_count": 0,
                 "total_obs": 0,
+                "good_obs": 0,
                 "first_obs": None,
                 "last_obs": None,
                 "nights": {},
@@ -77,6 +88,10 @@ def list_psv_targets(
             entry["vmag_sum"] += row.magnitude
             entry["vmag_count"] += 1
 
+        is_good = quality_by_capture.get(row.capture_id) in ACCEPTED_QUALITY_GRADES
+        if is_good:
+            entry["good_obs"] += 1
+
         obs_time = row.obs_time
         if entry["first_obs"] is None or obs_time < entry["first_obs"]:
             entry["first_obs"] = obs_time
@@ -86,11 +101,15 @@ def list_psv_targets(
         night_key = _utc_date(obs_time)
         night = entry["nights"].setdefault(
             night_key,
-            {"count": 0, "mag_count": 0},
+            {"count": 0, "mag_count": 0, "good_count": 0, "good_mag_count": 0},
         )
         night["count"] += 1
         if row.magnitude is not None:
             night["mag_count"] += 1
+        if is_good:
+            night["good_count"] += 1
+            if row.magnitude is not None:
+                night["good_mag_count"] += 1
 
     payload = []
     for entry in targets.values():
@@ -101,13 +120,18 @@ def list_psv_targets(
                 "night": night_key,
                 "count": nights[night_key]["count"],
                 "mag_count": nights[night_key]["mag_count"],
+                "good_count": nights[night_key]["good_count"],
+                "good_mag_count": nights[night_key]["good_mag_count"],
             }
             for night_key in night_keys
         ]
+        # Quality-gated: a night only qualifies if enough of its frames are
+        # good-quality associations (grade A/B), not just present. A night
+        # with 5 frames where only 1 is grade A doesn't count.
         qualifying_nights = [
             night
             for night in per_night
-            if 3 <= night["count"] <= 5 and night["mag_count"] >= 1
+            if 3 <= night["good_count"] <= 5 and night["good_mag_count"] >= 1
         ]
         measured_vmag = None
         if entry["vmag_count"] > 0:
@@ -122,6 +146,7 @@ def list_psv_targets(
                 "object_number": entry["object_number"],
                 "vmag": vmag_value,
                 "total_obs": entry["total_obs"],
+                "good_obs": entry["good_obs"],
                 "nights_observed": len(night_keys),
                 "qualifying_nights": len(qualifying_nights),
                 "ready": ready,
@@ -171,9 +196,14 @@ def create_psv_bundle(
         .join(CandidateAssociation, CandidateAssociation.capture_id == CaptureLog.id)
         .where(Measurement.target.in_(targets))
         .where(CaptureLog.has_wcs == True)
+        .where(CandidateAssociation.quality_grade.in_(ACCEPTED_QUALITY_GRADES))
     ).all()
     if not measurements:
-        raise HTTPException(status_code=404, detail="No measurements found for targets")
+        raise HTTPException(
+            status_code=404,
+            detail="No quality-gated measurements found for targets "
+            f"(grade {'/'.join(sorted(ACCEPTED_QUALITY_GRADES))} required)",
+        )
 
     bundle_label = request.bundle_label or "MULTI"
     report_service = ReportService(db)

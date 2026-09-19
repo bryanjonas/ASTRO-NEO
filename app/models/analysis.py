@@ -26,6 +26,11 @@ class CandidateAssociation(SQLModel, table=True):
     residual_arcsec: Optional[float] = None  # Distance from predicted
     snr: Optional[float] = None  # Signal-to-noise ratio
     peak_counts: Optional[float] = None  # Peak pixel value
+    # Scored-association quality (from AnalysisService.find_best_match_scored).
+    # Null when the match instead came from the older distance-only fallback
+    # (find_best_match), which has no quality grade to report.
+    quality_grade: Optional[str] = Field(default=None, max_length=1)  # 'A'/'B'/'C'
+    z_score: Optional[float] = None  # Normalized residual (lower is better)
 
     # Detection metadata
     method: str = Field(default="auto")  # "auto", "manual", "corrected"

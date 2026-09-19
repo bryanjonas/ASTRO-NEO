@@ -875,6 +875,8 @@ class AnalysisService:
             peak_counts=match.get("peak"),
             method="auto",
             stars_subtracted=stars_subtracted if use_star_subtraction else None,
+            quality_grade=scoring_info.get("quality_grade") if scoring_info else None,
+            z_score=scoring_info.get("z_score") if scoring_info else None,
             created_at=datetime.utcnow(),
         )
         db.add(assoc)
