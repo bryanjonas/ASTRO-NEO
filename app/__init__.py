@@ -10,7 +10,7 @@ from .core.site_config import bootstrap_site_config
 from .db.session import init_db
 from .dashboard_router import router as dashboard_router
 from .services.captures import prune_missing_captures
-from .services.whatsup import WhatsUpService
+from .services.whatsup import WhatsUpService, start_periodic_refresh_thread
 
 
 import logging
@@ -44,14 +44,26 @@ def create_app() -> FastAPI:
         try:
             from .db.session import get_session
             from sqlmodel import select, delete
-            from datetime import datetime
+            from datetime import datetime, timedelta
 
             from .models import NeoCandidate, NeoEphemeris, ObservingSession
 
             with get_session() as session:
+                # Only clear WHATSUP targets that are actually stale -- not
+                # unconditionally on every boot. A restart minutes after a
+                # real refresh (e.g. a routine redeploy) shouldn't throw away
+                # still-valid data and force an immediate re-scrape; the
+                # periodic refresh thread (started below) already re-checks
+                # freshness on its own schedule regardless.
+                stale_cutoff = datetime.utcnow() - timedelta(
+                    minutes=settings.whatsup_refresh_minutes
+                )
                 target_ids = session.exec(
-                    select(NeoCandidate.id).where(
-                        NeoCandidate.status.in_(["WHATSUP", "WHATSUP_NO_HORIZONS"])
+                    select(NeoCandidate.id)
+                    .where(NeoCandidate.status.in_(["WHATSUP", "WHATSUP_NO_HORIZONS"]))
+                    .where(
+                        (NeoCandidate.updated_at == None)  # noqa: E711
+                        | (NeoCandidate.updated_at < stale_cutoff)
                     )
                 ).all()
                 if target_ids:
@@ -77,7 +89,8 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("Failed to clear WhatsUp targets on startup: %s", exc)
 
-        logger.info("Startup complete; waiting for manual WhatsUp refresh.")
+        start_periodic_refresh_thread()
+        logger.info("Startup complete; WhatsUp targets will refresh automatically.")
 
     return app
 

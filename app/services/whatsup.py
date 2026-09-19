@@ -56,6 +56,58 @@ def maybe_auto_refresh(db: Session) -> bool:
         logger.warning("Auto-refresh: WhatsUp refresh failed: %s", exc)
     return True
 
+
+def _cache_is_fresh(db: Session) -> bool:
+    """DB-backed staleness check -- true if a WHATSUP-status candidate was
+    updated within whatsup_refresh_minutes. Deliberately DB-backed rather
+    than relying on maybe_auto_refresh's in-memory cooldown alone: that
+    cooldown resets to nothing on every process restart, and a restart
+    right after a real refresh shouldn't immediately re-hit WhatsUp just
+    because the new process doesn't remember it.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.whatsup_refresh_minutes)
+    existing = db.exec(
+        select(NeoCandidate.id)
+        .where(NeoCandidate.status == "WHATSUP")
+        .where(NeoCandidate.updated_at >= cutoff)
+        .limit(1)
+    ).first()
+    return existing is not None
+
+
+def start_periodic_refresh_thread() -> threading.Thread:
+    """Start a daemon thread that periodically refreshes WhatsUp targets if
+    the cache has actually gone stale or empty (via maybe_auto_refresh,
+    which throttles the real network call so this and the reactive fallback
+    in session start/auto-advance can't double up).
+
+    This is what keeps the WHATSUP-status cache from sitting empty between
+    sessions -- without it, session start's reactive refresh is the only
+    thing that ever repopulates the cache, and that blocks whoever triggers
+    it for the ~40s WhatsUp's form takes to respond. With this running, that
+    reactive path becomes a rare last resort instead of the routine case.
+    """
+    from app.db.session import get_session  # local import: avoid a module-load-time cycle
+
+    def _loop() -> None:
+        while True:
+            try:
+                with get_session() as db:
+                    if not _cache_is_fresh(db):
+                        maybe_auto_refresh(db)
+            except Exception:
+                logger.error("Periodic WhatsUp refresh loop error", exc_info=True)
+            time.sleep(max(60, settings.whatsup_auto_refresh_cooldown_minutes * 60))
+
+    thread = threading.Thread(target=_loop, daemon=True, name="whatsup-periodic-refresh")
+    thread.start()
+    logger.info(
+        "Started periodic WhatsUp refresh thread (checks every %.0f min)",
+        settings.whatsup_auto_refresh_cooldown_minutes,
+    )
+    return thread
+
+
 WHATSUP_URL = "https://minorplanetcenter.net/whatsup/index"
 
 HEADERS = {
