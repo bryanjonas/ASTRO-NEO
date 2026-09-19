@@ -24,6 +24,16 @@ This is a Windows/WSL configuration issue (sleep settings, WSL's own idle-VM shu
 
 This one-line infrastructure bug — not scoring quality, not solver tuning, not association rigor — was almost certainly the actual reason the system "wasn't having success." Everything below remains worth doing, but nothing else in this document mattered while the front door was closed.
 
+---
+
+## FIXED — WhatsUp refresh timeout, and a real milestone (2026-09-18)
+
+Last session's retry-with-backoff for `WhatsUpService.fetch_targets` (`d5e9f15`) correctly stopped an unhandled crash, but refresh kept failing anyway, and the assumption at the time — a transient rate limit from repeated testing — turned out to be wrong. Diagnosed live tonight, independent of any testing load: **MPC's WhatsUp form POST consistently takes ~37-38 seconds to respond** (confirmed twice, 37.31s and 37.66s, with and without an added delay between the GET and the POST — ruling out a bot-defense timing heuristic). `whatsup_timeout` was 30s, so every attempt — including all 3 retries — was being killed by our own client before MPC's server could ever respond.
+
+**Fix applied:** raised `whatsup_timeout` to 60s (commit `abe5c66`). **Verified via the real endpoint** (the actual, intended use of "Refresh Targets" — not an upstream submission): `POST /api/whatsup/refresh` returned 200 in ~39.5s with a real candidate (`(1264)`, vmag 13.9), correctly persisted with `status=WHATSUP` and a cached Horizons ephemeris row.
+
+**`GET /api/session/ready` returned `{"ready": true}` for the first time this entire session.** Every fix across both nights — the ingestion outage, the fault-tolerant capture loop, the ranking bug, auto-advance, auto-refresh, this timeout — has been building toward this: the app is now, for the first time, actually in a state where starting a real observing session would work end-to-end.
+
 ### Also fixed the same session (2026-09-16), in order
 
 1. **`4de9f55`** — the ingestion outage above.
