@@ -88,6 +88,63 @@ class HorizonMask:
         return np.interp(az_wrapped, self.azimuths, self.altitudes)
 
 
+def check_instant_visibility(
+    ra_deg: float,
+    dec_deg: float,
+    site_config: SiteFileConfig | None = None,
+    when: datetime | None = None,
+) -> tuple[bool, list[str]]:
+    """Fast, local, instantaneous visibility check for one RA/Dec: altitude
+    (vs. horizon mask), sun altitude (astronomical darkness), and moon
+    separation, all computed right now -- no network call.
+
+    This exists to re-verify a WhatsUp-cached candidate before selecting it,
+    rather than trusting a snapshot that can be up to whatsup_refresh_minutes
+    stale. It deliberately does NOT re-fetch the candidate's position: Earth's
+    rotation (~0.25 deg/min of altitude change) is what makes a cached
+    snapshot go stale on the timescale that matters here, not the object's
+    own proper motion, so recomputing against the *current* time using the
+    already-cached RA/Dec already captures the staleness that matters.
+
+    Does not check "too high" (max_target_altitude_deg) -- WhatsUpService
+    already excludes those via status=WHATSUP_TOO_HIGH upstream.
+    """
+    site_config = site_config or load_site_config()
+    observer = Observer(
+        latitude=site_config.latitude * u.deg,
+        longitude=site_config.longitude * u.deg,
+        elevation=site_config.altitude_m * u.m,
+        timezone="UTC",
+    )
+    obstime = Time(when or datetime.utcnow())
+    target_coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg)
+    altaz = target_coord.transform_to(AltAz(obstime=obstime, location=observer.location))
+    altitude = float(altaz.alt.deg)
+    azimuth = float(altaz.az.deg)
+
+    horizon_mask = HorizonMask.from_path(
+        site_config.horizon_mask.source if site_config.horizon_mask else None
+    )
+    horizon_limit = (
+        float(horizon_mask.limit_for(np.array([azimuth]))[0]) if horizon_mask else 0.0
+    )
+    min_altitude = max(horizon_limit, settings.observability_min_altitude_deg)
+
+    sun_altitude = float(observer.sun_altaz(obstime).alt.deg)
+    moon_coord = get_body("moon", obstime, location=observer.location)
+    moon_separation = float(target_coord.separation(moon_coord).deg)
+
+    reasons: list[str] = []
+    if altitude < min_altitude:
+        reasons.append(f"below_horizon (alt={altitude:.1f} < {min_altitude:.1f})")
+    if sun_altitude > settings.observability_max_sun_altitude_deg:
+        reasons.append(f"sun_above_limit (sun_alt={sun_altitude:.1f})")
+    if moon_separation < settings.observability_min_moon_separation_deg:
+        reasons.append(f"moon_too_close (sep={moon_separation:.1f})")
+
+    return not reasons, reasons
+
+
 class ObservabilityService:
     """Compute observability windows for MPC candidates."""
 
@@ -513,4 +570,4 @@ class ObservabilityService:
         return self.session.exec(stmt).first()
 
 
-__all__ = ["ObservabilityService"]
+__all__ = ["ObservabilityService", "check_instant_visibility", "HorizonMask"]

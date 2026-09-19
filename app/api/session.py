@@ -26,6 +26,7 @@ from app.services.automation import (
     request_stop,
 )
 from app.services.nina_client import NinaBridgeService
+from app.services.observability import check_instant_visibility
 from app.services.weather import WeatherService
 from app.services.whatsup import WhatsUpService, maybe_auto_refresh
 
@@ -148,9 +149,26 @@ def _build_target_dict_from_candidate(db: Session, target_id: str) -> dict[str, 
 def _first_available(
     visible_targets: list[NeoCandidate], exclude_ids: set[str]
 ) -> NeoCandidate | None:
+    """Pick the best-ranked candidate not yet attempted this chain AND
+    actually visible right now. A WhatsUp-cached "visible" status can be up
+    to whatsup_refresh_minutes stale; re-verify locally (no network call --
+    see check_instant_visibility) rather than trusting the snapshot. A
+    candidate that fails this is skipped for now, not permanently excluded
+    -- it isn't added to exclude_ids, so it can still be picked later in
+    the same chain if it becomes visible again (e.g. rising in the east).
+    """
     for candidate in visible_targets:
-        if candidate.id not in exclude_ids:
-            return candidate
+        if candidate.id in exclude_ids:
+            continue
+        if candidate.ra_deg is None or candidate.dec_deg is None:
+            continue
+        is_visible, reasons = check_instant_visibility(candidate.ra_deg, candidate.dec_deg)
+        if not is_visible:
+            logger.debug(
+                "Skipping %s: not currently visible (%s)", candidate.id, "; ".join(reasons)
+            )
+            continue
+        return candidate
     return None
 
 
