@@ -15,6 +15,7 @@ import astropy.units as u
 logger = logging.getLogger(__name__)
 
 # Default magnitude limit for Gaia query (fainter = more stars but slower)
+GAIA_QUERY_TIMEOUT_SECONDS = 30  # hard cap -- see _query_gaia_stars
 DEFAULT_GAIA_MAG_LIMIT = 18.0
 
 
@@ -156,8 +157,40 @@ class CatalogStarSubtractor:
             ORDER BY phot_g_mean_mag ASC
             """
 
-            job = Gaia.launch_job_async(query, verbose=False)
-            result = job.get_results()
+            # Gaia.launch_job_async has no built-in timeout and can hang
+            # indefinitely on a slow/unreliable connection (observed live:
+            # hung for 10+ minutes at a field site with no error, no
+            # exception, nothing -- TCP connect to the archive succeeded but
+            # the actual TAP request/poll cycle never returned). Run it in a
+            # worker thread with a hard deadline so a bad network can't stall
+            # an entire observing chain.
+            import concurrent.futures
+
+            def _run_query():
+                job = Gaia.launch_job_async(query, verbose=False)
+                return job.get_results()
+
+            # NOTE: deliberately not using the executor as a context manager --
+            # __exit__ calls shutdown(wait=True), which blocks until the
+            # abandoned worker thread finishes regardless of the timeout below,
+            # completely defeating the point (confirmed live: the timeout
+            # warning logged correctly, then execution silently blocked for
+            # several more minutes waiting on shutdown anyway). Using
+            # wait=False here means the orphaned thread is left running in the
+            # background (Python can't force-kill a thread stuck in a network
+            # call) but this function returns immediately as intended.
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = pool.submit(_run_query)
+            try:
+                result = future.result(timeout=GAIA_QUERY_TIMEOUT_SECONDS)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    f"Gaia query timed out after {GAIA_QUERY_TIMEOUT_SECONDS}s "
+                    "(network issue at this site?) -- continuing without Gaia stars"
+                )
+                pool.shutdown(wait=False)
+                return []
+            pool.shutdown(wait=False)
 
             if result is None or len(result) == 0:
                 logger.debug("Gaia query returned no results")

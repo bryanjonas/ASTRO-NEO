@@ -102,11 +102,28 @@ class HorizonsClient:
             "STOP_TIME": f"'{stop_time.strftime('%Y-%m-%d %H:%M')}'",
             "STEP_SIZE": f"'{step_minutes} min'",
             # Quantities:
-            # 1=Astrometric RA/DEC, 3=rates, 4=apparent RA/DEC, 8=airmass,
+            # 2=apparent (refracted) RA/DEC, 3=rates, 4=apparent AZ/EL, 8=airmass,
             # 9=Vis mag & Surf Brt, 10=illumination, 19=helio range/range-rate,
             # 20=obsrv range/range-rate, 23=S-T-O angle, 24=S-O-T /v,
             # 29=sky brightness, 43=3-sigma uncertainty
-            "QUANTITIES": "'1,3,4,8,9,20,23,24,43'",
+            #
+            # This was "1" (astrometric ICRF/J2000 RA/DEC) until tonight --
+            # confirmed live, both via direct raw-API inspection and a real
+            # observing session, that produced a systematic 1100-2400"
+            # offset between ra_deg/dec_deg and the frame the mount and
+            # plate solver actually operate in (apparent-of-date) -- the
+            # accumulated precession+nutation+aberration since J2000.0.
+            # Quantity 4 does NOT give apparent RA/DEC despite this code's
+            # previous comment claiming so -- it gives Azimuth/Elevation
+            # (confirmed by raw API response header: "Azimuth_(r-app),
+            # Elevation_(r-app)"); a first attempt at this fix reordered 4
+            # before 1 and silently picked up Az/El as RA/DEC, putting the
+            # "position" 233 degrees away in RA -- caught immediately since
+            # it was wildly wrong, not subtly wrong. Quantity 2 is the
+            # correct apparent-RA/DEC quantity code; verified against the
+            # raw API response ("R.A._(rfct-app), DEC_(rfct-app)") before
+            # changing this.
+            "QUANTITIES": "'2,3,4,8,9,20,23,24,43'",
             "REF_SYSTEM": "ICRF",  # ICRF reference frame
             "CAL_FORMAT": "CAL",  # Calendar date format
             "TIME_DIGITS": "MINUTES",
