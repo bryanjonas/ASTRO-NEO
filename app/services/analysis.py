@@ -1207,8 +1207,30 @@ class AnalysisService:
                 ORDER BY phot_g_mean_mag ASC
                 """
 
-                job = Gaia.launch_job_async(query, verbose=False)
-                result = job.get_results()
+                # See star_subtraction.py's _query_gaia_stars for why this
+                # needs a hard timeout with a non-blocking shutdown (a bad
+                # connection at a field site can hang launch_job_async/
+                # get_results indefinitely with zero error output).
+                import concurrent.futures
+
+                GAIA_PHOTOMETRY_TIMEOUT_SECONDS = 30
+
+                def _run_query():
+                    job = Gaia.launch_job_async(query, verbose=False)
+                    return job.get_results()
+
+                pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                future = pool.submit(_run_query)
+                try:
+                    result = future.result(timeout=GAIA_PHOTOMETRY_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        f"Gaia photometry query timed out after "
+                        f"{GAIA_PHOTOMETRY_TIMEOUT_SECONDS}s -- continuing without it"
+                    )
+                    pool.shutdown(wait=False)
+                    return [], None
+                pool.shutdown(wait=False)
 
                 if len(result) == 0:
                     logger.warning("No Gaia stars found in field")

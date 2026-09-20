@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import signal
 import subprocess
 import threading
 import sys
@@ -61,6 +62,29 @@ def solve_fits(
     )
 
 
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a timed-out solve-field process AND its descendants.
+
+    solve-field is a wrapper that shells out to the real worker binary
+    (astrometry-engine) as a grandchild process. proc.kill() alone only
+    kills the immediate solve-field process, leaving astrometry-engine as
+    an orphan that keeps running at full CPU indefinitely -- confirmed live
+    at a field site: repeated timed-out solve attempts each left behind a
+    98-99% CPU orphan, starving the actual in-progress work (a Gaia query
+    in one case) of CPU for minutes. start_new_session=True on Popen above
+    puts the whole tree in its own process group so this can kill all of it
+    at once.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
 def _solve_local(
     fits_path: str | Path,
     *,
@@ -98,6 +122,7 @@ def _solve_local(
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=str(path.parent),
+                start_new_session=True,  # own process group -- see _kill_process_tree below
             )
         except Exception as exc:
             raise SolveError("solve-field failed to start") from exc
@@ -126,13 +151,13 @@ def _solve_local(
             try:
                 proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired as exc:
-                proc.kill()
+                _kill_process_tree(proc)
                 raise SolveError("solve-field timed out") from exc
         else:
             try:
                 stdout_data, stderr_data = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired as exc:
-                proc.kill()
+                _kill_process_tree(proc)
                 stdout_data, stderr_data = proc.communicate()
                 raise SolveError("solve-field timed out") from exc
             if stdout_data:

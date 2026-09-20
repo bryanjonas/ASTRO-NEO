@@ -428,6 +428,18 @@ class SequentialCaptureService:
                 )
             self.nina.slew(slew_ra, slew_dec)
             self.nina.wait_for_mount_ready(timeout=60.0)
+            # NinaBridgeService.set_tracking() has existed since before this
+            # branch but was never actually called anywhere in the capture
+            # pipeline -- confirmed live: the mount's believed position
+            # drifted further from truth (roughly time-since-last-sync x
+            # sidereal rate) every time it sat idle between attempts, which
+            # is exactly what tonight's real, repeated large confirmation-
+            # solve offsets turned out to be. Best-effort: a mount/driver
+            # that doesn't support this shouldn't abort the whole capture.
+            try:
+                self.nina.set_tracking(0)  # 0 = sidereal, matches ASCOM DriveRates
+            except Exception as exc:
+                logger.warning("Could not enable tracking: %s", exc)
             self.nina.start_guiding_best_effort(timeout=2.0)
             logger.info("Slew complete.")
         except Exception as e:
@@ -438,37 +450,52 @@ class SequentialCaptureService:
                 "confirmation_attempts": 0,
             }
 
-        # Confirmation capture with blind solve and mount sync
+        # Confirmation capture with blind solve and mount sync -- retries up
+        # to confirmation_max_attempts times, re-slewing after each sync
+        # until the offset is within tolerance. Previously this parameter
+        # was accepted and documented ("Max re-centering attempts") but
+        # never actually used as a loop bound -- confirmed live: it always
+        # ran exactly once regardless of the resulting offset, silently
+        # discarding its own retry mechanism. Each iteration's sync should
+        # converge closer to the true target, since the residual GOTO error
+        # from a real (even small) polar-alignment error scales with
+        # distance from the last sync point.
         if settings.confirmation_enabled:
-            logger.info(
-                "Taking confirmation exposure: %.1fs binning=%dx",
-                settings.confirmation_exposure_seconds,
-                settings.confirmation_binning,
-            )
-            try:
-                conf_start = time.time()
-                self.nina.wait_for_camera_idle(timeout=30.0)
-                self.nina.start_exposure(
-                    filter_name=filter_name,
-                    binning=settings.confirmation_binning,
-                    exposure_seconds=settings.confirmation_exposure_seconds,
-                    target=f"{target_name}_CONF",
-                    request_solve=False,
+            max_confirmation_attempts = max(1, confirmation_max_attempts)
+            for confirmation_attempts in range(1, max_confirmation_attempts + 1):
+                logger.info(
+                    "Taking confirmation exposure (attempt %d/%d): %.1fs binning=%dx",
+                    confirmation_attempts,
+                    max_confirmation_attempts,
+                    settings.confirmation_exposure_seconds,
+                    settings.confirmation_binning,
                 )
-                self.nina.wait_for_camera_idle(
-                    timeout=settings.confirmation_exposure_seconds + 30.0
-                )
+                try:
+                    conf_start = time.time()
+                    self.nina.wait_for_camera_idle(timeout=30.0)
+                    self.nina.start_exposure(
+                        filter_name=filter_name,
+                        binning=settings.confirmation_binning,
+                        exposure_seconds=settings.confirmation_exposure_seconds,
+                        target=f"{target_name}_CONF",
+                        request_solve=False,
+                    )
+                    self.nina.wait_for_camera_idle(
+                        timeout=settings.confirmation_exposure_seconds + 30.0
+                    )
 
-                # Poll for confirmation FITS
-                conf_path = poll_for_fits_file(
-                    target_name=f"{target_name}_CONF",
-                    fits_directory=settings.nina_images_path,
-                    timeout=settings.confirmation_exposure_seconds + 30.0,
-                    min_mtime=conf_start - 1.0,
-                )
-                if not conf_path:
-                    logger.warning("Confirmation FITS not found; skipping confirmation")
-                else:
+                    # Poll for confirmation FITS
+                    conf_path = poll_for_fits_file(
+                        target_name=f"{target_name}_CONF",
+                        fits_directory=settings.nina_images_path,
+                        timeout=settings.confirmation_exposure_seconds + 30.0,
+                        min_mtime=conf_start - 1.0,
+                    )
+                    if not conf_path:
+                        logger.warning("Confirmation FITS not found; skipping confirmation")
+                        confirmation_success = True
+                        break
+
                     wait_for_file_size_stable(conf_path, stable_duration=1.0, timeout=10.0)
                     logger.info("Confirmation FITS: %s", conf_path)
 
@@ -507,34 +534,76 @@ class SequentialCaptureService:
                             predicted_ra, predicted_dec, solved_ra, solved_dec
                         )
                         logger.info(
-                            "Pointing offset: %.1f\" (predicted vs solved)",
+                            "Pointing offset: %.1f\" (predicted vs solved) [attempt %d/%d]",
                             offset_arcsec,
+                            confirmation_attempts,
+                            max_confirmation_attempts,
                         )
+                        confirmation_success = True
 
-                        # Always re-slew after sync to ensure mount is pointed at target
-                        # with the updated pointing model
-                        if settings.confirmation_reslew_enabled:
-                            if offset_arcsec > settings.confirmation_max_offset_arcsec:
-                                logger.warning(
-                                    "Offset %.1f\" exceeds threshold %.1f\"",
-                                    offset_arcsec,
-                                    settings.confirmation_max_offset_arcsec,
-                                )
-                            logger.info("Re-slewing to target after confirmation sync...")
+                        if offset_arcsec <= settings.confirmation_max_offset_arcsec:
+                            logger.info(
+                                "Offset %.1f\" within tolerance %.1f\" after %d attempt(s)",
+                                offset_arcsec,
+                                settings.confirmation_max_offset_arcsec,
+                                confirmation_attempts,
+                            )
+                            break
+
+                        if not settings.confirmation_reslew_enabled:
+                            logger.warning(
+                                "Offset %.1f\" exceeds threshold %.1f\" and re-slew is "
+                                "disabled; proceeding anyway",
+                                offset_arcsec,
+                                settings.confirmation_max_offset_arcsec,
+                            )
+                            break
+
+                        if confirmation_attempts >= max_confirmation_attempts:
+                            logger.warning(
+                                "Offset %.1f\" still exceeds threshold %.1f\" after %d "
+                                "attempt(s); re-slewing once more and proceeding anyway",
+                                offset_arcsec,
+                                settings.confirmation_max_offset_arcsec,
+                                confirmation_attempts,
+                            )
                             slew_ra, slew_dec = self._to_mount_coords(final_ra, final_dec)
                             self.nina.slew(slew_ra, slew_dec)
                             self.nina.wait_for_mount_ready(timeout=60.0)
-                            logger.info("Re-slew complete")
+                            try:
+                                self.nina.set_tracking(0)
+                            except Exception as exc:
+                                logger.warning("Could not enable tracking: %s", exc)
+                            logger.info("Final re-slew complete")
+                            break
 
-                        confirmation_success = True
+                        logger.info(
+                            "Offset %.1f\" exceeds threshold %.1f\"; re-slewing and "
+                            "retrying confirmation (%d/%d)...",
+                            offset_arcsec,
+                            settings.confirmation_max_offset_arcsec,
+                            confirmation_attempts,
+                            max_confirmation_attempts,
+                        )
+                        slew_ra, slew_dec = self._to_mount_coords(final_ra, final_dec)
+                        self.nina.slew(slew_ra, slew_dec)
+                        self.nina.wait_for_mount_ready(timeout=60.0)
+                        try:
+                            self.nina.set_tracking(0)
+                        except Exception as exc:
+                            logger.warning("Could not enable tracking: %s", exc)
+                        logger.info("Re-slew complete")
+                        # loop again for another confirmation attempt
 
                     except Exception as solve_exc:
                         logger.warning("Confirmation solve failed: %s", solve_exc)
                         confirmation_success = True  # Continue anyway
+                        break
 
-            except Exception as conf_exc:
-                logger.warning("Confirmation capture failed: %s", conf_exc)
-                confirmation_success = True  # Continue anyway
+                except Exception as conf_exc:
+                    logger.warning("Confirmation capture failed: %s", conf_exc)
+                    confirmation_success = True  # Continue anyway
+                    break
         else:
             logger.info("Confirmation disabled; proceeding with science exposure.")
             confirmation_success = True

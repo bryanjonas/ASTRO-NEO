@@ -53,8 +53,13 @@ class EphemerisPredictionService:
             return None
 
         candidate = self.session.get(NeoCandidate, candidate_id)
-        if not candidate or candidate.ra_deg is None or candidate.dec_deg is None:
+        if not candidate:
             return None
+        # NOTE: deliberately not gating on candidate.ra_deg/dec_deg here --
+        # those fields are never populated for WhatsUp-sourced candidates
+        # (only NeoEphemeris rows carry real positions for this branch's
+        # actual target source). Both _predict_from_horizons and
+        # _predict_from_mpc key off candidate.id, not candidate.ra_deg.
 
         try:
             return self._predict_from_horizons(candidate, when)

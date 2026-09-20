@@ -146,9 +146,29 @@ def _build_target_dict_from_candidate(db: Session, target_id: str) -> dict[str, 
     }
 
 
+def _latest_horizons_position(db: Session, candidate_id: str) -> tuple[float, float] | None:
+    """Most recently cached Horizons position for a candidate.
+
+    NeoCandidate.ra_deg/dec_deg are never populated for WhatsUp-sourced
+    candidates (only neocp.py's older discovery flow sets those) -- the
+    real, live position for these candidates only ever lands in
+    NeoEphemeris via WhatsUpService.ensure_horizons_cache/
+    refresh_targets_with_horizons. Read from there instead.
+    """
+    row = db.exec(
+        select(NeoEphemeris)
+        .where(NeoEphemeris.candidate_id == candidate_id)
+        .where(NeoEphemeris.source == "HORIZONS")
+        .order_by(NeoEphemeris.epoch.desc())
+    ).first()
+    if row is None or row.ra_deg is None or row.dec_deg is None:
+        return None
+    return row.ra_deg, row.dec_deg
+
+
 def _first_available(
-    visible_targets: list[NeoCandidate], exclude_ids: set[str]
-) -> NeoCandidate | None:
+    db: Session, visible_targets: list[NeoCandidate], exclude_ids: set[str]
+) -> tuple[NeoCandidate, float, float] | None:
     """Pick the best-ranked candidate not yet attempted this chain AND
     actually visible right now. A WhatsUp-cached "visible" status can be up
     to whatsup_refresh_minutes stale; re-verify locally (no network call --
@@ -156,19 +176,25 @@ def _first_available(
     candidate that fails this is skipped for now, not permanently excluded
     -- it isn't added to exclude_ids, so it can still be picked later in
     the same chain if it becomes visible again (e.g. rising in the east).
+
+    Returns (candidate, ra_deg, dec_deg) so callers reuse the same cached
+    position rather than re-querying it.
     """
     for candidate in visible_targets:
         if candidate.id in exclude_ids:
             continue
-        if candidate.ra_deg is None or candidate.dec_deg is None:
+        position = _latest_horizons_position(db, candidate.id)
+        if position is None:
+            logger.debug("Skipping %s: no cached Horizons position available", candidate.id)
             continue
-        is_visible, reasons = check_instant_visibility(candidate.ra_deg, candidate.dec_deg)
+        ra_deg, dec_deg = position
+        is_visible, reasons = check_instant_visibility(ra_deg, dec_deg)
         if not is_visible:
             logger.debug(
                 "Skipping %s: not currently visible (%s)", candidate.id, "; ".join(reasons)
             )
             continue
-        return candidate
+        return candidate, ra_deg, dec_deg
     return None
 
 
@@ -188,22 +214,23 @@ def _resolve_next_target(
     dashboard's chain-progress display.
     """
     visible_targets, error = _get_whatsup_targets(db)
-    candidate = _first_available(visible_targets, exclude_ids)
+    found = _first_available(db, visible_targets, exclude_ids)
 
-    if candidate is None and maybe_auto_refresh(db):
+    if found is None and maybe_auto_refresh(db):
         visible_targets, error = _get_whatsup_targets(db)
-        candidate = _first_available(visible_targets, exclude_ids)
+        found = _first_available(db, visible_targets, exclude_ids)
 
-    if candidate is None:
+    if found is None:
         return None, error or "No more unattempted visible targets", 0
 
+    candidate, ra_deg, dec_deg = found
     available_count = sum(1 for c in visible_targets if c.id not in exclude_ids)
 
     return {
         "name": candidate.id,  # Use id (e.g. "16") not trksub (e.g. "(16)")
         "candidate_id": candidate.id,
-        "ra_deg": candidate.ra_deg or 0.0,
-        "dec_deg": candidate.dec_deg or 0.0,
+        "ra_deg": ra_deg,
+        "dec_deg": dec_deg,
         "vmag": candidate.vmag,
         "score": 0.0,
     }, None, max(0, available_count - 1)
