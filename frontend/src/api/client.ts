@@ -2,6 +2,9 @@ import type {
   GuidingHistory,
   HardwareStatus,
   LatestCaptureInfo,
+  PsvBundleResult,
+  PsvFile,
+  PsvTarget,
   SessionReady,
   SessionStatus,
   SkyView,
@@ -46,4 +49,11 @@ export const api = {
   getLatestCapture: () => request<LatestCaptureInfo>('/hardware/camera/latest'),
   getSkyView: () => request<SkyView>('/hardware/sky'),
   getGuidingHistory: () => request<GuidingHistory>('/hardware/guiding/history'),
+  getPsvTargets: () => request<{ targets: PsvTarget[] }>('/psv/targets'),
+  getPsvFiles: () => request<{ files: PsvFile[] }>('/psv/files'),
+  createPsvBundle: (targets: string[], bundleLabel?: string) =>
+    request<PsvBundleResult>('/psv/bundle', {
+      method: 'POST',
+      body: JSON.stringify({ targets, bundle_label: bundleLabel || null }),
+    }),
 }

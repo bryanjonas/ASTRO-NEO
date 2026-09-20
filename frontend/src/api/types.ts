@@ -98,3 +98,44 @@ export interface GuideStep {
 export interface GuidingHistory {
   steps: GuideStep[]
 }
+
+export interface PsvNightSummary {
+  night: string
+  count: number
+  mag_count: number
+  good_count: number
+  good_mag_count: number
+}
+
+export interface PsvTarget {
+  target: string
+  object_number: string
+  vmag: number | null
+  total_obs: number
+  good_obs: number
+  nights_observed: number
+  qualifying_nights: number
+  ready: boolean
+  per_night: PsvNightSummary[]
+  first_obs: string | null
+  last_obs: string | null
+  science_exposures: number
+  solved: number
+  associated: number
+}
+
+export interface PsvBundleResult {
+  psv_path: string
+  validation_path: string
+  metadata_path: string
+  valid: boolean
+  errors: string[]
+  targets: string[]
+}
+
+export interface PsvFile {
+  name: string
+  path: string
+  size_bytes: number
+  modified_at: string
+}
