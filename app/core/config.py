@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     phd2_settle_time: float = 8.0
     phd2_settle_timeout: float = 60.0
 
+    # Focuser control (autofocus) -- same ASCOM Remote Server instance as
+    # the mount/camera, just a different device type/number.
+    alpaca_focuser_url: str = "http://host.docker.internal:11111"
+    alpaca_focuser_device_number: int = 0
+
     data_root: str = "/data"
     fits_retention_days: int = 14
     # Local astrometry solve configuration (synchronous subprocess)
