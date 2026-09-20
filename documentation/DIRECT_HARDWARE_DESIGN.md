@@ -33,8 +33,19 @@ One thing that needs verification against real hardware, not something I can res
 
 **Phase 3 — cutover.** Remove the NINA dependency: `mock_nina/`, `NINA_URL` config, the NINA-specific bits of `docker-compose.yml`, and the parts of `nina_client.py` (dome, sequence, guiding) that no longer apply. Update `README.md`/`LLM_SYSTEM_DESCRIPTION.md`, which still describe the NINA-based architecture.
 
-## Immediate next steps, if this phasing works for you
+## Phase 1 — real hardware verification (2026-09-19)
 
-1. Confirm ASCOM Remote Server (or Alpaca Device Hub) actually runs and correctly bridges the ZWO AM3 ASCOM driver on MELE — this needs to happen on the real Windows box, not something I can verify remotely without you setting it up.
-2. Once that's confirmed reachable, build `AlpacaMountClient` implementing `slew`/`wait_for_mount_ready`/`sync_mount`/`mount_info`/tracking-on/tracking-mode, matching `NinaBridgeService`'s method signatures so `sequential_capture.py` needs zero changes for Phase 1.
-3. Wire it in behind a config flag (e.g. `mount_backend: "nina" | "alpaca"`) so this can be tested side-by-side without disrupting the working NINA path while validating.
+Both immediate-next-steps items below were completed and verified against the real AM-3, not just the mock server:
+
+- **ASCOM Remote Server reachable and bridging correctly.** Took real troubleshooting to get there (Windows `http.sys` only accepts the literal `+`/`0.0.0.0`-as-"All Interfaces" distinction, not the literal string `0.0.0.0` itself — `HttpListener` throws "The request is not supported" on that), but once bound to the LAN interface, `configureddevices` correctly listed both `ASI Mount` (Telescope, device 0) and `ASI Camera` (Camera, device 0).
+- **`AlpacaMountClient` confirmed working against the real mount**, from inside the actual api container (the real network path, not localhost): `mount_info()`, `connect`, and — the actual point of this branch — `ensure_sidereal_tracking()` all verified live. Tracking flipped `false → true` on command, `trackingrate: 0` (sidereal) confirmed.
+- **`EquatorialSystem` confirmed = 1 (Topocentric/JNOW)** on the real AM-3 driver. The "NOT YET VERIFIED which epoch the driver reports" caveat in `alpaca_mount_client.py`'s docstrings is resolved: no J2000→JNOW conversion path has actually been exercised, and none is needed for this mount.
+- **`park_telescope()` is NOT yet reliable and needs more work before Phase 3 can depend on it.** Live behavior: `AtPark` flickered `true` briefly mid-slew then reverted to `false`, the mount did a multi-stage slew (dipped toward Dec 0 before settling near Dec 90), and it never ended in a state where `AtPark` read `true`. Some of this session's confusion was later attributed to a human adjusting the mount via the ASCOM Remote Server GUI concurrently with the automated `Park` call — a clean, uncontested retest is needed before concluding anything definitive about whether `AtPark`'s reporting itself is unreliable on this driver, or whether it just needs a park position configured once in the driver's own setup.
+
+Not yet done: wiring `AlpacaMountClient` into `sequential_capture.py` behind a config flag (`mount_backend: "nina" | "alpaca"`) — it exists as a standalone, tested class but nothing in the real capture pipeline uses it yet. That's the next real piece of Phase 1 before it can be called complete.
+
+## Immediate next steps
+
+1. Wire `AlpacaMountClient` into `sequential_capture.py` behind a `mount_backend` config flag so it can run side-by-side with NINA's mount path without disrupting `known_targets`-branch validation work.
+2. Do a clean, uncontested `park_telescope()` retest (no concurrent manual GUI interaction) to determine whether `AtPark` reporting is genuinely unreliable on this driver or just needs a configured park position.
+3. Start Phase 2 (camera + FITS writing) — see below.
