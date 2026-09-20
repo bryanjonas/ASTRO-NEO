@@ -1,6 +1,9 @@
 """ASTRO-NEO FastAPI application package."""
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import api_router
@@ -24,6 +27,30 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router)
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+    # New SPA frontend (React + Vite, built to app/frontend_dist -- see
+    # frontend/ for source). Mounted at /app, with a catch-all fallback so
+    # client-side routes (e.g. /app/hardware) work on direct load/refresh,
+    # not just client-side navigation from the SPA's own root.
+    frontend_dist = Path("app/frontend_dist")
+    if frontend_dist.exists():
+        app.mount(
+            "/app/assets",
+            StaticFiles(directory=str(frontend_dist / "assets")),
+            name="frontend-assets",
+        )
+
+        @app.get("/app", include_in_schema=False)
+        @app.get("/app/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str = "") -> FileResponse:
+            # Serve a real file if the path matches one on disk (e.g. the
+            # root-level favicon.svg, which Vite doesn't put under
+            # /assets); otherwise fall back to index.html so client-side
+            # routes (e.g. /app/hardware) work on direct load/refresh too.
+            candidate = frontend_dist / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(str(candidate))
+            return FileResponse(str(frontend_dist / "index.html"))
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:

@@ -1,3 +1,10 @@
+FROM node:20-slim AS frontend-build
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -29,6 +36,7 @@ RUN mkdir -p app && touch app/__init__.py && \
     pip install --no-cache-dir --find-links=/app/wheels --timeout=300 .
 
 COPY app /app/app
+COPY --from=frontend-build /frontend/dist /app/app/frontend_dist
 
 # Re-install the package to include the actual source code
 RUN pip install --no-cache-dir --find-links=/app/wheels --timeout=300 .

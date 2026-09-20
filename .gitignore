@@ -40,3 +40,7 @@ test_images/
 
 # Ops
 ops/backup.log
+
+# Frontend build output (built by Docker / manually deployed to app/frontend_dist)
+frontend/dist/
+app/frontend_dist/
