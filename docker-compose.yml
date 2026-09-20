@@ -12,6 +12,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: 1
       NINA_URL: ${NINA_URL:-http://host.docker.internal:1888/api}
+      ALPACA_MOUNT_URL: ${ALPACA_MOUNT_URL:-http://host.docker.internal:11111}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

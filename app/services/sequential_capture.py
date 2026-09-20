@@ -57,7 +57,11 @@ class SequentialCaptureService:
         analysis: Optional[AnalysisService] = None,
     ):
         self.db = db
-        self.nina = nina_client or NinaBridgeService()
+        if nina_client is not None:
+            self.nina = nina_client
+        else:
+            from app.services.hybrid_bridge import build_mount_camera_bridge
+            self.nina = build_mount_camera_bridge()
 
         # Initialize Scout client with site configuration
         if scout_client:

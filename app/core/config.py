@@ -108,6 +108,16 @@ class Settings(BaseSettings):
     # Slew coordinates frame: "jnow" (default) or "icrs"
     nina_slew_frame: str = "icrs"
 
+    # Mount control backend: "nina" (default, via NINA's Advanced API) or
+    # "alpaca" (direct ASCOM Alpaca via AlpacaMountClient -- see
+    # documentation/DIRECT_HARDWARE_DESIGN.md). Camera control stays on NINA
+    # regardless of this setting until Phase 2 (camera + FITS writing) is
+    # built -- see app/services/hybrid_bridge.py.
+    mount_backend: str = "nina"
+    alpaca_mount_url: str = "http://host.docker.internal:11111"
+    alpaca_mount_device_number: int = 0
+    alpaca_timeout: float = 30.0
+
     data_root: str = "/data"
     fits_retention_days: int = 14
     # Local astrometry solve configuration (synchronous subprocess)
