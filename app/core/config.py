@@ -131,6 +131,20 @@ class Settings(BaseSettings):
     alpaca_camera_device_number: int = 0
     alpaca_camera_gain: int = 100
 
+    # Guiding backend: "nina" (default, via NinaBridgeService's existing
+    # best-effort wrapper) or "phd2" (direct PHD2 Event Monitoring/Server
+    # API connection -- see app/services/phd2_client.py) or "none"
+    # (disabled). Independent of mount_backend/camera_backend -- PHD2
+    # guiding is a real, separate decision from which backend controls the
+    # mount or camera.
+    guiding_backend: str = "nina"
+    phd2_host: str = "host.docker.internal"
+    phd2_port: int = 4400
+    phd2_timeout: float = 30.0
+    phd2_settle_pixels: float = 1.5
+    phd2_settle_time: float = 8.0
+    phd2_settle_timeout: float = 60.0
+
     data_root: str = "/data"
     fits_retention_days: int = 14
     # Local astrometry solve configuration (synchronous subprocess)
