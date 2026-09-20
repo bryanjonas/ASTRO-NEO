@@ -1,4 +1,5 @@
 import type {
+  HardwareStatus,
   SessionReady,
   SessionStatus,
   StartSessionResponse,
@@ -38,4 +39,5 @@ export const api = {
   getWhatsUpTargets: () => request<WhatsUpTarget[]>('/whatsup/targets'),
   refreshWhatsUpTargets: () => request<WhatsUpTarget[]>('/whatsup/refresh', { method: 'POST' }),
   getWeather: () => request<WeatherStatus>('/site/weather'),
+  getHardwareStatus: () => request<HardwareStatus>('/hardware/status'),
 }

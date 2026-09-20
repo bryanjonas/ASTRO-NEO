@@ -46,3 +46,17 @@ export interface StartSessionResponse {
   error?: string
   session_id?: number | null
 }
+
+export interface HardwareSubsystemStatus {
+  backend: string
+  reachable: boolean
+  error?: string
+  [key: string]: unknown
+}
+
+export interface HardwareStatus {
+  mount: HardwareSubsystemStatus
+  camera: HardwareSubsystemStatus
+  guiding: HardwareSubsystemStatus
+  focuser: HardwareSubsystemStatus
+}
