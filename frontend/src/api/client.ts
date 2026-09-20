@@ -3,6 +3,7 @@ import type {
   LatestCaptureInfo,
   SessionReady,
   SessionStatus,
+  SkyView,
   StartSessionResponse,
   WeatherStatus,
   WhatsUpTarget,
@@ -42,4 +43,5 @@ export const api = {
   getWeather: () => request<WeatherStatus>('/site/weather'),
   getHardwareStatus: () => request<HardwareStatus>('/hardware/status'),
   getLatestCapture: () => request<LatestCaptureInfo>('/hardware/camera/latest'),
+  getSkyView: () => request<SkyView>('/hardware/sky'),
 }

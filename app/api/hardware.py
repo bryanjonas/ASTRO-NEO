@@ -211,3 +211,100 @@ def camera_preview(db: Session = Depends(get_session_dep)) -> Response:
     buf = BytesIO()
     image.save(buf, format="JPEG", quality=85)
     return Response(content=buf.getvalue(), media_type="image/jpeg")
+
+
+def _current_altaz(ra_deg: float, dec_deg: float) -> dict[str, float]:
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+    import astropy.units as u
+    from app.core.site_config import load_site_config
+
+    site_config = load_site_config()
+    location = EarthLocation(
+        lat=site_config.latitude * u.deg,
+        lon=site_config.longitude * u.deg,
+        height=site_config.altitude_m * u.m,
+    )
+    coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
+    altaz = coord.transform_to(AltAz(obstime=Time.now(), location=location))
+    return {"alt_deg": float(altaz.alt.deg), "az_deg": float(altaz.az.deg)}
+
+
+@router.get("/sky")
+def sky_view(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
+    """Everything the Sky View page needs to render one live polar plot:
+    current mount pointing, the horizon obstruction mask, the active
+    target's position (if any), and sun/moon for context."""
+    from astropy.coordinates import AltAz, EarthLocation, get_body
+    from astropy.time import Time
+    import astropy.units as u
+    from app.core.site_config import load_site_config
+    from app.services.observability import HorizonMask
+    from app.models.session import ObservingSession
+
+    site_config = load_site_config()
+    location = EarthLocation(
+        lat=site_config.latitude * u.deg,
+        lon=site_config.longitude * u.deg,
+        height=site_config.altitude_m * u.m,
+    )
+    now = Time.now()
+
+    result: dict[str, Any] = {}
+
+    cache: dict[str, Any] = {}
+    mount = _mount_status(cache)
+    if mount.get("reachable") and mount.get("ra_deg") is not None and mount.get("dec_deg") is not None:
+        try:
+            result["mount"] = _current_altaz(mount["ra_deg"], mount["dec_deg"])
+        except Exception as exc:
+            logger.debug("Could not compute mount alt/az: %s", exc)
+            result["mount"] = None
+    else:
+        result["mount"] = None
+
+    horizon_mask = HorizonMask.from_path(
+        site_config.horizon_mask.source if site_config.horizon_mask else None
+    )
+    if horizon_mask is not None:
+        sample_az = list(range(0, 360, 5))
+        sample_alt = horizon_mask.limit_for(np.array(sample_az, dtype=float))
+        result["horizon"] = [
+            {"az_deg": az, "alt_deg": float(alt)} for az, alt in zip(sample_az, sample_alt)
+        ]
+    else:
+        result["horizon"] = []
+
+    try:
+        sun_altaz = get_body("sun", now, location=location).transform_to(
+            AltAz(obstime=now, location=location)
+        )
+        result["sun"] = {"alt_deg": float(sun_altaz.alt.deg), "az_deg": float(sun_altaz.az.deg)}
+        moon_altaz = get_body("moon", now, location=location).transform_to(
+            AltAz(obstime=now, location=location)
+        )
+        result["moon"] = {"alt_deg": float(moon_altaz.alt.deg), "az_deg": float(moon_altaz.az.deg)}
+    except Exception as exc:
+        logger.debug("Could not compute sun/moon position: %s", exc)
+        result["sun"] = None
+        result["moon"] = None
+
+    active_session = db.exec(
+        select(ObservingSession).where(ObservingSession.status == "active")
+    ).first()
+    result["target"] = None
+    if active_session and active_session.selected_target:
+        capture = db.exec(
+            select(CaptureLog)
+            .where(CaptureLog.target == active_session.selected_target)
+            .where(CaptureLog.predicted_ra_deg.is_not(None))
+            .order_by(CaptureLog.started_at.desc())
+        ).first()
+        if capture and capture.predicted_ra_deg is not None and capture.predicted_dec_deg is not None:
+            try:
+                altaz = _current_altaz(capture.predicted_ra_deg, capture.predicted_dec_deg)
+                result["target"] = {"name": active_session.selected_target, **altaz}
+            except Exception as exc:
+                logger.debug("Could not compute target alt/az: %s", exc)
+
+    return result

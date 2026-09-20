@@ -71,3 +71,16 @@ export interface LatestCaptureInfo {
   has_wcs?: boolean
   error_message?: string | null
 }
+
+export interface AltAz {
+  alt_deg: number
+  az_deg: number
+}
+
+export interface SkyView {
+  mount: AltAz | null
+  horizon: AltAz[]
+  sun: AltAz | null
+  moon: AltAz | null
+  target: (AltAz & { name: string }) | null
+}
