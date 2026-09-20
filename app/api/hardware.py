@@ -14,11 +14,21 @@ endpoint to report on, not an error condition for the endpoint itself.
 from __future__ import annotations
 
 import logging
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+import numpy as np
+from astropy.io import fits
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from PIL import Image
+from sqlalchemy.orm import Session
+from sqlmodel import select
 
 from app.core.config import settings
+from app.db.session import get_session_dep
+from app.models.capture import CaptureLog
 
 logger = logging.getLogger(__name__)
 
@@ -139,3 +149,65 @@ def hardware_status() -> dict[str, Any]:
         "guiding": _guiding_status(cache),
         "focuser": _focuser_status(cache),
     }
+
+
+def _latest_capture(db: Session) -> CaptureLog | None:
+    # Skip capture records with no real file -- created when a capture
+    # started but was interrupted before a FITS path was ever assigned
+    # (confirmed live: this is a real, normal state to encounter, not a
+    # bug -- e.g. a session stopped mid-exposure during testing).
+    return db.exec(
+        select(CaptureLog)
+        .where(CaptureLog.path != "")
+        .order_by(CaptureLog.started_at.desc())
+    ).first()
+
+
+@router.get("/camera/latest")
+def latest_capture_info(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
+    """Metadata for the most recent capture, for the frontend to show
+    alongside the preview image (target, timestamp, exposure, solve
+    status) without re-parsing the FITS file itself."""
+    capture = _latest_capture(db)
+    if capture is None:
+        return {"available": False}
+    return {
+        "available": True,
+        "capture_id": capture.id,
+        "target": capture.target,
+        "started_at": capture.started_at.isoformat(),
+        "exposure_seconds": capture.exposure_seconds,
+        "filter_name": capture.filter_name,
+        "has_wcs": capture.has_wcs,
+        "error_message": capture.error_message,
+    }
+
+
+@router.get("/camera/preview")
+def camera_preview(db: Session = Depends(get_session_dep)) -> Response:
+    """A stretched, downscaled JPEG preview of the most recent capture --
+    browsers can't display raw 16-bit FITS directly. Renders the raw
+    sensor data as grayscale (no debayering) -- good enough to confirm
+    something is in frame and roughly in focus; a proper color preview
+    is a later enhancement, not needed for this to be useful."""
+    capture = _latest_capture(db)
+    if capture is None or not Path(capture.path).exists():
+        raise HTTPException(status_code=404, detail="No capture available")
+
+    try:
+        data = fits.getdata(capture.path).astype(float)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read FITS data: {exc}") from exc
+
+    lo, hi = np.percentile(data, [1.0, 99.5])
+    if hi <= lo:
+        hi = lo + 1.0
+    stretched = np.clip((data - lo) / (hi - lo), 0.0, 1.0)
+    img8 = (stretched * 255).astype(np.uint8)
+
+    image = Image.fromarray(img8, mode="L")
+    image.thumbnail((1200, 1200))
+
+    buf = BytesIO()
+    image.save(buf, format="JPEG", quality=85)
+    return Response(content=buf.getvalue(), media_type="image/jpeg")

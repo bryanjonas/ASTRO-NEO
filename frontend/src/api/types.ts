@@ -60,3 +60,14 @@ export interface HardwareStatus {
   guiding: HardwareSubsystemStatus
   focuser: HardwareSubsystemStatus
 }
+
+export interface LatestCaptureInfo {
+  available: boolean
+  capture_id?: number
+  target?: string
+  started_at?: string
+  exposure_seconds?: number
+  filter_name?: string | null
+  has_wcs?: boolean
+  error_message?: string | null
+}
