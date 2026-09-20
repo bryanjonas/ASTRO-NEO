@@ -664,6 +664,7 @@ class SequentialCaptureService:
                                 self.nina.set_tracking(0)
                             except Exception as exc:
                                 logger.warning("Could not enable tracking: %s", exc)
+                            self.nina.start_guiding_best_effort(timeout=2.0)
                             logger.info("Final re-slew complete")
                             break
 
@@ -682,6 +683,7 @@ class SequentialCaptureService:
                             self.nina.set_tracking(0)
                         except Exception as exc:
                             logger.warning("Could not enable tracking: %s", exc)
+                        self.nina.start_guiding_best_effort(timeout=2.0)
                         logger.info("Re-slew complete")
                         # loop again for another confirmation attempt
 
