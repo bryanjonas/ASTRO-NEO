@@ -118,6 +118,19 @@ class Settings(BaseSettings):
     alpaca_mount_device_number: int = 0
     alpaca_timeout: float = 30.0
 
+    # Camera control backend: "nina" (default) or "alpaca" (direct ASCOM
+    # Alpaca via AlpacaCameraClient -- owns the full exposure lifecycle and
+    # writes FITS itself instead of polling for NINA to produce a file).
+    # alpaca_camera_gain is a placeholder default -- presets.py already
+    # computes a per-target gain value that isn't actually wired through to
+    # capture today on EITHER backend (NINA's own start_exposure doesn't
+    # take a gain parameter either); threading that through properly is a
+    # follow-up, not a regression introduced by adding the alpaca backend.
+    camera_backend: str = "nina"
+    alpaca_camera_url: str = "http://host.docker.internal:11111"
+    alpaca_camera_device_number: int = 0
+    alpaca_camera_gain: int = 100
+
     data_root: str = "/data"
     fits_retention_days: int = 14
     # Local astrometry solve configuration (synchronous subprocess)

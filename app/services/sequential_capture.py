@@ -82,6 +82,99 @@ class SequentialCaptureService:
 
         self.analysis = analysis or AnalysisService(db)
 
+        from app.services.alpaca_camera_client import AlpacaCameraClient
+        self.alpaca_camera = AlpacaCameraClient(
+            base_url=settings.alpaca_camera_url,
+            device_number=settings.alpaca_camera_device_number,
+            timeout=settings.alpaca_timeout,
+        )
+        self._alpaca_camera_caps: dict[str, Any] | None = None
+
+    def _capture_exposure(
+        self,
+        *,
+        target_name: str,
+        exposure_seconds: float,
+        binning: int,
+        filter_name: str,
+        min_start_time: float,
+        poll_timeout: float,
+        camera_idle_timeout: float = 60.0,
+        exclude_paths: set[str] | None = None,
+        stable_duration: float = 1.0,
+        stable_timeout: float = 10.0,
+        ra_deg: float | None = None,
+        dec_deg: float | None = None,
+    ) -> Path | None:
+        """Trigger one exposure and return the resulting FITS path, or
+        None on failure -- branches on settings.camera_backend. Callers
+        keep their own try/except and error-response shape unchanged;
+        this only owns "how do we get a validated FITS path".
+
+        NINA path (default): unchanged behavior, just extracted from what
+        was previously duplicated at each of the three capture call sites.
+
+        Alpaca path: owns the full exposure lifecycle directly (trigger,
+        poll ImageReady, pull pixel data, write FITS) instead of polling
+        the filesystem for NINA to produce a file -- see
+        alpaca_camera_client.py and alpaca_fits_writer.py.
+        """
+        if settings.camera_backend == "alpaca":
+            from datetime import timezone
+            from app.services.alpaca_fits_writer import CaptureContext, write_capture_fits
+
+            if self._alpaca_camera_caps is None:
+                self._alpaca_camera_caps = self.alpaca_camera.get_capabilities()
+            caps = self._alpaca_camera_caps
+
+            self.alpaca_camera.set_binning(binning, binning)
+            self.alpaca_camera.set_gain(settings.alpaca_camera_gain)
+            self.alpaca_camera.start_exposure(exposure_seconds, light=True)
+            self.alpaca_camera.wait_for_image_ready(timeout=exposure_seconds + camera_idle_timeout)
+            data = self.alpaca_camera.get_image_array()
+
+            ctx = CaptureContext(
+                target_name=target_name,
+                exposure_seconds=exposure_seconds,
+                date_obs_utc=datetime.now(timezone.utc),
+                binning=binning,
+                gain=settings.alpaca_camera_gain,
+                electrons_per_adu=caps.get("electrons_per_adu"),
+                pixel_size_um=caps.get("pixel_size_x"),
+                instrument_name=caps.get("name", ""),
+                bayer_offset_x=caps.get("bayer_offset_x", 0) or 0,
+                bayer_offset_y=caps.get("bayer_offset_y", 0) or 0,
+                ccd_temperature_c=self.alpaca_camera.get_ccd_temperature(),
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+            )
+            path = write_capture_fits(data, ctx, output_root=settings.nina_images_path)
+            logger.info("Alpaca capture written: %s", path)
+            return path
+
+        self.nina.wait_for_camera_idle(timeout=camera_idle_timeout)
+        self.nina.start_exposure(
+            filter_name=filter_name,
+            binning=binning,
+            exposure_seconds=exposure_seconds,
+            target=target_name,
+            request_solve=False,
+        )
+        self.nina.wait_for_camera_idle(timeout=exposure_seconds + 30.0)
+
+        path = poll_for_fits_file(
+            target_name=target_name,
+            fits_directory=settings.nina_images_path,
+            timeout=poll_timeout,
+            min_mtime=min_start_time - 1.0,
+            exclude_paths=exclude_paths or None,
+        )
+        if not path:
+            return None
+        if not wait_for_file_size_stable(path, stable_duration=stable_duration, timeout=stable_timeout):
+            logger.warning("File size did not stabilize, continuing anyway: %s", path)
+        return path
+
     @staticmethod
     def _to_mount_coords(ra_deg: float, dec_deg: float) -> tuple[float, float]:
         """Convert ICRS/J2000 coords to the mount frame used by NINA."""
@@ -476,31 +569,24 @@ class SequentialCaptureService:
                 )
                 try:
                     conf_start = time.time()
-                    self.nina.wait_for_camera_idle(timeout=30.0)
-                    self.nina.start_exposure(
-                        filter_name=filter_name,
-                        binning=settings.confirmation_binning,
-                        exposure_seconds=settings.confirmation_exposure_seconds,
-                        target=f"{target_name}_CONF",
-                        request_solve=False,
-                    )
-                    self.nina.wait_for_camera_idle(
-                        timeout=settings.confirmation_exposure_seconds + 30.0
-                    )
-
-                    # Poll for confirmation FITS
-                    conf_path = poll_for_fits_file(
+                    conf_path = self._capture_exposure(
                         target_name=f"{target_name}_CONF",
-                        fits_directory=settings.nina_images_path,
-                        timeout=settings.confirmation_exposure_seconds + 30.0,
-                        min_mtime=conf_start - 1.0,
+                        exposure_seconds=settings.confirmation_exposure_seconds,
+                        binning=settings.confirmation_binning,
+                        filter_name=filter_name,
+                        min_start_time=conf_start,
+                        poll_timeout=settings.confirmation_exposure_seconds + 30.0,
+                        camera_idle_timeout=30.0,
+                        stable_duration=1.0,
+                        stable_timeout=10.0,
+                        ra_deg=final_ra,
+                        dec_deg=final_dec,
                     )
                     if not conf_path:
                         logger.warning("Confirmation FITS not found; skipping confirmation")
                         confirmation_success = True
                         break
 
-                    wait_for_file_size_stable(conf_path, stable_duration=1.0, timeout=10.0)
                     logger.info("Confirmation FITS: %s", conf_path)
 
                     # Blind solve confirmation image
@@ -625,26 +711,6 @@ class SequentialCaptureService:
         }
 
         if confirmation_success and settings.test_mode_slew_only:
-            try:
-                science_capture_start = time.time()
-                logger.info("Capturing science image: %s", target_name)
-                self.nina.wait_for_camera_idle(timeout=60.0)
-                self.nina.start_exposure(
-                    filter_name=filter_name,
-                    binning=binning,
-                    exposure_seconds=exposure_seconds,
-                    target=target_name,
-                    request_solve=False,
-                )
-                self.nina.wait_for_camera_idle(timeout=exposure_seconds + 30.0)
-            except Exception as e:
-                logger.error("Science capture failed: %s", e)
-                return {
-                    "success": False,
-                    "error": f"Science capture failed: {e}",
-                    "confirmation_attempts": confirmation_attempts,
-                }
-
             exclude_paths = {
                 row[0]
                 for row in self.db.exec(
@@ -656,13 +722,31 @@ class SequentialCaptureService:
                 )
                 if row[0]
             }
-            science_path = poll_for_fits_file(
-                target_name=target_name,
-                fits_directory=settings.nina_images_path,
-                timeout=exposure_seconds + 60.0,
-                min_mtime=science_capture_start - 1.0,
-                exclude_paths=exclude_paths or None,
-            )
+            try:
+                science_capture_start = time.time()
+                logger.info("Capturing science image: %s", target_name)
+                science_path = self._capture_exposure(
+                    target_name=target_name,
+                    exposure_seconds=exposure_seconds,
+                    binning=binning,
+                    filter_name=filter_name,
+                    min_start_time=science_capture_start,
+                    poll_timeout=exposure_seconds + 60.0,
+                    camera_idle_timeout=60.0,
+                    exclude_paths=exclude_paths or None,
+                    stable_duration=1.0,
+                    stable_timeout=10.0,
+                    ra_deg=final_ra,
+                    dec_deg=final_dec,
+                )
+            except Exception as e:
+                logger.error("Science capture failed: %s", e)
+                return {
+                    "success": False,
+                    "error": f"Science capture failed: {e}",
+                    "confirmation_attempts": confirmation_attempts,
+                }
+
             if not science_path:
                 logger.error("Science FITS file not found")
                 return {
@@ -670,8 +754,6 @@ class SequentialCaptureService:
                     "error": "Science image not created",
                     "confirmation_attempts": confirmation_attempts,
                 }
-            if not wait_for_file_size_stable(science_path, stable_duration=1.0, timeout=10.0):
-                logger.warning("Science file size did not stabilize, continuing anyway")
 
             logger.info("Science exposure saved: %s", science_path)
             try:
@@ -752,30 +834,6 @@ class SequentialCaptureService:
         logger.info(f"Created capture record: id={capture.id}")
 
         # Step 4: Take main science exposure
-        try:
-            main_capture_start = time.time()
-            logger.info(f"Capturing main science image: {target_name}")
-            self.nina.wait_for_camera_idle(timeout=60.0)
-            self.nina.start_exposure(
-                filter_name=filter_name,
-                binning=binning,
-                exposure_seconds=exposure_seconds,
-                target=target_name,
-                request_solve=False,  # Never rely on NINA solving
-            )
-            self.nina.wait_for_camera_idle(timeout=exposure_seconds + 30.0)
-        except Exception as e:
-            logger.error(f"Main capture failed: {e}")
-            capture.error_message = f"Capture failed: {e}"
-            self.db.commit()  # Commit the failed capture for tracking
-            return {
-                "success": False,
-                "capture_id": capture.id,
-                "error": f"Main capture failed: {e}",
-                "confirmation_attempts": confirmation_attempts,
-            }
-
-        # Step 5: Wait for main FITS file
         exclude_paths = {
             row[0]
             for row in self.db.exec(
@@ -787,13 +845,35 @@ class SequentialCaptureService:
             )
             if row[0]
         }
-        fits_path = poll_for_fits_file(
-            target_name=target_name,
-            fits_directory=settings.nina_images_path,
-            timeout=exposure_seconds + 60.0,  # Exposure time + buffer
-            min_mtime=main_capture_start - 1.0,
-            exclude_paths=exclude_paths or None,
-        )
+        try:
+            main_capture_start = time.time()
+            logger.info(f"Capturing main science image: {target_name}")
+            fits_path = self._capture_exposure(
+                target_name=target_name,
+                exposure_seconds=exposure_seconds,
+                binning=binning,
+                filter_name=filter_name,
+                min_start_time=main_capture_start,
+                poll_timeout=exposure_seconds + 60.0,
+                camera_idle_timeout=60.0,
+                exclude_paths=exclude_paths or None,
+                stable_duration=2.0,
+                stable_timeout=30.0,
+                ra_deg=final_ra,
+                dec_deg=final_dec,
+            )
+        except Exception as e:
+            logger.error(f"Main capture failed: {e}")
+            capture.error_message = f"Capture failed: {e}"
+            self.db.commit()  # Commit the failed capture for tracking
+            return {
+                "success": False,
+                "capture_id": capture.id,
+                "error": f"Main capture failed: {e}",
+                "confirmation_attempts": confirmation_attempts,
+            }
+
+        # Step 5: Handle missing FITS file
         if not fits_path:
             logger.error("Main FITS file not found")
             capture.error_message = "FITS file not created"
@@ -804,10 +884,6 @@ class SequentialCaptureService:
                 "error": "Science image not created",
                 "confirmation_attempts": confirmation_attempts,
             }
-
-        # Wait for file write to complete
-        if not wait_for_file_size_stable(fits_path, stable_duration=2.0, timeout=30.0):
-            logger.warning("Main file size did not stabilize, continuing anyway")
 
         # Update capture with path (don't commit yet - wait for solve)
         capture.path = str(fits_path)
