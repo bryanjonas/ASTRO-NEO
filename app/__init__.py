@@ -14,6 +14,7 @@ from .db.session import init_db
 from .dashboard_router import router as dashboard_router
 from .services.captures import prune_missing_captures
 from .services.whatsup import WhatsUpService, start_periodic_refresh_thread
+from .services.guide_telemetry import start_guide_telemetry_thread
 
 
 import logging
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
             logger.warning("Failed to clear WhatsUp targets on startup: %s", exc)
 
         start_periodic_refresh_thread()
+        start_guide_telemetry_thread()
         logger.info("Startup complete; WhatsUp targets will refresh automatically.")
 
     return app

@@ -60,6 +60,12 @@ class Phd2Client:
         self.app_state: str | None = None
         self.last_settle: dict[str, Any] | None = None
         self.last_alert: dict[str, Any] | None = None
+        # Optional hook invoked for every Event received (in addition to
+        # the built-in handling above) -- used by guide_telemetry.py's
+        # background listener to capture GuideStep events for the live
+        # guiding graph without this class needing to know anything about
+        # that consumer.
+        self.on_event: Any = None
 
     def connect(self) -> None:
         self._sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
@@ -117,6 +123,11 @@ class Phd2Client:
         elif event == "Alert":
             self.last_alert = obj
             logger.warning("PHD2 alert: %s", obj.get("Msg"))
+        if self.on_event is not None:
+            try:
+                self.on_event(obj)
+            except Exception:
+                logger.exception("Phd2Client.on_event callback raised")
 
     def _pump(self, timeout: float) -> None:
         """Read and dispatch events (and stray non-matching responses)
@@ -223,6 +234,16 @@ class Phd2Client:
             "PHD2 settle failed: status=%s error=%s", status, self.last_settle.get("Error")
         )
         return False
+
+    def listen_forever(self, stop_flag) -> None:
+        """Block, dispatching events via on_event, until stop_flag() is
+        true or the connection breaks. Intended to run in a dedicated
+        background thread -- see guide_telemetry.py."""
+        while not stop_flag():
+            try:
+                self._pump(timeout=1.0)
+            except Phd2Error:
+                raise
 
     def stop_capture(self) -> None:
         self._call("stop_capture")

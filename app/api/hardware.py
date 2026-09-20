@@ -35,16 +35,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/hardware", tags=["hardware"])
 
 
+_NINA_UNREACHABLE = object()  # sentinel: cache a failed attempt too
+
+
 def _nina_status_cached(cache: dict[str, Any]) -> dict[str, Any]:
     """NinaBridgeService.get_status() covers telescope+camera+focuser in
-    one call -- fetch it at most once per request even if multiple
-    subsystems are on the nina backend."""
+    one call -- fetch (or fail) it at most once per request even if
+    multiple subsystems are on the nina backend. Confirmed live: without
+    caching the FAILURE too, a NINA-unreachable request took ~15s (three
+    independent 5s timeouts for mount+camera+guiding each retrying the
+    same failing connection) instead of one."""
     if "nina" not in cache:
         from app.services.nina_client import NinaBridgeService
 
-        # Short timeout -- NinaBridgeService defaults to 300s (fine for
-        # actual exposures, unacceptable for a quick status poll).
-        cache["nina"] = NinaBridgeService(timeout=5.0).get_status()
+        try:
+            # Short timeout -- NinaBridgeService defaults to 300s (fine
+            # for actual exposures, unacceptable for a quick status poll).
+            cache["nina"] = NinaBridgeService(timeout=3.0).get_status()
+        except Exception as exc:
+            cache["nina"] = _NINA_UNREACHABLE
+            cache["nina_error"] = str(exc)
+    if cache["nina"] is _NINA_UNREACHABLE:
+        raise RuntimeError(cache["nina_error"])
     return cache["nina"]
 
 
@@ -110,9 +122,14 @@ def _guiding_status(cache: dict[str, Any]) -> dict[str, Any]:
                     "calibrated": client.get_calibrated(),
                     "equipment": client.get_current_equipment(),
                 }
+        # Reuses the shared cached NINA reachability check (and its
+        # failure) rather than making an independent, redundant 5s-timeout
+        # attempt when NINA is already known unreachable this request --
+        # see _nina_status_cached's docstring for why this matters.
+        _nina_status_cached(cache)
         from app.services.nina_client import NinaBridgeService
 
-        guider = NinaBridgeService(timeout=5.0).guider_info()
+        guider = NinaBridgeService(timeout=3.0).guider_info()
         return {"backend": backend, "reachable": guider is not None, **(guider or {})}
     except Exception as exc:
         logger.debug("Guiding status unavailable: %s", exc)
@@ -308,3 +325,13 @@ def sky_view(db: Session = Depends(get_session_dep)) -> dict[str, Any]:
                 logger.debug("Could not compute target alt/az: %s", exc)
 
     return result
+
+
+@router.get("/guiding/history")
+def guiding_history() -> dict[str, Any]:
+    """Recent GuideStep telemetry from the background PHD2 listener (see
+    guide_telemetry.py) -- empty when guiding_backend != "phd2" or PHD2
+    isn't currently connected, not an error."""
+    from app.services.guide_telemetry import get_guide_history
+
+    return {"steps": get_guide_history()}

@@ -84,3 +84,17 @@ export interface SkyView {
   moon: AltAz | null
   target: (AltAz & { name: string }) | null
 }
+
+export interface GuideStep {
+  time: number | null
+  ra_distance_raw: number | null
+  dec_distance_raw: number | null
+  ra_duration: number | null
+  dec_duration: number | null
+  snr: number | null
+  star_mass: number | null
+}
+
+export interface GuidingHistory {
+  steps: GuideStep[]
+}

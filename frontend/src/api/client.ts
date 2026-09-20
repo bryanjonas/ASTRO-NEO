@@ -1,4 +1,5 @@
 import type {
+  GuidingHistory,
   HardwareStatus,
   LatestCaptureInfo,
   SessionReady,
@@ -44,4 +45,5 @@ export const api = {
   getHardwareStatus: () => request<HardwareStatus>('/hardware/status'),
   getLatestCapture: () => request<LatestCaptureInfo>('/hardware/camera/latest'),
   getSkyView: () => request<SkyView>('/hardware/sky'),
+  getGuidingHistory: () => request<GuidingHistory>('/hardware/guiding/history'),
 }

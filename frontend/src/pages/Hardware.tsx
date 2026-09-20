@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling'
 import type { HardwareSubsystemStatus } from '../api/types'
 import { Card, StatPill } from '../components/ui'
 import CameraPreview from '../components/CameraPreview'
+import GuidingGraph from '../components/GuidingGraph'
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return '—'
@@ -47,6 +48,7 @@ export default function Hardware() {
       <h1 className="text-xl font-semibold text-slate-100">Hardware</h1>
       {hardware.error && <p className="text-sm text-rose-300">{hardware.error}</p>}
       <CameraPreview />
+      <GuidingGraph />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SubsystemCard title="Mount" status={hardware.data?.mount} />
         <SubsystemCard title="Camera" status={hardware.data?.camera} />
