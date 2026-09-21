@@ -339,37 +339,41 @@ def guiding_history() -> dict[str, Any]:
 
 @router.post("/polar-align/run")
 def run_polar_alignment_measurement(
-    exposure_seconds: float = 5.0, rotation_deg: float = 60.0
+    exposure_seconds: float = 5.0, step_deg: float = 30.0
 ) -> dict[str, Any]:
-    """Run one all-sky polar alignment measurement cycle (see
-    all_sky_polar_align.py): capture+solve, RA-only re-slew, capture+solve
-    again, report the axis error. A real, deliberate mount/camera action
-    -- only ever triggered by an explicit request, never automatically."""
-    from app.services.all_sky_polar_align import run_all_sky_polar_alignment
+    """Run one all-sky polar alignment calibration (see
+    all_sky_polar_align.py): three shots step_deg apart in RA (same
+    declination), reporting the axis error from the widest-separated
+    pair. Two slews total -- leaves the mount at the final pointing, no
+    further slewing. A real, deliberate mount/camera action -- only ever
+    triggered by an explicit request, never automatically."""
+    from app.services.all_sky_polar_align import calibrate
     from app.services.polar_alignment import PolarAlignmentError
     from app.services.alpaca_camera_client import AlpacaError as CameraAlpacaError
     from app.services.alpaca_mount_client import AlpacaError as MountAlpacaError
 
     try:
-        return run_all_sky_polar_alignment(exposure_seconds=exposure_seconds, rotation_deg=rotation_deg)
+        return calibrate(exposure_seconds=exposure_seconds, step_deg=step_deg)
     except (PolarAlignmentError, CameraAlpacaError, MountAlpacaError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/polar-align/start")
 def start_continuous_polar_alignment(
-    exposure_seconds: float = 5.0, rotation_deg: float = 60.0
+    exposure_seconds: float = 5.0, step_deg: float = 30.0
 ) -> dict[str, Any]:
-    """Start continuous polar alignment: repeats the measurement cycle in
-    a background thread, each cycle fully independent, so you can adjust
-    the mount's azimuth/altitude bolts between readings and watch them
-    converge. Real, deliberate mount/camera action running repeatedly
-    until explicitly stopped -- only starts on explicit request."""
+    """Start a polar alignment session: one calibration (two slews, three
+    shots step_deg apart in RA) followed by a monitor phase that performs
+    NO further slewing -- just repeatedly captures and solves at the
+    final fixed pointing while you physically adjust the mount's
+    azimuth/altitude bolts, reporting how far the star field has drifted
+    from the first monitor reading. Real, deliberate mount/camera action
+    -- only starts on explicit request."""
     from app.services.all_sky_polar_align import start_continuous_polar_alignment as _start
     from app.services.polar_alignment import PolarAlignmentError
 
     try:
-        _start(exposure_seconds=exposure_seconds, rotation_deg=rotation_deg)
+        _start(exposure_seconds=exposure_seconds, step_deg=step_deg)
         return {"started": True}
     except PolarAlignmentError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -377,6 +381,9 @@ def start_continuous_polar_alignment(
 
 @router.post("/polar-align/stop")
 def stop_continuous_polar_alignment() -> dict[str, Any]:
+    """Stop the polar alignment session. Only affects the monitor
+    phase's repeated capture+solve loop -- there is no slewing to stop,
+    the mount is left exactly where the calibration phase last put it."""
     from app.services.all_sky_polar_align import stop_continuous_polar_alignment as _stop
 
     _stop()

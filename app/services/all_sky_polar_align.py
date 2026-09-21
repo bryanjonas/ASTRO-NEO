@@ -1,32 +1,34 @@
 """All-sky polar alignment orchestration -- direct_hardware branch.
 
-Captures two points, computes the mount's actual polar axis error, and
-reports it -- see polar_alignment.py for the validated math core. This
-module owns the real-hardware sequencing: slew, capture+solve, RA-only
-re-slew, capture+solve again.
+Two-phase design, matching the standard real-world workflow (confirmed
+against a real run tonight that the previous "repeat the full slew cycle
+forever" design was wrong -- it kept re-slewing across a wide arc every
+~1 minute with no pause, which is exactly what looked like "the mount
+going all over the place" rather than a controlled measurement):
 
-The commanded rotation passed into the math core comes from the MOUNT'S
-OWN reported RA before/after the second slew, not from the two solved
-positions -- deliberately, since inferring it from solved sky coordinates
-would be circular with the very polar-alignment error being measured. A
-mount's own RA-axis encoder delta for a same-declination retarget is a
-much more trustworthy "known rotation angle" input.
+Phase 1 -- Calibrate (runs once): three shots ~30 degrees apart in RA
+(same declination), computing the polar axis error from the two
+widest-separated points. Two slews total, not repeated.
 
-NOT YET VERIFIED against a real star field (it's daytime -- see
-polar_alignment.py's module docstring and tonight's other real-hardware
-work for the established pattern of flagging this honestly). One specific
-risk this hasn't resolved: the sign mapping between "mount-reported RA
-decreased by X" and the math core's Alt/Az right-hand-rotation convention
-is implemented according to the standard HA=LST-RA relationship below,
-but hasn't been empirically cross-checked against a real, independently-
-verified polar alignment reading. Treat the FIRST real run's reported
-direction with appropriate skepticism -- cross-check against a polar
-scope or other independent method before trusting the sign blindly.
+Phase 2 -- Monitor (stays put): after calibration, the mount is NOT
+slewed again. Repeatedly capture+solve at the same fixed pointing while
+you physically adjust the azimuth/altitude bolts, reporting how far the
+solved position has drifted from the first monitor-phase reading -- a
+direct, honest readout of your adjustment's effect, not a re-derived
+az/alt breakdown (that would need re-deriving the drift-alignment
+geometry for an arbitrary, uncalibrated moment, which hasn't been done
+or validated the way the two-point axis solver has -- see
+polar_alignment.py). Watch this drift accumulate roughly in line with
+the calibration's reported error, then stop.
+
+See polar_alignment.py for the validated math core (the two-point axis
+solver) used only in the calibration phase.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -98,24 +100,17 @@ def _capture_and_solve(
 
 def _slew_to_reference_point(mount: AlpacaMountClient, alt_deg: float = 50.0, az_deg: float = 90.0) -> None:
     """Slew to a fixed Alt/Az reference point well away from the celestial
-    pole before starting a measurement cycle.
+    pole before starting calibration.
 
-    Confirmed live as the real cause of a failed measurement: the mount
+    Confirmed live as a real cause of a failed measurement: the mount
     had been sitting at Dec~90 (parked near the pole, its normal idle
-    state all night) when a bare measurement was attempted using "wherever
-    the mount currently is" as point 1. Near the pole, a 60 degree rotation
+    state) when a bare measurement was attempted using "wherever the
+    mount currently is" as point 1 -- near the pole, a large rotation
     about the mount's own axis barely changes the actual pointing
-    direction at all (you're rotating around an axis that nearly passes
-    through your own pointing direction) -- which breaks the whole
-    method's geometry (the solver correctly refused to answer: "No sign
-    change found", rather than returning a wrong number).
+    direction at all, breaking the whole method's geometry.
 
     Az 90 (East) at Alt 50 sits safely inside this branch's configured
-    open horizon arc (0-135 deg needs only 30+ deg altitude) and is a
-    reasonable, moderate-altitude, moderate-hour-angle reference point --
-    not claiming this is the mathematically optimal point (near-meridian
-    is more classically recommended for azimuth sensitivity specifically),
-    just "far enough from the pole that the method's geometry is sound".
+    open horizon arc (0-135 deg needs only 30+ deg altitude).
     """
     from astropy.coordinates import AltAz, EarthLocation, SkyCoord
     from astropy.time import Time
@@ -130,22 +125,39 @@ def _slew_to_reference_point(mount: AlpacaMountClient, alt_deg: float = 50.0, az
     mount.wait_for_mount_ready(timeout=120.0)
 
 
-def run_all_sky_polar_alignment(
+def _slew_ra_only(mount: AlpacaMountClient, ra_hours: float, dec_deg: float, offset_deg: float) -> float:
+    """Slew to the same declination, offset by offset_deg of RA. Returns
+    the mount's own post-slew RA (hours) for computing the real achieved
+    rotation from the mount's own encoder, not the commanded value."""
+    target_ra_hours = (ra_hours - offset_deg / 15.0) % 24.0
+    mount.slew(target_ra_hours * 15.0, dec_deg)
+    mount.wait_for_mount_ready(timeout=120.0)
+    return float(mount.mount_info_raw()["RightAscension"])
+
+
+def _ra_delta_deg(ra_hours_before: float, ra_hours_after: float) -> float:
+    delta_hours = ra_hours_before - ra_hours_after
+    if delta_hours > 12.0:
+        delta_hours -= 24.0
+    elif delta_hours < -12.0:
+        delta_hours += 24.0
+    return delta_hours * 15.0
+
+
+def calibrate(
     exposure_seconds: float = 5.0,
-    rotation_deg: float = 60.0,
+    step_deg: float = 30.0,
     settle_seconds: float = 3.0,
     reference_alt_deg: float = 50.0,
     reference_az_deg: float = 90.0,
 ) -> dict[str, Any]:
-    """Run one full measurement cycle: slew to a fixed reference point
-    away from the pole, capture+solve, RA-only re-slew by `rotation_deg`,
-    capture+solve again, solve for the polar axis error.
-
-    This does not adjust anything -- it's a measurement tool. Run it,
-    physically adjust the mount's azimuth/altitude bolts per the reported
-    direction, then run it again to confirm convergence (matching how
-    SharpCap's equivalent live-feedback tool is used, just one measurement
-    at a time rather than continuously)."""
+    """Three shots step_deg apart in RA (same declination): slew to a
+    reference point, capture+solve, slew +step_deg twice more,
+    capture+solve each time. Computes the axis error from the two
+    widest-separated points (points 1 and 3, 2*step_deg apart). Leaves
+    the mount at point 3's pointing -- no slew happens after this
+    returns; call monitor_once() repeatedly from there.
+    """
     mount = AlpacaMountClient(
         base_url=settings.alpaca_mount_url,
         device_number=settings.alpaca_mount_device_number,
@@ -159,139 +171,170 @@ def run_all_sky_polar_alignment(
 
     _slew_to_reference_point(mount, reference_alt_deg, reference_az_deg)
     time.sleep(settle_seconds)
-
     point1 = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN", frame_index=0)
 
-    mount_info_before = mount.mount_info_raw()
-    mount_ra_hours_before = float(mount_info_before["RightAscension"])
-    mount_dec_before = float(mount_info_before["Declination"])
+    mount_info_1 = mount.mount_info_raw()
+    ra_hours_1 = float(mount_info_1["RightAscension"])
+    dec_deg = float(mount_info_1["Declination"])
 
-    # Retarget to the SAME reported declination, offset RA by
-    # rotation_deg/15 hours -- keeping declination unchanged means a
-    # well-behaved GEM only needs to move its RA axis to get there.
-    target_ra_hours = (mount_ra_hours_before - rotation_deg / 15.0) % 24.0
-    mount.slew(target_ra_hours * 15.0, mount_dec_before)
-    mount.wait_for_mount_ready(timeout=120.0)
+    ra_hours_2 = _slew_ra_only(mount, ra_hours_1, dec_deg, step_deg)
     time.sleep(settle_seconds)
-
-    mount_info_after = mount.mount_info_raw()
-    mount_ra_hours_after = float(mount_info_after["RightAscension"])
-
-    # The mount's own RA-axis rotation, from its own encoder/reported
-    # position -- not inferred from solved sky positions (see module
-    # docstring for why that would be circular).
-    ra_delta_hours = mount_ra_hours_before - mount_ra_hours_after
-    # Handle wraparound (e.g. 23.9h -> 0.1h).
-    if ra_delta_hours > 12.0:
-        ra_delta_hours -= 24.0
-    elif ra_delta_hours < -12.0:
-        ra_delta_hours += 24.0
-    commanded_rotation_deg = ra_delta_hours * 15.0
-
     point2 = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN", frame_index=1)
+
+    ra_hours_3 = _slew_ra_only(mount, ra_hours_1, dec_deg, 2 * step_deg)
+    time.sleep(settle_seconds)
+    point3 = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN", frame_index=2)
+
+    commanded_rotation_deg = _ra_delta_deg(ra_hours_1, ra_hours_3)
 
     from app.core.site_config import load_site_config
 
     site = load_site_config()
-
     result = solve_polar_axis_error(
         ra1_deg=point1["ra_deg"],
         dec1_deg=point1["dec_deg"],
         time1=point1["time"],
-        ra2_deg=point2["ra_deg"],
-        dec2_deg=point2["dec_deg"],
-        time2=point2["time"],
+        ra2_deg=point3["ra_deg"],
+        dec2_deg=point3["dec_deg"],
+        time2=point3["time"],
         commanded_rotation_deg=commanded_rotation_deg,
         site_lat_deg=site.latitude,
         site_lon_deg=site.longitude,
         site_height_m=site.altitude_m,
     )
-
     description = describe_adjustment(result["az_error_arcmin"], result["alt_error_arcmin"])
-    logger.info("Polar alignment result: %s", description)
+    logger.info("Polar alignment calibration: %s", description)
 
-    return {**result, "description": description, "commanded_rotation_deg": commanded_rotation_deg}
+    return {
+        **result,
+        "description": description,
+        "commanded_rotation_deg": commanded_rotation_deg,
+        "last_heading": {"ra_deg": point3["ra_deg"], "dec_deg": point3["dec_deg"]},
+    }
 
 
-# --- Continuous mode: repeat the measurement cycle in a background thread,
-# so the reading keeps updating while you physically adjust the mount's
-# azimuth/altitude bolts between cycles -- each cycle is a fully
-# independent, self-contained measurement (fresh reference slew, fresh
-# pair of shots), so it's fine that you're changing the physical axis
-# between them; nothing here assumes the axis stayed put across cycles,
-# only within one cycle's own two shots. ---
+def monitor_once(exposure_seconds: float = 5.0) -> dict[str, Any]:
+    """One capture+solve at whatever the mount is CURRENTLY pointed at --
+    no slew, no mount commands at all. Used repeatedly during the monitor
+    phase while you physically adjust the mount by hand."""
+    mount = AlpacaMountClient(
+        base_url=settings.alpaca_mount_url,
+        device_number=settings.alpaca_mount_device_number,
+        timeout=settings.alpaca_timeout,
+    )
+    camera = AlpacaCameraClient(
+        base_url=settings.alpaca_camera_url,
+        device_number=settings.alpaca_camera_device_number,
+        timeout=settings.alpaca_timeout,
+    )
+    point = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN_MONITOR", frame_index=0)
+    return {"ra_deg": point["ra_deg"], "dec_deg": point["dec_deg"]}
 
-import threading
+
+def _separation_arcsec(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    import math
+
+    cos_dec = math.cos(math.radians((dec1 + dec2) / 2.0))
+    d_ra = (ra2 - ra1) * cos_dec
+    d_dec = dec2 - dec1
+    return math.sqrt(d_ra**2 + d_dec**2) * 3600.0
+
+
+# --- Continuous session: calibrate once, then repeatedly monitor in
+# place (no further slewing) until stopped. ---
 
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 _stop_flag = threading.Event()
 _state: dict[str, Any] = {
     "running": False,
-    "latest": None,
-    "history": [],
+    "phase": "idle",  # "idle" | "calibrating" | "monitoring"
+    "calibration": None,
+    "monitor_baseline": None,
+    "monitor_latest": None,
+    "monitor_drift_arcsec": None,
+    "monitor_count": 0,
     "error": None,
-    "cycle_count": 0,
 }
-_MAX_HISTORY = 20
 
 
 def get_polar_align_state() -> dict[str, Any]:
     with _lock:
-        return {**_state, "history": list(_state["history"])}
+        return dict(_state)
 
 
-def _continuous_loop(exposure_seconds: float, rotation_deg: float, reference_alt_deg: float, reference_az_deg: float) -> None:
+def _run_loop(exposure_seconds: float, step_deg: float, reference_alt_deg: float, reference_az_deg: float) -> None:
+    try:
+        with _lock:
+            _state["phase"] = "calibrating"
+        calibration = calibrate(
+            exposure_seconds=exposure_seconds,
+            step_deg=step_deg,
+            reference_alt_deg=reference_alt_deg,
+            reference_az_deg=reference_az_deg,
+        )
+        with _lock:
+            _state["calibration"] = calibration
+            _state["phase"] = "monitoring"
+    except Exception as exc:
+        logger.warning("Polar alignment calibration failed: %s", exc)
+        with _lock:
+            _state["error"] = str(exc)
+            _state["running"] = False
+            _state["phase"] = "idle"
+        return
+
+    baseline = None
+    count = 0
     while not _stop_flag.is_set():
         try:
-            result = run_all_sky_polar_alignment(
-                exposure_seconds=exposure_seconds,
-                rotation_deg=rotation_deg,
-                reference_alt_deg=reference_alt_deg,
-                reference_az_deg=reference_az_deg,
-            )
+            point = monitor_once(exposure_seconds=exposure_seconds)
             with _lock:
-                _state["latest"] = result
+                if baseline is None:
+                    baseline = point
+                    _state["monitor_baseline"] = baseline
+                _state["monitor_latest"] = point
+                _state["monitor_drift_arcsec"] = _separation_arcsec(
+                    baseline["ra_deg"], baseline["dec_deg"], point["ra_deg"], point["dec_deg"]
+                )
+                count += 1
+                _state["monitor_count"] = count
                 _state["error"] = None
-                _state["cycle_count"] += 1
-                _state["history"].append(result)
-                if len(_state["history"]) > _MAX_HISTORY:
-                    _state["history"] = _state["history"][-_MAX_HISTORY:]
-            logger.info("Polar alignment cycle %d: %s", _state["cycle_count"], result["description"])
         except Exception as exc:
-            logger.warning("Polar alignment cycle failed: %s", exc)
+            logger.warning("Polar alignment monitor capture failed: %s", exc)
             with _lock:
                 _state["error"] = str(exc)
-            # A single failed cycle (e.g. a transient solve failure) isn't
-            # fatal to the whole continuous session -- keep going rather
-            # than silently stopping, but don't hammer real hardware in a
-            # tight retry loop if something's persistently wrong.
             _stop_flag.wait(5.0)
 
     with _lock:
         _state["running"] = False
+        _state["phase"] = "idle"
 
 
 def start_continuous_polar_alignment(
     exposure_seconds: float = 5.0,
-    rotation_deg: float = 60.0,
+    step_deg: float = 30.0,
     reference_alt_deg: float = 50.0,
     reference_az_deg: float = 90.0,
 ) -> None:
     global _thread
     with _lock:
         if _state["running"]:
-            raise PolarAlignmentError("Continuous polar alignment is already running")
+            raise PolarAlignmentError("Polar alignment is already running")
         _state["running"] = True
+        _state["phase"] = "calibrating"
+        _state["calibration"] = None
+        _state["monitor_baseline"] = None
+        _state["monitor_latest"] = None
+        _state["monitor_drift_arcsec"] = None
+        _state["monitor_count"] = 0
         _state["error"] = None
-        _state["cycle_count"] = 0
-        _state["history"] = []
     _stop_flag.clear()
     _thread = threading.Thread(
-        target=_continuous_loop,
-        args=(exposure_seconds, rotation_deg, reference_alt_deg, reference_az_deg),
+        target=_run_loop,
+        args=(exposure_seconds, step_deg, reference_alt_deg, reference_az_deg),
         daemon=True,
-        name="polar-align-continuous",
+        name="polar-align",
     )
     _thread.start()
 
@@ -300,10 +343,12 @@ def stop_continuous_polar_alignment() -> None:
     _stop_flag.set()
     with _lock:
         _state["running"] = False
+        _state["phase"] = "idle"
 
 
 __all__ = [
-    "run_all_sky_polar_alignment",
+    "calibrate",
+    "monitor_once",
     "start_continuous_polar_alignment",
     "stop_continuous_polar_alignment",
     "get_polar_align_state",
