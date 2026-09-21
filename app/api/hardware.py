@@ -354,3 +354,37 @@ def run_polar_alignment_measurement(
         return run_all_sky_polar_alignment(exposure_seconds=exposure_seconds, rotation_deg=rotation_deg)
     except (PolarAlignmentError, CameraAlpacaError, MountAlpacaError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/polar-align/start")
+def start_continuous_polar_alignment(
+    exposure_seconds: float = 5.0, rotation_deg: float = 60.0
+) -> dict[str, Any]:
+    """Start continuous polar alignment: repeats the measurement cycle in
+    a background thread, each cycle fully independent, so you can adjust
+    the mount's azimuth/altitude bolts between readings and watch them
+    converge. Real, deliberate mount/camera action running repeatedly
+    until explicitly stopped -- only starts on explicit request."""
+    from app.services.all_sky_polar_align import start_continuous_polar_alignment as _start
+    from app.services.polar_alignment import PolarAlignmentError
+
+    try:
+        _start(exposure_seconds=exposure_seconds, rotation_deg=rotation_deg)
+        return {"started": True}
+    except PolarAlignmentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/polar-align/stop")
+def stop_continuous_polar_alignment() -> dict[str, Any]:
+    from app.services.all_sky_polar_align import stop_continuous_polar_alignment as _stop
+
+    _stop()
+    return {"stopped": True}
+
+
+@router.get("/polar-align/state")
+def polar_alignment_state() -> dict[str, Any]:
+    from app.services.all_sky_polar_align import get_polar_align_state
+
+    return get_polar_align_state()

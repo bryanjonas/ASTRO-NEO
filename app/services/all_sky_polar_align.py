@@ -96,13 +96,50 @@ def _capture_and_solve(
     }
 
 
+def _slew_to_reference_point(mount: AlpacaMountClient, alt_deg: float = 50.0, az_deg: float = 90.0) -> None:
+    """Slew to a fixed Alt/Az reference point well away from the celestial
+    pole before starting a measurement cycle.
+
+    Confirmed live as the real cause of a failed measurement: the mount
+    had been sitting at Dec~90 (parked near the pole, its normal idle
+    state all night) when a bare measurement was attempted using "wherever
+    the mount currently is" as point 1. Near the pole, a 60 degree rotation
+    about the mount's own axis barely changes the actual pointing
+    direction at all (you're rotating around an axis that nearly passes
+    through your own pointing direction) -- which breaks the whole
+    method's geometry (the solver correctly refused to answer: "No sign
+    change found", rather than returning a wrong number).
+
+    Az 90 (East) at Alt 50 sits safely inside this branch's configured
+    open horizon arc (0-135 deg needs only 30+ deg altitude) and is a
+    reasonable, moderate-altitude, moderate-hour-angle reference point --
+    not claiming this is the mathematically optimal point (near-meridian
+    is more classically recommended for azimuth sensitivity specifically),
+    just "far enough from the pole that the method's geometry is sound".
+    """
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+    import astropy.units as u
+    from app.core.site_config import load_site_config
+
+    site = load_site_config()
+    location = EarthLocation(lat=site.latitude * u.deg, lon=site.longitude * u.deg, height=site.altitude_m * u.m)
+    altaz = AltAz(alt=alt_deg * u.deg, az=az_deg * u.deg, obstime=Time.now(), location=location)
+    radec = SkyCoord(altaz).icrs
+    mount.slew(float(radec.ra.deg), float(radec.dec.deg))
+    mount.wait_for_mount_ready(timeout=120.0)
+
+
 def run_all_sky_polar_alignment(
     exposure_seconds: float = 5.0,
     rotation_deg: float = 60.0,
     settle_seconds: float = 3.0,
+    reference_alt_deg: float = 50.0,
+    reference_az_deg: float = 90.0,
 ) -> dict[str, Any]:
-    """Run one full measurement cycle: capture+solve, RA-only re-slew by
-    `rotation_deg`, capture+solve again, solve for the polar axis error.
+    """Run one full measurement cycle: slew to a fixed reference point
+    away from the pole, capture+solve, RA-only re-slew by `rotation_deg`,
+    capture+solve again, solve for the polar axis error.
 
     This does not adjust anything -- it's a measurement tool. Run it,
     physically adjust the mount's azimuth/altitude bolts per the reported
@@ -119,6 +156,9 @@ def run_all_sky_polar_alignment(
         device_number=settings.alpaca_camera_device_number,
         timeout=settings.alpaca_timeout,
     )
+
+    _slew_to_reference_point(mount, reference_alt_deg, reference_az_deg)
+    time.sleep(settle_seconds)
 
     point1 = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN", frame_index=0)
 
@@ -173,4 +213,98 @@ def run_all_sky_polar_alignment(
     return {**result, "description": description, "commanded_rotation_deg": commanded_rotation_deg}
 
 
-__all__ = ["run_all_sky_polar_alignment"]
+# --- Continuous mode: repeat the measurement cycle in a background thread,
+# so the reading keeps updating while you physically adjust the mount's
+# azimuth/altitude bolts between cycles -- each cycle is a fully
+# independent, self-contained measurement (fresh reference slew, fresh
+# pair of shots), so it's fine that you're changing the physical axis
+# between them; nothing here assumes the axis stayed put across cycles,
+# only within one cycle's own two shots. ---
+
+import threading
+
+_lock = threading.Lock()
+_thread: threading.Thread | None = None
+_stop_flag = threading.Event()
+_state: dict[str, Any] = {
+    "running": False,
+    "latest": None,
+    "history": [],
+    "error": None,
+    "cycle_count": 0,
+}
+_MAX_HISTORY = 20
+
+
+def get_polar_align_state() -> dict[str, Any]:
+    with _lock:
+        return {**_state, "history": list(_state["history"])}
+
+
+def _continuous_loop(exposure_seconds: float, rotation_deg: float, reference_alt_deg: float, reference_az_deg: float) -> None:
+    while not _stop_flag.is_set():
+        try:
+            result = run_all_sky_polar_alignment(
+                exposure_seconds=exposure_seconds,
+                rotation_deg=rotation_deg,
+                reference_alt_deg=reference_alt_deg,
+                reference_az_deg=reference_az_deg,
+            )
+            with _lock:
+                _state["latest"] = result
+                _state["error"] = None
+                _state["cycle_count"] += 1
+                _state["history"].append(result)
+                if len(_state["history"]) > _MAX_HISTORY:
+                    _state["history"] = _state["history"][-_MAX_HISTORY:]
+            logger.info("Polar alignment cycle %d: %s", _state["cycle_count"], result["description"])
+        except Exception as exc:
+            logger.warning("Polar alignment cycle failed: %s", exc)
+            with _lock:
+                _state["error"] = str(exc)
+            # A single failed cycle (e.g. a transient solve failure) isn't
+            # fatal to the whole continuous session -- keep going rather
+            # than silently stopping, but don't hammer real hardware in a
+            # tight retry loop if something's persistently wrong.
+            _stop_flag.wait(5.0)
+
+    with _lock:
+        _state["running"] = False
+
+
+def start_continuous_polar_alignment(
+    exposure_seconds: float = 5.0,
+    rotation_deg: float = 60.0,
+    reference_alt_deg: float = 50.0,
+    reference_az_deg: float = 90.0,
+) -> None:
+    global _thread
+    with _lock:
+        if _state["running"]:
+            raise PolarAlignmentError("Continuous polar alignment is already running")
+        _state["running"] = True
+        _state["error"] = None
+        _state["cycle_count"] = 0
+        _state["history"] = []
+    _stop_flag.clear()
+    _thread = threading.Thread(
+        target=_continuous_loop,
+        args=(exposure_seconds, rotation_deg, reference_alt_deg, reference_az_deg),
+        daemon=True,
+        name="polar-align-continuous",
+    )
+    _thread.start()
+
+
+def stop_continuous_polar_alignment() -> None:
+    _stop_flag.set()
+    with _lock:
+        _state["running"] = False
+
+
+__all__ = [
+    "run_all_sky_polar_alignment",
+    "start_continuous_polar_alignment",
+    "stop_continuous_polar_alignment",
+    "get_polar_align_state",
+]

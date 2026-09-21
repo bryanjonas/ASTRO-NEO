@@ -2,7 +2,7 @@ import type {
   GuidingHistory,
   HardwareStatus,
   LatestCaptureInfo,
-  PolarAlignResult,
+  PolarAlignState,
   PsvBundleResult,
   PsvFile,
   PsvTarget,
@@ -57,5 +57,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ targets, bundle_label: bundleLabel || null }),
     }),
-  runPolarAlignment: () => request<PolarAlignResult>('/hardware/polar-align/run', { method: 'POST' }),
+  getPolarAlignState: () => request<PolarAlignState>('/hardware/polar-align/state'),
+  startContinuousPolarAlignment: () => request<{ started: boolean }>('/hardware/polar-align/start', { method: 'POST' }),
+  stopContinuousPolarAlignment: () => request<{ stopped: boolean }>('/hardware/polar-align/stop', { method: 'POST' }),
 }

@@ -148,3 +148,11 @@ export interface PolarAlignResult {
   description: string
   commanded_rotation_deg: number
 }
+
+export interface PolarAlignState {
+  running: boolean
+  latest: PolarAlignResult | null
+  history: PolarAlignResult[]
+  error: string | null
+  cycle_count: number
+}
