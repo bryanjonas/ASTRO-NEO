@@ -51,6 +51,10 @@ EQ_SYSTEM_J2000 = 2
 EQ_SYSTEM_J2050 = 3
 EQ_SYSTEM_B1950 = 4
 
+# ASCOM TelescopeAxes enum (Alpaca `moveaxis`/`axisrates`/`canmoveaxis` Axis param).
+AXIS_PRIMARY = 0  # RA (equatorial) / Azimuth (alt-az)
+AXIS_SECONDARY = 1  # Dec (equatorial) / Altitude (alt-az)
+
 
 class AlpacaError(Exception):
     """An Alpaca device returned ErrorNumber != 0."""
@@ -109,8 +113,8 @@ class AlpacaMountClient:
             )
         return data.get("Value")
 
-    def _get(self, member: str) -> Any:
-        return self._request("GET", member)
+    def _get(self, member: str, params: dict[str, Any] | None = None) -> Any:
+        return self._request("GET", member, params)
 
     def _put(self, member: str, params: dict[str, Any] | None = None) -> None:
         self._request("PUT", member, params)
@@ -137,6 +141,35 @@ class AlpacaMountClient:
                 )
                 self._equatorial_system = EQ_SYSTEM_TOPOCENTRIC
         return self._equatorial_system
+
+    # --- Raw axis control (bypasses GOTO/coordinate-transform logic
+    # entirely -- see all_sky_polar_align.py for why this matters) ---
+
+    def can_move_axis(self, axis: int) -> bool:
+        try:
+            return bool(self._get("canmoveaxis", {"Axis": axis}))
+        except Exception:
+            return False
+
+    def get_axis_rates(self, axis: int) -> list[dict[str, float]]:
+        """The driver's own allowed rates (deg/sec) for MoveAxis on this
+        axis -- querying rather than guessing a hardcoded rate."""
+        raw = self._get("axisrates", {"Axis": axis})
+        return [{"Minimum": float(r["Minimum"]), "Maximum": float(r["Maximum"])} for r in (raw or [])]
+
+    def move_axis(self, axis: int, rate_deg_per_sec: float) -> None:
+        """Start (or stop, with rate 0.0) a raw axis rotation at a fixed
+        rate. No coordinate solving, no meridian/pier-flip logic -- just
+        spins the motor, same as a hand-paddle jog. Caller is responsible
+        for stopping it (rate 0.0) and for polling position to know how
+        far it's gone."""
+        self._put("moveaxis", {"Axis": axis, "Rate": rate_deg_per_sec})
+
+    def get_sidereal_time_hours(self) -> float:
+        """Local apparent sidereal time in hours -- used to compute hour
+        angle (HA = LST - RA) so callers can tell whether a planned RA
+        slew would cross the meridian."""
+        return float(self._get("siderealtime"))
 
     def mount_info_raw(self) -> dict[str, Any]:
         """Raw Alpaca properties. RightAscension is in HOURS here, matching

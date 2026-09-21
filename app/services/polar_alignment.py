@@ -188,25 +188,52 @@ def solve_polar_axis_error(
     }
 
 
-def describe_adjustment(az_error_arcmin: float, alt_error_arcmin: float) -> str:
-    """Human-readable description of the solved polar axis error.
+def format_angle_arcmin(value_arcmin: float) -> str:
+    """Render an arcmin magnitude as deg/arcmin/arcsec -- a raw arcmin
+    number is hard to read at a glance once it's in the hundreds (this
+    branch's actual first live reading was ~386 arcmin, i.e. over 6
+    degrees), and arcsec resolution matters once it's small and you're
+    trying to fine-tune the last bit of error."""
+    total_arcsec = abs(value_arcmin) * 60.0
+    deg, rem = divmod(total_arcsec, 3600.0)
+    arcmin, arcsec = divmod(rem, 60.0)
+    if deg >= 1:
+        return f"{int(deg)}°{int(arcmin):02d}'{arcsec:04.1f}\""
+    if arcmin >= 1:
+        return f"{int(arcmin)}'{arcsec:04.1f}\""
+    return f"{arcsec:.1f}\""
 
-    Deliberately reports the unambiguous physical direction (which way
-    the mount's actual axis points, relative to true north/true pole
-    altitude) rather than "turn this knob clockwise" -- which specific
-    adjuster direction corrects a given error depends on the mount's own
-    adjuster mechanism (varies by model, and even by which side of a given
-    bolt you're turning), and guessing that wrong is exactly the kind of
-    mistake this module's synthetic validation was built to avoid. Point
-    the mount toward the reported direction to correct it.
+
+def describe_adjustment(az_error_arcmin: float, alt_error_arcmin: float) -> dict[str, Any]:
+    """Structured, human-readable description of the solved polar axis
+    error and the correction it implies.
+
+    Deliberately reports the unambiguous physical direction the axis
+    needs to MOVE (west/east, up/down) rather than "turn this knob
+    clockwise" -- which specific adjuster direction corrects a given
+    error depends on the mount's own adjuster mechanism (varies by
+    model, and even by which side of a given bolt you're turning), and
+    guessing that wrong is exactly the kind of mistake this module's
+    synthetic validation was built to avoid. "Move the axis west" is
+    mount-independent; "turn clockwise" is not.
     """
-    az_dir = "east" if az_error_arcmin > 0 else "west"
-    alt_dir = "above" if alt_error_arcmin > 0 else "below"
-    return (
-        f"Mount's polar axis points {abs(az_error_arcmin):.1f} arcmin too far {az_dir} "
-        f"of true north, and {abs(alt_error_arcmin):.1f} arcmin {alt_dir} true pole altitude. "
-        f"Adjust the mount so its axis moves in the opposite direction by these amounts."
+    az_error_dir = "east" if az_error_arcmin > 0 else "west"
+    alt_error_dir = "above" if alt_error_arcmin > 0 else "below"
+    az_move_dir = "west" if az_error_arcmin > 0 else "east"
+    alt_move_dir = "down" if alt_error_arcmin > 0 else "up"
+    az_str = format_angle_arcmin(az_error_arcmin)
+    alt_str = format_angle_arcmin(alt_error_arcmin)
+    text = (
+        f"Move the axis {az_move_dir} by {az_str} (azimuth) and {alt_move_dir} by {alt_str} (altitude). "
+        f"Currently {az_str} too far {az_error_dir} of true north, {alt_str} {alt_error_dir} true pole altitude."
     )
+    return {
+        "text": text,
+        "az_move_direction": az_move_dir,
+        "az_move_amount": az_str,
+        "alt_move_direction": alt_move_dir,
+        "alt_move_amount": alt_str,
+    }
 
 
-__all__ = ["solve_polar_axis_error", "describe_adjustment", "PolarAlignmentError"]
+__all__ = ["solve_polar_axis_error", "describe_adjustment", "format_angle_arcmin", "PolarAlignmentError"]
