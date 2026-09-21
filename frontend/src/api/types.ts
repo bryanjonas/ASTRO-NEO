@@ -147,12 +147,21 @@ export interface PolarAlignResult {
   mount_pole_az_deg: number
   description: string
   commanded_rotation_deg: number
+  last_heading: { ra_deg: number; dec_deg: number }
+}
+
+export interface PolarAlignSolvedPoint {
+  ra_deg: number
+  dec_deg: number
 }
 
 export interface PolarAlignState {
   running: boolean
-  latest: PolarAlignResult | null
-  history: PolarAlignResult[]
+  phase: 'idle' | 'calibrating' | 'monitoring'
+  calibration: PolarAlignResult | null
+  monitor_baseline: PolarAlignSolvedPoint | null
+  monitor_latest: PolarAlignSolvedPoint | null
+  monitor_drift_arcsec: number | null
+  monitor_count: number
   error: string | null
-  cycle_count: number
 }
