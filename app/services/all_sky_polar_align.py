@@ -7,8 +7,10 @@ forever" design was wrong -- it kept re-slewing across a wide arc every
 going all over the place" rather than a controlled measurement):
 
 Phase 1 -- Calibrate (runs once): three shots ~30 degrees apart in RA
-(same declination), computing the polar axis error from the two
-widest-separated points. Two slews total, not repeated.
+(same declination), starting from wherever the mount is already
+pointed (point yourself away from the pole first -- see
+_MAX_ABS_DEC_FOR_CALIBRATION_DEG). Computes the polar axis error from
+the two widest-separated points. Two slews total, not repeated.
 
 Phase 2 -- Monitor (stays put): after calibration, the mount is NOT
 slewed again. Repeatedly capture+solve at the same fixed pointing while
@@ -98,31 +100,23 @@ def _capture_and_solve(
     }
 
 
-def _slew_to_reference_point(mount: AlpacaMountClient, alt_deg: float = 50.0, az_deg: float = 90.0) -> None:
-    """Slew to a fixed Alt/Az reference point well away from the celestial
-    pole before starting calibration.
+_MAX_ABS_DEC_FOR_CALIBRATION_DEG = 80.0
+"""Real all-sky polar alignment tools start shot 1 from wherever the
+mount is already pointed rather than force-relocating it -- SharpCap's
+2-point method uses a ~90 deg RA rotation, ASIAIR's up-to-3-point method
+uses ~60 deg with declination held fixed, and neither auto-repoints you
+first (see https://docs.sharpcap.co.uk/3.2/18_PolarAlignment.htm and
+https://bbs.zwoastro.com/d/11580-polar-alignment-without-polaris).
+calibrate() below matches that: point 1 is whatever's already framed.
 
-    Confirmed live as a real cause of a failed measurement: the mount
-    had been sitting at Dec~90 (parked near the pole, its normal idle
-    state) when a bare measurement was attempted using "wherever the
-    mount currently is" as point 1 -- near the pole, a large rotation
-    about the mount's own axis barely changes the actual pointing
-    direction at all, breaking the whole method's geometry.
-
-    Az 90 (East) at Alt 50 sits safely inside this branch's configured
-    open horizon arc (0-135 deg needs only 30+ deg altitude).
-    """
-    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
-    from astropy.time import Time
-    import astropy.units as u
-    from app.core.site_config import load_site_config
-
-    site = load_site_config()
-    location = EarthLocation(lat=site.latitude * u.deg, lon=site.longitude * u.deg, height=site.altitude_m * u.m)
-    altaz = AltAz(alt=alt_deg * u.deg, az=az_deg * u.deg, obstime=Time.now(), location=location)
-    radec = SkyCoord(altaz).icrs
-    mount.slew(float(radec.ra.deg), float(radec.dec.deg))
-    mount.wait_for_mount_ready(timeout=120.0)
+Near the pole, though, a rotation about the mount's own RA axis barely
+changes the actual pointing direction at all (rotating around an axis
+that nearly passes through your own pointing direction), which breaks
+this method's geometry regardless of which real tool implements it --
+confirmed live: the solver correctly refused to answer ("No sign change
+found...") starting from Dec ~= 90. Rather than silently slewing you
+somewhere else the way an earlier version of this did, calibrate() just
+refuses and asks you to repoint further from the pole yourself first."""
 
 
 def _slew_ra_only(mount: AlpacaMountClient, ra_hours: float, dec_deg: float, offset_deg: float) -> float:
@@ -148,16 +142,17 @@ def calibrate(
     exposure_seconds: float = 5.0,
     step_deg: float = 30.0,
     settle_seconds: float = 3.0,
-    reference_alt_deg: float = 50.0,
-    reference_az_deg: float = 90.0,
 ) -> dict[str, Any]:
-    """Three shots step_deg apart in RA (same declination): slew to a
-    reference point, capture+solve, slew +step_deg twice more,
-    capture+solve each time. Computes the axis error from the two
-    widest-separated points (points 1 and 3, 2*step_deg apart). Leaves
-    the mount at point 3's pointing -- no slew happens after this
+    """Three shots step_deg apart in RA (same declination), starting from
+    wherever the mount is already pointed: capture+solve, slew +step_deg
+    twice more, capture+solve each time. Computes the axis error from the
+    two widest-separated points (points 1 and 3, 2*step_deg apart).
+    Leaves the mount at point 3's pointing -- no slew happens after this
     returns; call monitor_once() repeatedly from there.
-    """
+
+    Point yourself away from the celestial pole before starting --
+    Dec beyond +/-80 is refused outright (see
+    _MAX_ABS_DEC_FOR_CALIBRATION_DEG above)."""
     mount = AlpacaMountClient(
         base_url=settings.alpaca_mount_url,
         device_number=settings.alpaca_mount_device_number,
@@ -169,13 +164,17 @@ def calibrate(
         timeout=settings.alpaca_timeout,
     )
 
-    _slew_to_reference_point(mount, reference_alt_deg, reference_az_deg)
-    time.sleep(settle_seconds)
-    point1 = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN", frame_index=0)
-
     mount_info_1 = mount.mount_info_raw()
     ra_hours_1 = float(mount_info_1["RightAscension"])
     dec_deg = float(mount_info_1["Declination"])
+    if abs(dec_deg) > _MAX_ABS_DEC_FOR_CALIBRATION_DEG:
+        raise PolarAlignmentError(
+            f"Mount is pointed at Dec {dec_deg:.1f} deg, too close to the celestial pole for this "
+            f"method's geometry to work (needs |Dec| <= {_MAX_ABS_DEC_FOR_CALIBRATION_DEG:.0f}). "
+            "Slew to a spot further from the pole and try again."
+        )
+
+    point1 = _capture_and_solve(mount, camera, exposure_seconds, "POLAR_ALIGN", frame_index=0)
 
     ra_hours_2 = _slew_ra_only(mount, ra_hours_1, dec_deg, step_deg)
     time.sleep(settle_seconds)
@@ -263,16 +262,11 @@ def get_polar_align_state() -> dict[str, Any]:
         return dict(_state)
 
 
-def _run_loop(exposure_seconds: float, step_deg: float, reference_alt_deg: float, reference_az_deg: float) -> None:
+def _run_loop(exposure_seconds: float, step_deg: float) -> None:
     try:
         with _lock:
             _state["phase"] = "calibrating"
-        calibration = calibrate(
-            exposure_seconds=exposure_seconds,
-            step_deg=step_deg,
-            reference_alt_deg=reference_alt_deg,
-            reference_az_deg=reference_az_deg,
-        )
+        calibration = calibrate(exposure_seconds=exposure_seconds, step_deg=step_deg)
         with _lock:
             _state["calibration"] = calibration
             _state["phase"] = "monitoring"
@@ -311,12 +305,7 @@ def _run_loop(exposure_seconds: float, step_deg: float, reference_alt_deg: float
         _state["phase"] = "idle"
 
 
-def start_continuous_polar_alignment(
-    exposure_seconds: float = 5.0,
-    step_deg: float = 30.0,
-    reference_alt_deg: float = 50.0,
-    reference_az_deg: float = 90.0,
-) -> None:
+def start_continuous_polar_alignment(exposure_seconds: float = 5.0, step_deg: float = 30.0) -> None:
     global _thread
     with _lock:
         if _state["running"]:
@@ -332,7 +321,7 @@ def start_continuous_polar_alignment(
     _stop_flag.clear()
     _thread = threading.Thread(
         target=_run_loop,
-        args=(exposure_seconds, step_deg, reference_alt_deg, reference_az_deg),
+        args=(exposure_seconds, step_deg),
         daemon=True,
         name="polar-align",
     )
