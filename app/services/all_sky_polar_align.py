@@ -6,7 +6,7 @@ forever" design was wrong -- it kept re-slewing across a wide arc every
 ~1 minute with no pause, which is exactly what looked like "the mount
 going all over the place" rather than a controlled measurement):
 
-Phase 1 -- Calibrate (runs once): three shots ~30 degrees apart in RA
+Phase 1 -- Calibrate (runs once): three shots ~20 degrees apart in RA
 (same declination), starting from wherever the mount is already
 pointed (point yourself away from the pole first -- see
 _MAX_ABS_DEC_FOR_CALIBRATION_DEG). Computes the polar axis error from
@@ -273,7 +273,7 @@ def _ra_delta_deg(ra_hours_before: float, ra_hours_after: float) -> float:
 
 def calibrate(
     exposure_seconds: float = 5.0,
-    step_deg: float = 30.0,
+    step_deg: float = 20.0,
     settle_seconds: float = 3.0,
     on_step: Any = None,
 ) -> dict[str, Any]:
@@ -483,7 +483,7 @@ def _run_loop(exposure_seconds: float, step_deg: float) -> None:
         _state["message"] = "Stopped."
 
 
-def start_continuous_polar_alignment(exposure_seconds: float = 5.0, step_deg: float = 30.0) -> None:
+def start_continuous_polar_alignment(exposure_seconds: float = 5.0, step_deg: float = 20.0) -> None:
     global _thread
     with _lock:
         if _state["running"]:

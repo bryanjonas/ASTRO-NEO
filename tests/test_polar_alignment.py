@@ -69,6 +69,12 @@ for az_error_arcmin, alt_error_arcmin in [
     (-20.0, 25.0),
     (5.0, 5.0),
     (-3.0, -12.0),
+    # A real live run measured ~386-390 arcmin (~6.4 deg) of az error --
+    # just outside the old fixed +/-5 deg search bracket, causing an
+    # intermittent "No sign change found" failure right at the edge of
+    # the window. This case (~6.5 deg) checks the widen-and-retry fix
+    # actually recovers an error just past the first bracket.
+    (-390.0, 60.0),
 ]:
     true_pole_altaz = (site_lat, 0.0)  # Alt=latitude, Az=North(0)
     mount_pole_alt = site_lat + alt_error_arcmin / 60.0

@@ -145,34 +145,54 @@ def solve_polar_axis_error(
         phi = _rotation_angle_about_axis(v1, v2, axis_at(t))
         return _wrap_deg_signed(np.degrees(phi - target_rad))
 
-    bracket_rad = np.radians(search_bracket_deg)
-    lo, hi = t0 - bracket_rad, t0 + bracket_rad
-    f_lo, f_hi = f(lo), f(hi)
-
-    if f_lo == 0.0:
-        t_solution = lo
-    elif f_hi == 0.0:
-        t_solution = hi
-    elif (f_lo > 0) == (f_hi > 0):
-        raise PolarAlignmentError(
-            f"No sign change found within +/-{search_bracket_deg} deg of the true pole "
-            f"(f_lo={f_lo:.4f}, f_hi={f_hi:.4f}) -- polar error may exceed the search bracket, "
-            "or the commanded rotation / inputs are wrong"
-        )
-    else:
-        # Bisection -- f is well-behaved (monotonic-ish) in this small
-        # neighborhood; no need for anything fancier.
+    def _try_bracket(bracket_deg: float) -> float | None:
+        """Bisect for a root within +/-bracket_deg of the true pole's own
+        position. Returns None (not a raised error) if the two endpoints
+        don't straddle a root -- lets the caller retry wider rather than
+        giving up on the first, possibly-too-narrow attempt."""
+        bracket_rad = np.radians(bracket_deg)
+        lo, hi = t0 - bracket_rad, t0 + bracket_rad
+        f_lo, f_hi = f(lo), f(hi)
+        if f_lo == 0.0:
+            return lo
+        if f_hi == 0.0:
+            return hi
+        if (f_lo > 0) == (f_hi > 0):
+            return None
         for _ in range(60):
             mid = (lo + hi) / 2.0
             f_mid = f(mid)
             if f_mid == 0.0:
-                lo = hi = mid
-                break
+                return mid
             if (f_mid > 0) == (f_lo > 0):
                 lo, f_lo = mid, f_mid
             else:
                 hi, f_hi = mid, f_mid
-        t_solution = (lo + hi) / 2.0
+        return (lo + hi) / 2.0
+
+    # A real misalignment can easily exceed a tight first guess (this
+    # branch's mount measured ~6.4 deg off in azimuth on a real run,
+    # just outside the old fixed 5 deg search -- causing an intermittent,
+    # confusing failure right at the edge of the window). Retry with a
+    # progressively wider search before giving up, rather than failing on
+    # the first, possibly-too-narrow attempt.
+    attempted_brackets = [search_bracket_deg, search_bracket_deg * 3.0, search_bracket_deg * 6.0]
+    t_solution: float | None = None
+    for bracket_deg in attempted_brackets:
+        t_solution = _try_bracket(bracket_deg)
+        if t_solution is not None:
+            break
+
+    if t_solution is None:
+        raise PolarAlignmentError(
+            f"Couldn't pin down the polar axis error -- it looks like more than "
+            f"{attempted_brackets[-1]:.0f} degrees off in azimuth and/or altitude, which is further than "
+            "this method can reliably measure in one pass. This usually means either the mount is quite far "
+            "from polar aligned (get it roughly pointed north/at the right altitude first, e.g. using the "
+            "mount's built-in compass/altitude scale, then retry), or the two shots didn't actually differ by "
+            "the RA amount this was expecting (a bad plate solve, or the mount didn't rotate as much as "
+            "reported). Try again; if it keeps happening, increase the rotation step size."
+        )
 
     mount_pole_vec = axis_at(t_solution)
     mount_pole_alt, mount_pole_az = _unit_vector_to_altaz(mount_pole_vec)

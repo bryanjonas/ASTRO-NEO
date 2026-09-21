@@ -339,7 +339,7 @@ def guiding_history() -> dict[str, Any]:
 
 @router.post("/polar-align/run")
 def run_polar_alignment_measurement(
-    exposure_seconds: float = 5.0, step_deg: float = 30.0
+    exposure_seconds: float = 5.0, step_deg: float = 20.0
 ) -> dict[str, Any]:
     """Run one all-sky polar alignment calibration (see
     all_sky_polar_align.py): three shots step_deg apart in RA (same
@@ -360,7 +360,7 @@ def run_polar_alignment_measurement(
 
 @router.post("/polar-align/start")
 def start_continuous_polar_alignment(
-    exposure_seconds: float = 5.0, step_deg: float = 30.0
+    exposure_seconds: float = 5.0, step_deg: float = 20.0
 ) -> dict[str, Any]:
     """Start a polar alignment session: one calibration (two slews, three
     shots step_deg apart in RA) followed by a monitor phase that performs
