@@ -2,6 +2,7 @@ import { api } from '../api/client'
 import { usePolling } from '../hooks/usePolling'
 import { Card } from '../components/ui'
 import SkyPlot from '../components/SkyPlot'
+import PolarAlignPanel from '../components/PolarAlignPanel'
 
 export default function SkyView() {
   const sky = usePolling(api.getSkyView, 5000)
@@ -23,6 +24,7 @@ export default function SkyView() {
           <p className="text-sm text-slate-500">Loading…</p>
         )}
       </Card>
+      <PolarAlignPanel />
     </div>
   )
 }

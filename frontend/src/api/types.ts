@@ -139,3 +139,12 @@ export interface PsvFile {
   size_bytes: number
   modified_at: string
 }
+
+export interface PolarAlignResult {
+  az_error_arcmin: number
+  alt_error_arcmin: number
+  mount_pole_alt_deg: number
+  mount_pole_az_deg: number
+  description: string
+  commanded_rotation_deg: number
+}

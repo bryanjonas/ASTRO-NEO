@@ -335,3 +335,22 @@ def guiding_history() -> dict[str, Any]:
     from app.services.guide_telemetry import get_guide_history
 
     return {"steps": get_guide_history()}
+
+
+@router.post("/polar-align/run")
+def run_polar_alignment_measurement(
+    exposure_seconds: float = 5.0, rotation_deg: float = 60.0
+) -> dict[str, Any]:
+    """Run one all-sky polar alignment measurement cycle (see
+    all_sky_polar_align.py): capture+solve, RA-only re-slew, capture+solve
+    again, report the axis error. A real, deliberate mount/camera action
+    -- only ever triggered by an explicit request, never automatically."""
+    from app.services.all_sky_polar_align import run_all_sky_polar_alignment
+    from app.services.polar_alignment import PolarAlignmentError
+    from app.services.alpaca_camera_client import AlpacaError as CameraAlpacaError
+    from app.services.alpaca_mount_client import AlpacaError as MountAlpacaError
+
+    try:
+        return run_all_sky_polar_alignment(exposure_seconds=exposure_seconds, rotation_deg=rotation_deg)
+    except (PolarAlignmentError, CameraAlpacaError, MountAlpacaError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
