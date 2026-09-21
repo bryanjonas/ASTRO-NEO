@@ -41,9 +41,10 @@ export default function PolarAlignPanel() {
   return (
     <Card title="All-Sky Polar Alignment">
       <p className="mb-3 text-sm text-slate-500">
-        Calibrates once (three shots 30&deg; apart in RA, ~2 slews), reports the axis error, then stops
-        slewing entirely and just keeps re-imaging that same fixed pointing while you adjust the mount's
-        azimuth/altitude bolts by hand &mdash; watch the drift number below move as you turn each knob.
+        Calibrates once (three shots 20&deg; apart in RA, starting wherever you've already pointed the mount
+        &mdash; keep it well off the celestial pole), reports exactly which way and how far to adjust, then
+        stops moving entirely and just keeps re-imaging that same fixed pointing while you turn the
+        azimuth/altitude bolts by hand.
       </p>
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
       {data?.error && <p className="mb-3 text-sm text-amber-300">{data.error}</p>}
@@ -57,14 +58,30 @@ export default function PolarAlignPanel() {
         />
       </div>
 
+      {data?.message && (
+        <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-300">
+          {data.message}
+        </div>
+      )}
+
       {calibration && (
-        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Calibration result</h3>
-          <p className="text-sm text-slate-200">{calibration.description}</p>
+        <div className="mb-4 flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Calibration result &mdash; adjust the mount now
+          </h3>
           <div className="flex flex-wrap gap-3">
-            <StatPill label="Az error" value={`${calibration.az_error_arcmin.toFixed(1)}'`} />
-            <StatPill label="Alt error" value={`${calibration.alt_error_arcmin.toFixed(1)}'`} />
+            <StatPill
+              label="Azimuth"
+              value={`turn ${calibration.az_move_direction}, ${calibration.az_move_amount}`}
+              tone="warn"
+            />
+            <StatPill
+              label="Altitude"
+              value={`turn ${calibration.alt_move_direction}, ${calibration.alt_move_amount}`}
+              tone="warn"
+            />
           </div>
+          <p className="text-xs text-slate-500">{calibration.description}</p>
         </div>
       )}
 
@@ -84,7 +101,7 @@ export default function PolarAlignPanel() {
           <p className="text-xs text-slate-500">
             This is the raw change in the solved star field position, not a re-derived az/alt breakdown &mdash;
             use it as a relative "am I moving the right way, and by how much" signal while adjusting, then
-            re-run calibration to get a fresh precise az/alt error reading once you're close.
+            re-run calibration to get a fresh precise az/alt reading once you're close.
           </p>
         </div>
       )}

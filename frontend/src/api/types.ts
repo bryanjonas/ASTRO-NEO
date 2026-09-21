@@ -146,6 +146,10 @@ export interface PolarAlignResult {
   mount_pole_alt_deg: number
   mount_pole_az_deg: number
   description: string
+  az_move_direction: 'east' | 'west'
+  az_move_amount: string
+  alt_move_direction: 'up' | 'down'
+  alt_move_amount: string
   commanded_rotation_deg: number
   last_heading: { ra_deg: number; dec_deg: number }
 }
@@ -158,6 +162,7 @@ export interface PolarAlignSolvedPoint {
 export interface PolarAlignState {
   running: boolean
   phase: 'idle' | 'calibrating' | 'monitoring'
+  message: string | null
   calibration: PolarAlignResult | null
   monitor_baseline: PolarAlignSolvedPoint | null
   monitor_latest: PolarAlignSolvedPoint | null
