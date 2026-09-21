@@ -154,19 +154,11 @@ export interface PolarAlignResult {
   last_heading: { ra_deg: number; dec_deg: number }
 }
 
-export interface PolarAlignSolvedPoint {
-  ra_deg: number
-  dec_deg: number
-}
-
 export interface PolarAlignState {
   running: boolean
-  phase: 'idle' | 'calibrating' | 'monitoring'
+  phase: 'idle' | 'calibrating' | 'ready'
   message: string | null
   calibration: PolarAlignResult | null
-  monitor_baseline: PolarAlignSolvedPoint | null
-  monitor_latest: PolarAlignSolvedPoint | null
-  monitor_drift_arcsec: number | null
-  monitor_count: number
+  cycle_count: number
   error: string | null
 }

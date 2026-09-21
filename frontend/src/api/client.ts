@@ -60,4 +60,5 @@ export const api = {
   getPolarAlignState: () => request<PolarAlignState>('/hardware/polar-align/state'),
   startContinuousPolarAlignment: () => request<{ started: boolean }>('/hardware/polar-align/start', { method: 'POST' }),
   stopContinuousPolarAlignment: () => request<{ stopped: boolean }>('/hardware/polar-align/stop', { method: 'POST' }),
+  refreshPolarAlignment: () => request<{ requested: boolean }>('/hardware/polar-align/refresh', { method: 'POST' }),
 }

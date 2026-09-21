@@ -362,13 +362,13 @@ def run_polar_alignment_measurement(
 def start_continuous_polar_alignment(
     exposure_seconds: float = 5.0, step_deg: float = 20.0
 ) -> dict[str, Any]:
-    """Start a polar alignment session: one calibration (two slews, three
-    shots step_deg apart in RA) followed by a monitor phase that performs
-    NO further slewing -- just repeatedly captures and solves at the
-    final fixed pointing while you physically adjust the mount's
-    azimuth/altitude bolts, reporting how far the star field has drifted
-    from the first monitor reading. Real, deliberate mount/camera action
-    -- only starts on explicit request."""
+    """Start a polar alignment session: runs one calibration (two small
+    RA-axis jogs, three shots step_deg apart), reports the correction,
+    then waits for an explicit Refresh request (POST .../polar-align/
+    refresh) before running calibration again -- no exposure is ever
+    taken without an explicit request, so nothing captures while you're
+    mid-adjustment. Real, deliberate mount/camera action -- only starts
+    on explicit request."""
     from app.services.all_sky_polar_align import start_continuous_polar_alignment as _start
     from app.services.polar_alignment import PolarAlignmentError
 
@@ -381,13 +381,27 @@ def start_continuous_polar_alignment(
 
 @router.post("/polar-align/stop")
 def stop_continuous_polar_alignment() -> dict[str, Any]:
-    """Stop the polar alignment session. Only affects the monitor
-    phase's repeated capture+solve loop -- there is no slewing to stop,
-    the mount is left exactly where the calibration phase last put it."""
+    """Stop the polar alignment session."""
     from app.services.all_sky_polar_align import stop_continuous_polar_alignment as _stop
 
     _stop()
     return {"stopped": True}
+
+
+@router.post("/polar-align/refresh")
+def refresh_polar_alignment() -> dict[str, Any]:
+    """Trigger a fresh calibration cycle (small RA-axis jogs + 3 shots).
+    Take your hands off the mount before calling this -- caught live:
+    capturing while the mount is being physically turned by hand
+    produces trailed frames that never plate-solve."""
+    from app.services.all_sky_polar_align import request_refresh
+    from app.services.polar_alignment import PolarAlignmentError
+
+    try:
+        request_refresh()
+        return {"requested": True}
+    except PolarAlignmentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/polar-align/state")

@@ -5,46 +5,35 @@ import { Button, Card, ErrorBanner, StatPill } from './ui'
 
 export default function PolarAlignPanel() {
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'start' | 'stop' | 'refresh' | null>(null)
   const state = usePolling(api.getPolarAlignState, 3000)
 
-  async function handleStart() {
-    setBusy(true)
+  async function run(action: 'start' | 'stop' | 'refresh', fn: () => Promise<unknown>) {
+    setBusy(action)
     setError(null)
     try {
-      await api.startContinuousPolarAlignment()
+      await fn()
       await state.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleStop() {
-    setBusy(true)
-    try {
-      await api.stopContinuousPolarAlignment()
-      await state.refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
   const data = state.data
   const running = data?.running ?? false
   const phase = data?.phase ?? 'idle'
+  const ready = phase === 'ready'
   const calibration = data?.calibration
 
   return (
     <Card title="All-Sky Polar Alignment">
       <p className="mb-3 text-sm text-slate-500">
-        Calibrates once (three shots 20&deg; apart in RA, starting wherever you've already pointed the mount
-        &mdash; keep it well off the celestial pole), reports exactly which way and how far to adjust, then
-        stops moving entirely and just keeps re-imaging that same fixed pointing while you turn the
-        azimuth/altitude bolts by hand.
+        Each Refresh runs a fresh calibration (three shots ~20&deg; apart in RA, raw axis jogs, no coordinate
+        GOTO) starting wherever you've already pointed the mount &mdash; keep it well off the celestial pole.
+        No exposure is ever taken without pressing Refresh, so nothing captures mid-adjustment. Adjust the
+        azimuth/altitude bolts, then press Refresh for a real, freshly recalculated correction.
       </p>
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
       {data?.error && <p className="mb-3 text-sm text-amber-300">{data.error}</p>}
@@ -53,9 +42,10 @@ export default function PolarAlignPanel() {
         <StatPill label="Running" value={running ? 'Yes' : 'No'} tone={running ? 'good' : 'default'} />
         <StatPill
           label="Phase"
-          value={phase === 'calibrating' ? 'Calibrating…' : phase === 'monitoring' ? 'Monitoring (mount stationary)' : 'Idle'}
-          tone={phase === 'monitoring' ? 'good' : phase === 'calibrating' ? 'warn' : 'default'}
+          value={phase === 'calibrating' ? 'Calibrating…' : phase === 'ready' ? 'Ready' : 'Idle'}
+          tone={ready ? 'good' : phase === 'calibrating' ? 'warn' : 'default'}
         />
+        <StatPill label="Cycles" value={data?.cycle_count ?? 0} />
       </div>
 
       {data?.message && (
@@ -85,36 +75,22 @@ export default function PolarAlignPanel() {
         </div>
       )}
 
-      {phase === 'monitoring' && (
-        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Live drift since calibration (mount not moving)
-          </h3>
-          <div className="flex flex-wrap gap-3">
-            <StatPill label="Readings" value={data?.monitor_count ?? 0} />
-            <StatPill
-              label="Drift from first reading"
-              value={data?.monitor_drift_arcsec != null ? `${data.monitor_drift_arcsec.toFixed(1)}"` : '—'}
-              tone="warn"
-            />
-          </div>
-          <p className="text-xs text-slate-500">
-            This is the raw change in the solved star field position, not a re-derived az/alt breakdown &mdash;
-            use it as a relative "am I moving the right way, and by how much" signal while adjusting, then
-            re-run calibration to get a fresh precise az/alt reading once you're close.
-          </p>
-        </div>
-      )}
-
-      {running ? (
-        <Button variant="danger" onClick={handleStop} disabled={busy}>
-          {busy ? 'Stopping…' : 'Stop'}
-        </Button>
-      ) : (
-        <Button onClick={handleStart} disabled={busy}>
-          {busy ? 'Starting…' : 'Start'}
-        </Button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {running ? (
+          <>
+            <Button onClick={() => run('refresh', api.refreshPolarAlignment)} disabled={!ready || busy !== null}>
+              {busy === 'refresh' ? 'Refreshing…' : 'Refresh'}
+            </Button>
+            <Button variant="danger" onClick={() => run('stop', api.stopContinuousPolarAlignment)} disabled={busy !== null}>
+              {busy === 'stop' ? 'Stopping…' : 'Stop'}
+            </Button>
+          </>
+        ) : (
+          <Button onClick={() => run('start', api.startContinuousPolarAlignment)} disabled={busy !== null}>
+            {busy === 'start' ? 'Starting…' : 'Start'}
+          </Button>
+        )}
+      </div>
     </Card>
   )
 }
